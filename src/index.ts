@@ -16,6 +16,7 @@ import {
 } from "./middleware/auth";
 import { rateLimiter, rateLimitPresets } from "./middleware/rateLimiter";
 import { serveStatic } from "hono/bun";
+import { redis } from "./redis.js";
 
 const app = new Hono();
 app.use("*", logger());
@@ -1464,8 +1465,8 @@ function isValidPhone(phone: string): boolean {
 
 // --- Routes ---
 
-// POST /api/v1/auth/send-code - Send SMS verification code
-app.post("/api/v1/auth/send-code", rateLimiter(rateLimitPresets.smsCode), async (c) => {
+// POST /api/v1/auth/send-code - Send SMS verification code (仅手机号级别限制，在 SmsService 中实现)
+app.post("/api/v1/auth/send-code", async (c) => {
   const { phone } = await c.req.json();
 
   if (!phone) {
@@ -1511,12 +1512,12 @@ app.post("/api/v1/auth/send-code", rateLimiter(rateLimitPresets.smsCode), async 
   );
 });
 
-// POST /api/v1/auth/login - Login with SMS code and invitation code
+// POST /api/v1/auth/login - Login with SMS code (invitation_code optional for two-stage login)
 app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) => {
   const { phone, code, invitation_code, enterprise_code } = await c.req.json();
 
-  // 参数验证
-  if (!phone || !code || !invitation_code) {
+  // 参数验证 - invitation_code 改为可选
+  if (!phone || !code) {
     return c.json(
       {
         success: false,
@@ -1560,21 +1561,6 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
     );
   }
 
-  // 验证邀请码
-  const invitationCode = db
-    .prepare("SELECT * FROM invitation_codes WHERE code = ?")
-    .get(invitation_code) as any;
-
-  if (!invitationCode) {
-    return c.json(
-      {
-        success: false,
-        msg: "邀请码不存在",
-      },
-      400,
-    );
-  }
-
   // 获取默认企业
   const enterprise = db
     .prepare("SELECT * FROM enterprises WHERE code = 'sudo'")
@@ -1607,17 +1593,7 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
       );
     }
 
-    // 用户已存在，验证邀请码是否匹配
-    if (user.invitation_code_id !== invitationCode.id) {
-      return c.json(
-        {
-          success: false,
-          msg: "邀请码错误",
-        },
-        400,
-      );
-    }
-
+    // 用户已存在，直接登录（不再验证邀请码）
     // 从 sudorouter 同步用户额度（并行获取用户信息和模型列表）
     let totalPoints = 0;
     let usedPoints = 0;
@@ -1722,7 +1698,90 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
     });
   }
 
-  // 用户不存在，检查邀请码是否可用
+  // 用户不存在，生成 register_token 并返回
+  // 生成 32 位随机 token
+  const registerToken = crypto.randomUUID().replace(/-/g, '');
+
+  // 将 register_token 存入 Redis，10 分钟有效
+  await redis.setex(`register_token:${registerToken}`, 600, JSON.stringify({
+    phone,
+    verified: true,
+    created_at: Date.now()
+  }));
+
+  console.log(`[Login] 用户不存在，生成 register_token: ${registerToken.substring(0, 8)}... 手机号: ${phone}`);
+
+  return c.json({
+    success: false,
+    need_register: true,
+    register_token: registerToken,
+    phone: phone,
+    msg: "用户不存在，请先注册"
+  });
+});
+
+// POST /api/v1/auth/register - Register new user with register_token
+app.post("/api/v1/auth/register", rateLimiter(rateLimitPresets.login), async (c) => {
+  const { register_token, nickname, invitation_code } = await c.req.json();
+
+  // 参数验证
+  if (!register_token || !nickname || !invitation_code) {
+    return c.json(
+      {
+        success: false,
+        msg: "参数不完整",
+      },
+      400,
+    );
+  }
+
+  // 验证 register_token
+  const tokenDataStr = await redis.get(`register_token:${register_token}`);
+  if (!tokenDataStr) {
+    return c.json(
+      {
+        success: false,
+        msg: "注册凭证无效或已过期，请重新获取验证码",
+      },
+      400,
+    );
+  }
+
+  const tokenData = JSON.parse(tokenDataStr);
+  const phone = tokenData.phone;
+
+  // 检查用户是否已被创建（防止重复注册）
+  const existingUser = db
+    .prepare("SELECT * FROM users WHERE phone = ?")
+    .get(phone) as any;
+
+  if (existingUser) {
+    // 删除 register_token
+    await redis.del(`register_token:${register_token}`);
+    return c.json(
+      {
+        success: false,
+        msg: "该手机号已注册，请直接登录",
+      },
+      400,
+    );
+  }
+
+  // 验证邀请码
+  const invitationCode = db
+    .prepare("SELECT * FROM invitation_codes WHERE code = ?")
+    .get(invitation_code) as any;
+
+  if (!invitationCode) {
+    return c.json(
+      {
+        success: false,
+        msg: "邀请码不存在",
+      },
+      400,
+    );
+  }
+
   if (invitationCode.status === 1) {
     return c.json(
       {
@@ -1730,6 +1789,21 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
         msg: "邀请码已被使用",
       },
       400,
+    );
+  }
+
+  // 获取默认企业
+  const enterprise = db
+    .prepare("SELECT * FROM enterprises WHERE code = 'sudo'")
+    .get() as any;
+
+  if (!enterprise) {
+    return c.json(
+      {
+        success: false,
+        msg: "系统配置错误",
+      },
+      500,
     );
   }
 
@@ -1806,7 +1880,7 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
         quotaResult.error || "额度充值失败"
       ]
     );
-    console.error(`[Login] 用户 ${phone} 额度充值失败`);
+    console.error(`[Register] 用户 ${phone} 额度充值失败`);
   } else {
     // 记录成功日志
     db.run(
@@ -1820,7 +1894,7 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
         quotaResult.response.status, quotaResult.duration_ms
       ]
     );
-    console.log(`[Login] 用户 ${phone} 充值成功: ${initialQuota}`);
+    console.log(`[Register] 用户 ${phone} 充值成功: ${initialQuota}`);
   }
 
   // 调用 sudorouter 创建令牌
@@ -1874,13 +1948,13 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
   // 创建本地用户
   const result = db.run(
     `INSERT INTO users (
-      phone, nickname, role, status, enterprise_id, 
-      sudorouter_user_id, sudorouter_key, invitation_code_id, 
+      phone, nickname, role, status, enterprise_id,
+      sudorouter_user_id, sudorouter_key, invitation_code_id,
       quota, used_quota, balance
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       phone,
-      phone, // 昵称默认为手机号
+      nickname, // 使用用户填写的昵称
       "USER",
       1, // 状态默认已批准
       enterprise.id,
@@ -1911,8 +1985,11 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
   db.run(
     `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [newUserId, phone, "USER_CREATE", "user", newUserId, "POST", "/api/v1/auth/login"],
+    [newUserId, phone, "USER_CREATE", "user", newUserId, "POST", "/api/v1/auth/register"],
   );
+
+  // 删除 register_token
+  await redis.del(`register_token:${register_token}`);
 
   // 生成 JWT
   const token = await sign(
@@ -1926,7 +2003,7 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
     SECRET,
   );
 
-  console.log(`[用户创建] 手机号: ${phone}, sudorouter用户ID: ${sudorouterUser.id}, 初始积分: ${initialBalance}`);
+  console.log(`[用户注册] 手机号: ${phone}, 昵称: ${nickname}, sudorouter用户ID: ${sudorouterUser.id}, 初始积分: ${initialBalance}`);
 
   const bonusPoints = sudorouterService.getInitialPoints(); // 赠送积分
 
@@ -1941,7 +2018,7 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
       user: {
         id: newUserId,
         phone: phone,
-        nickname: phone,
+        nickname: nickname,
         role: "USER",
         status: 1,
         enterprise_code: enterprise.code,

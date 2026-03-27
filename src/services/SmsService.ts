@@ -82,15 +82,31 @@ export class SmsService {
     const dailyKey = `${SMS_DAILY_COUNT_PREFIX}:${phone}:${today}`;
     const dailyCount = parseInt((await redis.get(dailyKey)) || "0");
 
+    // 24小时内最多发送 maxPerDay 条
     if (dailyCount >= this.smsConfig.code.maxPerDay) {
       return {
         success: false,
-        message: `今日发送次数已达上限（${this.smsConfig.code.maxPerDay}次）`,
+        message: `今日发送次数已达上限（${this.smsConfig.code.maxPerDay}次），请明天再试`,
       };
     }
 
-    const code = this.generateCode();
+    // 检查60秒内是否已发送（验证码key存在且未过期）
     const codeKey = `${SMS_CODE_PREFIX}:${phone}`;
+    const existingCode = await redis.get(codeKey);
+    if (existingCode) {
+      const ttl = await redis.ttl(codeKey);
+      const elapsed = this.smsConfig.code.expireMinutes * 60 - ttl;
+      const nextSendIn = this.smsConfig.code.sendInterval - elapsed;
+      if (nextSendIn > 0) {
+        return {
+          success: false,
+          message: `发送过于频繁，请 ${nextSendIn} 秒后再试`,
+          nextSendIn,
+        };
+      }
+    }
+
+    const code = this.generateCode();
     const expireSeconds = this.smsConfig.code.expireMinutes * 60;
 
     const pipe = redis.pipeline();
