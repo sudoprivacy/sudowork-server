@@ -5,42 +5,20 @@ services:
   # Sudowork-Server Service
   # ============================================
   sudowork-server:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: 10.0.1.22:80/dev/sudowor-server:v1.0
     container_name: sudowork-server
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      # Redis Configuration
+      # 容器间通信配置（必须在 environment 中指定）
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=
-
-      # SMS Configuration
-      - SMS_PROVIDER=${SMS_PROVIDER:-mock}
-      - TENCENT_SECRET_ID=${TENCENT_SECRET_ID}
-      - TENCENT_SECRET_KEY=${TENCENT_SECRET_KEY}
-      - TENCENT_SDK_APP_ID=${TENCENT_SDK_APP_ID}
-      - TENCENT_SIGN_NAME=${TENCENT_SIGN_NAME}
-      - TENCENT_TEMPLATE_ID=${TENCENT_TEMPLATE_ID}
-      - TENCENT_SIGN_ID=${TENCENT_SIGN_ID}
-      - TENCENT_REGION=${TENCENT_REGION:-ap-beijing}
-
-      # Verification Code Configuration
-      - SMS_CODE_LENGTH=${SMS_CODE_LENGTH:-6}
-      - SMS_CODE_EXPIRE_MINUTES=${SMS_CODE_EXPIRE_MINUTES:-5}
-      - SMS_CODE_SEND_INTERVAL=${SMS_CODE_SEND_INTERVAL:-60}
-      - SMS_CODE_MAX_PER_DAY=${SMS_CODE_MAX_PER_DAY:-10}
-
-      # Server Configuration
-      - SERVER_PORT=${SERVER_PORT:-3000}
       - NODE_ENV=production
     volumes:
       # Persist SQLite database
       - ./data:/app/data
-      # Persist .env file (optional, for configuration)
+      # Mount .env for SMS and other configurations
       - ./.env:/app/.env:ro
     depends_on:
       redis:
@@ -48,13 +26,7 @@ services:
     networks:
       - sudowork-network
     healthcheck:
-      test:
-        [
-          "CMD",
-          "bun",
-          "-e",
-          "fetch('http://localhost:3000/').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))",
-        ]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -67,10 +39,7 @@ services:
     image: redis:7-alpine
     container_name: sudowork-redis
     restart: unless-stopped
-    # Don't expose Redis port to host for security
-    # Only accessible within docker network
     volumes:
-      # Persist Redis data
       - redis-data:/data
     command: redis-server --appendonly yes
     networks:
