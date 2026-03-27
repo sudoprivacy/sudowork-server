@@ -1397,7 +1397,7 @@ const initEnterprise = () => {
   const ent = db.prepare("SELECT * FROM enterprises WHERE code = 'sudo'").get();
   if (!ent) {
     db.run("INSERT INTO enterprises (name, code) VALUES (?, ?)", [
-      "Sudowork",
+      "数牍科技",
       "sudo",
     ]);
     console.log("=== 企业已创建 ===");

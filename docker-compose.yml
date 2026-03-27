@@ -5,7 +5,7 @@ services:
   # Sudowork-Server Service
   # ============================================
   sudowork-server:
-    image: 10.0.1.22:80/dev/sudowor-server:v1.0
+    image: 10.0.1.22:80/dev/sudoclaw-server:v1.0
     container_name: sudowork-server
     restart: unless-stopped
     ports:
