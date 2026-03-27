@@ -1,0 +1,57 @@
+# Dependencies
+node_modules
+
+# Logs
+*.log
+server.log
+logs/
+
+# Database (don't include in image)
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Environment files (use docker-compose env instead)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+README.md
+ADMIN_GUIDE.md
+DEPLOYMENT.md
+
+# Tests
+test/
+tests/
+*.test.ts
+*.spec.ts
+
+# Build artifacts (keep admin-dist for production)
+dist/
+build/
+out/
+
+# Admin build output (will be built in Docker)
+admin/dist/

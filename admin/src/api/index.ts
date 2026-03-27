@@ -1,0 +1,126 @@
+import axios from "axios";
+
+const API_BASE_URL = import.meta.env.PROD ? "/api" : "/api";
+
+export const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 10000,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+// Request interceptor
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("admin_token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  },
+);
+
+// Response interceptor
+api.interceptors.response.use(
+  (response) => {
+    return response.data;
+  },
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("admin_token");
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  },
+);
+
+// Admin APIs
+export const adminApi = {
+  login: (data: { phone: string; password: string }) =>
+    api.post("/v1/admin/login", data),
+
+  changePassword: (data: { oldPassword: string; newPassword: string }) =>
+    api.post("/v1/admin/change-password", data),
+
+  getStats: () => api.get("/v1/admin/stats"),
+
+  // Enterprise APIs
+  getEnterprises: () => api.get("/v1/admin/enterprises"),
+
+  createEnterprise: (data: {
+    name: string;
+    code: string;
+    credit_pool?: number;
+  }) => api.post("/v1/admin/enterprises", data),
+
+  updateEnterprise: (id: number, data: { name: string; credit_pool?: number }) =>
+    api.put(`/v1/admin/enterprises/${id}`, data),
+
+  deleteEnterprise: (id: number) => api.delete(`/v1/admin/enterprises/${id}`),
+
+  // User APIs
+  getUsers: (params?: {
+    enterprise_id?: number;
+    status?: number;
+    role?: string;
+  }) => api.get("/v1/admin/users", { params }),
+
+  createUser: (data: {
+    phone: string;
+    nickname?: string;
+    enterprise_id: number;
+    invitation_code_id?: number;
+  }) => api.post("/v1/admin/users", data),
+
+  updateUser: (
+    id: number,
+    data: {
+      nickname?: string;
+      status?: number;
+      enterprise_id?: number;
+    },
+  ) => api.put(`/v1/admin/users/${id}`, data),
+
+  deleteUser: (id: number) => api.delete(`/v1/admin/users/${id}`),
+
+  getAvailableInvitationCodes: (enterpriseId: number) =>
+    api.get(`/v1/admin/invitation-codes/available`, { params: { enterprise_id: enterpriseId } }),
+
+  setUserRole: (id: number, role: string) =>
+    api.post(`/v1/admin/users/${id}/role`, { role }),
+
+  adjustPoints: (
+    id: number,
+    data: { amount: number; reason?: string; operation: "add" | "subtract" },
+  ) => api.post(`/v1/admin/users/${id}/points`, data),
+
+  manageUser: (id: number, action: "enable" | "disable") =>
+    api.post(`/v1/admin/users/${id}/manage`, { action }),
+
+  getUserLedger: (id: number, limit?: number) =>
+    api.get(`/v1/admin/users/${id}/ledger`, { params: { limit } }),
+
+  // Invitation Code APIs
+  getInvitationCodes: (params?: { status?: number; enterprise_id?: number; page?: number; page_size?: number }) =>
+    api.get("/v1/admin/invitation-codes", { params }),
+
+  createInvitationCodes: (enterpriseId: number, count: number) =>
+    api.post("/v1/admin/invitation-codes", { enterprise_id: enterpriseId, count }),
+
+  deleteInvitationCode: (id: number) =>
+    api.delete(`/v1/admin/invitation-codes/${id}`),
+
+  // Operation Logs APIs
+  getOperationLogs: (params?: {
+    user_id?: number;
+    action?: string;
+    date_from?: number;
+    date_to?: number;
+    page?: number;
+    page_size?: number;
+  }) => api.get("/v1/admin/logs", { params }),
+};

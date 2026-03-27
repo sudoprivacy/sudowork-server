@@ -1,0 +1,93 @@
+.admin-layout {
+  min-height: 100vh;
+  display: flex;
+}
+
+.admin-sider {
+  background: linear-gradient(180deg, #1d2129 0%, #14161a 100%);
+  border-right: 1px solid #2e3342;
+}
+
+.admin-sider .ant-menu {
+  background: transparent;
+  border: none;
+}
+
+.admin-sider .ant-menu-item {
+  color: #86909c;
+  margin: 4px 8px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.admin-sider .ant-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.admin-sider .ant-menu-item-selected {
+  background: linear-gradient(
+    90deg,
+    rgba(22, 93, 255, 0.2) 0%,
+    rgba(22, 93, 255, 0.05) 100%
+  );
+  color: #165dff;
+}
+
+.admin-logo {
+  padding: 24px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid #2e3342;
+}
+
+.admin-logo-text {
+  font-size: 20px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #165dff 0%, #722ed1 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 1px;
+}
+
+.admin-header {
+  background: #fff;
+  border-bottom: 1px solid #e5e6eb;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+}
+
+.admin-breadcrumb {
+  flex: 1;
+}
+
+.admin-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.admin-user:hover {
+  background: #f7f8fa;
+}
+
+.admin-user-name {
+  font-size: 14px;
+  color: #1d2129;
+  font-weight: 500;
+}
+
+.admin-content {
+  padding: 24px;
+  background: #f7f8fa;
+  flex: 1;
+}

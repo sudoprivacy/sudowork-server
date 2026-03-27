@@ -1,0 +1,120 @@
+.dashboard {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #1d2129;
+  margin: 0 0 24px 0;
+}
+
+.mb-24 {
+  margin-bottom: 24px !important;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 12px;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.stat-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  color: #fff;
+}
+
+.stat-icon-blue {
+  background: linear-gradient(135deg, #165dff 0%, #4080ff 100%);
+}
+
+.stat-icon-green {
+  background: linear-gradient(135deg, #00b42a 0%, #00d67a 100%);
+}
+
+.stat-icon-cyan {
+  background: linear-gradient(135deg, #0fc6c2 0%, #33d6d2 100%);
+}
+
+.stat-icon-orange {
+  background: linear-gradient(135deg, #ff7d00 0%, #ff9a3e 100%);
+}
+
+.stat-content {
+  flex: 1;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: #86909c;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: #1d2129;
+}
+
+.points-stat {
+  text-align: center;
+  padding: 16px;
+  background: #f7f8fa;
+  border-radius: 8px;
+}
+
+.points-label {
+  font-size: 14px;
+  color: #86909c;
+  margin-bottom: 8px;
+}
+
+.points-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1d2129;
+}
+
+.points-value-primary {
+  color: #165dff;
+}
+
+.quick-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #f7f8fa;
+  border-radius: 8px;
+  color: #1d2129;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.quick-action:hover {
+  background: #e8f3ff;
+  color: #165dff;
+  transform: translateX(4px);
+}
+
+.dashboard-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 400px;
+  color: #86909c;
+  font-size: 16px;
+}
