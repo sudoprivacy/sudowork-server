@@ -4,31 +4,24 @@
 
 ## 📋 功能特性
 
-- ✅ **用户认证**: 短信验证码登录，支持企业码验证
-- ✅ **企业管理**: 多企业支持，管理员审批流，成员管理
-- ✅ **积分管理**: 余额查询、流水记录、积分消费
+- ✅ **用户认证**: 两阶段登录（短信验证码 + 邀请码注册），JWT Token
+- ✅ **企业管理**: 多企业支持，邀请码管理，成员管理
+- ✅ **积分管理**: 余额查询、流水记录、积分消费（带余额检查）
 - ✅ **Sudorouter 集成**: API Key 分发、用量上报、模型查询
 - ✅ **短信服务**: 腾讯云 SMS 集成，支持 Mock 模式
-- ✅ **权限控制**: JWT 认证，角色管理（管理员/普通用户）
-- ✅ **管理后台**: Web 管理界面，支持企业/用户管理
+- ✅ **安全防护**: Rate Limiting、余额检查、输入验证
+- ✅ **权限控制**: JWT 认证，角色管理（SUPER_ADMIN/ENTERPRISE_ADMIN/USER）
+- ✅ **管理后台**: Web 管理界面，支持企业/用户/邀请码管理
 
-## 🎯 管理后台
+## 🔐 安全特性
 
-### 超级管理员账户
-
-首次启动会自动创建超级管理员账户：
-
-- **账号**: `sudo`
-
-### 访问管理后台
-
-启动服务后，访问：`http://localhost:3000/`
-
-登录后可管理：
-
-- 📊 仪表盘 - 查看统计数据
-- 🏢 企业列表 - 添加/删除企业
-- 👥 用户管理 - 添加/修改/删除用户，设置积分
+| 特性 | 说明 |
+|------|------|
+| **Rate Limiting** | 登录/验证码接口 15 分钟最多 5-10 次/IP |
+| **余额检查** | 消费前检查余额，防止负数 |
+| **JWT 认证** | 24 小时过期，支持多角色权限 |
+| **密码加密** | bcrypt 加密存储 |
+| **敏感信息保护** | Token/验证码不打印日志 |
 
 ## 🚀 快速开始
 
@@ -44,7 +37,7 @@
 1. **克隆项目**
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/sudoprivacy/sudowork-server.git
 cd sudowork-server
 ```
 
@@ -52,10 +45,16 @@ cd sudowork-server
 
 ```bash
 cp .env.example .env
-# 编辑 .env 文件，配置必要参数
+# 编辑 .env 文件，配置必要参数（特别是 JWT_SECRET 和 SUPER_ADMIN_PASSWORD）
 ```
 
-3. **启动服务**
+3. **创建数据目录**
+
+```bash
+mkdir -p data
+```
+
+4. **启动服务**
 
 ```bash
 # 后台运行
@@ -65,13 +64,13 @@ docker-compose up -d
 docker-compose logs -f sudowork-server
 ```
 
-4. **验证部署**
+5. **验证部署**
 
 ```bash
 curl http://localhost:3000/
 ```
 
-5. **停止服务**
+6. **停止服务**
 
 ```bash
 docker-compose down
@@ -79,10 +78,8 @@ docker-compose down
 
 #### 数据持久化
 
-SQLite 数据库和 Redis 数据会自动挂载到本地：
-
 - `./data/` - SQLite 数据库文件
-- `redis-data` 卷 - Redis 数据
+- Redis 数据通过 Docker Volume 持久化
 
 ### 方式二：手动部署
 
@@ -103,6 +100,7 @@ bun install
 
 ```bash
 cp .env.example .env
+# 编辑 .env 文件
 ```
 
 3. **启动 Redis**
@@ -117,35 +115,69 @@ redis-server
 bun run src/index.ts
 ```
 
+## 🎯 管理后台
+
+### 超级管理员账户
+
+首次启动会自动创建超级管理员账户（需配置 `SUPER_ADMIN_PASSWORD`）：
+
+- **账号**: 由 `SUPER_ADMIN_PHONE` 配置（默认 `sudo`）
+- **密码**: 由 `SUPER_ADMIN_PASSWORD` 配置
+
+### 访问管理后台
+
+启动服务后，访问：`http://localhost:3000/`
+
+登录后可管理：
+
+- 📊 仪表盘 - 查看统计数据
+- 🏢 企业列表 - 添加/删除企业
+- 🎫 邀请码 - 批量生成/查看邀请码
+- 👥 用户管理 - 添加/修改/删除用户，设置积分
+- 📝 操作日志 - 查看系统操作记录
+
 ## 📖 环境变量说明
 
 ### 必需配置
 
-| 变量名         | 说明           | 默认值      | 示例                |
-| -------------- | -------------- | ----------- | ------------------- |
-| `REDIS_HOST`   | Redis 主机地址 | `localhost` | `redis` (Docker)    |
-| `REDIS_PORT`   | Redis 端口     | `6379`      | `6379`              |
-| `SMS_PROVIDER` | 短信提供商     | `mock`      | `mock` 或 `tencent` |
+| 变量名 | 说明 | 默认值 | 必需 |
+|--------|------|--------|------|
+| `JWT_SECRET` | JWT 密钥 | - | ✅ |
+| `SUPER_ADMIN_PASSWORD` | 超级管理员密码 | - | ✅ |
+| `REDIS_HOST` | Redis 主机地址 | `localhost` | ✅ |
+| `SUDOROUTER_API_TOKEN` | Sudorouter API Token | - | ✅ |
 
-### 腾讯云短信配置（SMS_PROVIDER=tencent 时必需）
+### 服务配置
 
-| 变量名                | 说明             | 获取方式                                                   |
-| --------------------- | ---------------- | ---------------------------------------------------------- |
-| `TENCENT_SECRET_ID`   | 腾讯云 SecretId  | [腾讯云控制台](https://console.cloud.tencent.com/cam/capi) |
-| `TENCENT_SECRET_KEY`  | 腾讯云 SecretKey | [腾讯云控制台](https://console.cloud.tencent.com/cam/capi) |
-| `TENCENT_SDK_APP_ID`  | 短信 SDK AppID   | [短信控制台](https://console.cloud.tencent.com/smsv2)      |
-| `TENCENT_SIGN_NAME`   | 短信签名         | 需审核通过                                                 |
-| `TENCENT_TEMPLATE_ID` | 短信模板 ID      | 需审核通过                                                 |
-| `TENCENT_REGION`      | 腾讯云区域       | `ap-beijing`                                               |
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `SERVER_PORT` | 服务端口 | `3000` |
+| `DB_PATH` | SQLite 数据库路径 | `/app/data/sudowork.db` |
+| `SUPER_ADMIN_PHONE` | 超级管理员账号 | `sudo` |
 
-### 验证码配置
+### Sudorouter 配置
 
-| 变量名                    | 说明                   | 默认值 |
-| ------------------------- | ---------------------- | ------ |
-| `SMS_CODE_LENGTH`         | 验证码长度             | `6`    |
-| `SMS_CODE_EXPIRE_MINUTES` | 验证码过期时间（分钟） | `5`    |
-| `SMS_CODE_SEND_INTERVAL`  | 发送间隔（秒）         | `60`   |
-| `SMS_CODE_MAX_PER_DAY`    | 每日最大发送次数       | `10`   |
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `SUDOROUTER_BASE_URL` | Sudorouter API 地址 | `http://10.0.1.8:3000` |
+| `SUDOROUTER_ADMIN_USER_ID` | Sudorouter 管理员 ID | `13` |
+| `USER_INITIAL_QUOTA` | 新用户初始额度 | `500000` (1000 积分) |
+
+### SMS 配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `SMS_PROVIDER` | 短信提供商 | `mock` |
+| `SMS_CODE_EXPIRE_MINUTES` | 验证码过期时间 | `5` 分钟 |
+| `SMS_CODE_MAX_PER_DAY` | 每日最大发送次数 | `10` |
+
+### Rate Limiting 配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `RATE_LIMIT_ENABLED` | 启用速率限制 | `true` |
+| `RATE_LIMIT_LOGIN_MAX` | 登录最大尝试次数/IP/15分钟 | `10` |
+| `RATE_LIMIT_API_MAX` | API 最大请求次数/IP/分钟 | `100` |
 
 ## 🔌 API 文档
 
@@ -155,23 +187,21 @@ bun run src/index.ts
 - **认证方式**: Bearer Token (JWT)
 - **请求格式**: `application/json`
 
+---
+
 ### 认证接口
 
 #### 1. 发送短信验证码
 
 **POST** `/api/v1/auth/send-code`
 
-**请求体**:
+**Rate Limit**: 5 次/IP/15分钟
 
 ```json
-{
-  "phone": "13653658804"
-}
-```
+// Request
+{ "phone": "13800138000" }
 
-**响应**:
-
-```json
+// Response
 {
   "success": true,
   "msg": "验证码已发送",
@@ -181,57 +211,73 @@ bun run src/index.ts
 }
 ```
 
-**错误响应**:
-
-```json
-{
-  "success": false,
-  "msg": "发送过于频繁，请 30 秒后再试",
-  "next_send_in": 30
-}
-```
-
 ---
 
-#### 2. 验证码登录
+#### 2. 短信验证码登录（两阶段）
 
 **POST** `/api/v1/auth/login`
 
-**请求体**:
+**Rate Limit**: 10 次/IP/15分钟
+
+**阶段一：已注册用户登录**
 
 ```json
-{
-  "phone": "13653658804",
-  "code": "123456",
-  "enterprise_code": "sudo"
-}
-```
+// Request
+{ "phone": "13800138000", "code": "123456" }
 
-**响应** (登录成功):
-
-```json
+// Response（用户已存在，直接登录）
 {
   "success": true,
   "data": {
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token": "eyJhbGciOiJIUzI1NiIs...",
     "user": {
       "id": 1,
-      "nickname": "管理员",
-      "role": "ADMIN",
-      "status": 1,
-      "enterprise_code": "sudo"
+      "phone": "13800138000",
+      "nickname": "用户昵称",
+      "role": "USER",
+      "sudorouter_key": "sk-xxx...",
+      "points": { "total": 1000, "used": 0, "remaining": 1000 }
     }
   }
 }
 ```
 
-**响应** (待审批):
+**阶段二：新用户注册**
 
 ```json
+// Response（用户不存在，需注册）
 {
   "success": false,
-  "status": 0,
-  "msg": "账号审核中，暂时无法进入系统"
+  "need_register": true,
+  "register_token": "abc123...",
+  "phone": "13800138000",
+  "msg": "用户不存在，请先注册"
+}
+```
+
+---
+
+#### 3. 新用户注册
+
+**POST** `/api/v1/auth/register`
+
+**Rate Limit**: 10 次/IP/15分钟
+
+```json
+// Request
+{
+  "register_token": "abc123...",
+  "nickname": "我的昵称",
+  "invitation_code": "ABC123"
+}
+
+// Response
+{
+  "success": true,
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIs...",
+    "user": { ... }
+  }
 }
 ```
 
@@ -239,249 +285,82 @@ bun run src/index.ts
 
 ### 用户接口
 
-需要 JWT 认证，请求头包含：
+需要 JWT 认证：`Authorization: Bearer <token>`
 
-```
-Authorization: Bearer <your-jwt-token>
-```
-
-#### 3. 获取用户信息
+#### 4. 获取用户信息
 
 **GET** `/api/v1/user/profile`
 
-**响应**:
+#### 5. 获取用户仪表盘
 
-```json
-{
-  "success": true,
-  "data": {
-    "id": 1,
-    "phone": "13653658804",
-    "nickname": "管理员",
-    "role": "ADMIN",
-    "status": 1,
-    "enterprise_code": "sudo",
-    "balance": 1000,
-    "total_points": 1000,
-    "used_points": 0
-  }
-}
-```
+**GET** `/api/v1/user/dashboard`
 
----
+返回积分、今日使用统计、使用流水。
 
-#### 4. 获取积分流水
-
-**GET** `/api/v1/user/ledger`
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 1,
-      "user_id": 1,
-      "amount": 1000,
-      "type": "BONUS",
-      "reason": "系统初始化配额",
-      "balance": 1000,
-      "timestamp": "2026-03-23T10:00:00.000Z"
-    }
-  ]
-}
-```
-
----
-
-#### 5. 用量上报
+#### 6. 用量上报（扣费）
 
 **POST** `/api/v1/usage/report`
 
-**请求体**:
-
 ```json
+// Request
 {
   "inputTokens": 100,
   "outputTokens": 200,
   "model": "claude-3-5-sonnet"
 }
-```
 
-**响应**:
-
-```json
+// Response
 {
   "success": true,
   "deducted": 0.3,
   "newBalance": 999.7
 }
+
+// 余额不足时
+{
+  "success": false,
+  "msg": "余额不足",
+  "data": { "balance": 0.1, "required": 0.3 }
+}
 ```
 
-**计费规则**:
-
-- 1000 Tokens = 1 积分
-- 计算公式：`points = ceil((inputTokens + outputTokens) / 1000 * 100) / 100`
+**计费规则**: 1000 Tokens = 1 积分
 
 ---
 
 ### 管理接口
 
-需要管理员权限（role: ADMIN）
+需要管理员权限（`SUPER_ADMIN` 或 `ENTERPRISE_ADMIN`）
 
-#### 6. 获取成员列表
+#### 7. 管理员登录
 
-**GET** `/api/v1/admin/members`
+**POST** `/api/v1/admin/login`
 
-**响应**:
+#### 8. 获取统计数据
 
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": 1,
-      "phone": "13653658804",
-      "nickname": "管理员",
-      "role": "ADMIN",
-      "status": 1,
-      "enterprise_id": 1,
-      "balance": 1000
-    },
-    {
-      "id": 2,
-      "phone": "13800138000",
-      "nickname": "13800138000",
-      "role": "USER",
-      "status": 0,
-      "enterprise_id": 1,
-      "balance": 0
-    }
-  ]
-}
-```
+**GET** `/api/v1/admin/stats`
 
-**状态说明**:
+#### 9. 企业管理
 
-- `status: 0` - 待审批
-- `status: 1` - 已批准
-- `status: 2` - 已拒绝
+- `GET /api/v1/admin/enterprises` - 企业列表
+- `POST /api/v1/admin/enterprises` - 创建企业
+- `PUT /api/v1/admin/enterprises/:id` - 更新企业
+- `DELETE /api/v1/admin/enterprises/:id` - 删除企业
 
----
+#### 10. 邀请码管理
 
-#### 7. 审批用户
+- `GET /api/v1/admin/invitation-codes` - 邀请码列表
+- `POST /api/v1/admin/invitation-codes` - 批量创建邀请码
+- `DELETE /api/v1/admin/invitation-codes/:id` - 删除邀请码
 
-**POST** `/api/v1/admin/approve`
+#### 11. 用户管理
 
-**请求体**:
-
-```json
-{
-  "userId": 2
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "msg": "审批成功"
-}
-```
-
-**操作**:
-
-- 用户状态变为 `已批准` (status: 1)
-- 分配 Sudorouter API Key
-- 赠送 100 初始积分
-
----
-
-#### 8. 拒绝用户
-
-**POST** `/api/v1/admin/reject`
-
-**请求体**:
-
-```json
-{
-  "userId": 2
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "msg": "已拒绝申请"
-}
-```
-
-**操作**:
-
-- 用户状态变为 `已拒绝` (status: 2)
-- 记录拒绝日志
-
----
-
-#### 9. 删除用户
-
-**POST** `/api/v1/admin/delete`
-
-**请求体**:
-
-```json
-{
-  "userId": 2
-}
-```
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "msg": "用户已删除"
-}
-```
-
-**注意**:
-
-- 不能删除管理员账户
-- 会删除用户相关的积分流水记录
-
----
-
-### Sudorouter 接口
-
-#### 10. 获取模型列表
-
-**GET** `/api/v1/router/models`
-
-**响应**:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "label": "Claude 3.5 Sonnet (Global)",
-      "value": "claude-3-5-sonnet"
-    },
-    {
-      "label": "GPT-4o (Global)",
-      "value": "gpt-4o"
-    },
-    {
-      "label": "DeepSeek V3",
-      "value": "deepseek-v3"
-    }
-  ]
-}
-```
+- `GET /api/v1/admin/users` - 用户列表
+- `POST /api/v1/admin/users` - 创建用户
+- `PUT /api/v1/admin/users/:id` - 更新用户
+- `DELETE /api/v1/admin/users/:id` - 删除用户
+- `POST /api/v1/admin/users/:id/points` - 调整积分
+- `POST /api/v1/admin/users/:id/manage` - 启用/禁用用户
 
 ---
 
@@ -502,111 +381,83 @@ Authorization: Bearer <your-jwt-token>
 ```
 sudowork-server/
 ├── src/
-│   ├── index.ts              # 主入口
-│   ├── redis.ts              # Redis 连接
-│   └── services/
-│       ├── SmsService.ts     # 短信服务
-│       └── SudoworkService.ts # Sudorouter 服务
-├── admin/                    # 管理后台前端源码
-├── admin-dist/               # 构建后的前端静态文件
-├── data/                     # SQLite 数据库（持久化）
-├── docker-compose.yml        # Docker 编排
-├── Dockerfile               # Docker 镜像
-├── .env.example             # 环境变量模板
-└── README.md                # 本文档
+│   ├── index.ts                 # 主入口、路由定义
+│   ├── redis.ts                 # Redis 连接
+│   ├── middleware/
+│   │   ├── auth.ts              # JWT 认证中间件
+│   │   └── rateLimiter.ts       # 速率限制中间件
+│   ├── services/
+│   │   ├── SmsService.ts        # 短信服务
+│   │   └── SudorouterService.ts # Sudorouter API 封装
+│   └── utils/
+│       └── password.ts          # 密码加密工具
+├── admin/                       # 管理后台前端源码
+├── admin-dist/                  # 构建后的前端静态文件
+├── data/                        # SQLite 数据库（持久化）
+├── docker-compose.yml           # Docker 编排
+├── Dockerfile                   # Docker 镜像
+├── .env.example                 # 环境变量模板
+└── README.md                    # 本文档
 ```
 
 ### 数据模型
 
 #### 用户表 (users)
 
-- `id`: 主键
-- `phone`: 手机号
-- `nickname`: 昵称
-- `role`: 角色 (ADMIN/USER)
-- `status`: 状态 (0:待审批/1:已批准/2:已拒绝)
-- `enterprise_id`: 企业 ID
-- `api_key`: Sudorouter API Key
-- `balance`: 积分余额
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INTEGER | 主键 |
+| `phone` | TEXT | 手机号 |
+| `nickname` | TEXT | 昵称 |
+| `role` | TEXT | 角色 (SUPER_ADMIN/ENTERPRISE_ADMIN/USER) |
+| `status` | INTEGER | 状态 (0:待审批/1:正常/2:禁用) |
+| `enterprise_id` | INTEGER | 企业 ID |
+| `sudorouter_user_id` | INTEGER | Sudorouter 用户 ID |
+| `sudorouter_key` | TEXT | Sudorouter API Key |
+| `balance` | REAL | 积分余额 |
 
 #### 企业表 (enterprises)
 
-- `id`: 主键
-- `name`: 企业名称
-- `code`: 企业码（唯一）
-- `credit_pool`: 积分池
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INTEGER | 主键 |
+| `name` | TEXT | 企业名称 |
+| `code` | TEXT | 企业码（唯一） |
 
-#### 积分流水表 (ledger)
+#### 邀请码表 (invitation_codes)
 
-- `id`: 主键
-- `user_id`: 用户 ID
-- `amount`: 变动金额
-- `type`: 类型 (BONUS/CONSUME/REJECT)
-- `reason`: 原因
-- `timestamp`: 时间戳
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INTEGER | 主键 |
+| `code` | TEXT | 邀请码（唯一） |
+| `enterprise_id` | INTEGER | 所属企业 |
+| `status` | INTEGER | 状态 (0:未使用/1:已使用) |
+| `used_by_user_id` | INTEGER | 使用者 ID |
 
 ---
 
 ## 🔧 常见问题
 
-### 1. 短信发送失败
+### 1. Rate Limit 触发后如何处理
 
-**Mock 模式**: 查看服务器日志获取验证码
+等待 `retry_after` 秒后重试，或联系管理员。
 
-```bash
-docker-compose logs sudowork-server | grep "验证码"
-```
+### 2. 短信发送失败
 
-**腾讯云模式**:
+**Mock 模式**: 验证码不会打印到日志，需查看 Redis 或使用腾讯云模式。
 
-- 检查 SecretId/SecretKey 是否正确
-- 确认短信签名和模板已审核通过
-- 检查手机号格式（支持 11 位或 +86 格式）
+**腾讯云模式**: 检查 SecretId/SecretKey、签名和模板是否审核通过。
 
-### 2. Redis 连接失败
-
-检查 Redis 服务状态：
+### 3. Redis 连接失败
 
 ```bash
 docker-compose ps redis
 docker-compose logs redis
 ```
 
-### 3. 数据库文件位置
+### 4. 忘记超级管理员密码
 
-SQLite 数据库文件位于 `./data/sudowork.db`，会自动创建。
-
-### 4. 管理员账户
-
-首次启动会自动创建管理员账户：
-
-- **手机号**: `13653658804`
-- **企业码**: `sudo`
-- **角色**: ADMIN
-- **初始积分**: 1000
-
----
-
-## 📝 开发指南
-
-### 本地调试
-
-```bash
-# 安装依赖
-bun install
-
-# 启动 Redis
-redis-server
-
-# 启动服务（热重载）
-bun run --hot src/index.ts
-```
-
-### 添加新功能
-
-1. 在 `src/services/` 创建服务模块
-2. 在 `src/index.ts` 注册 API 路由
-3. 更新本文档的 API 章节
+删除数据库文件重新初始化，或直接修改数据库中的 `password_hash`。
 
 ---
 
