@@ -20,7 +20,7 @@ const app = new Hono();
 app.use("*", logger());
 app.use("*", cors());
 
-const db = new Database("sudowork.db");
+const db = new Database(process.env.DB_PATH || "/app/data/sudowork.db");
 const SECRET = process.env.JWT_SECRET || "sudowork-secret-key";
 
 // Serve static files from admin-dist
@@ -1388,48 +1388,24 @@ addColumnIfNotExists("operation_logs", "response_data", "TEXT");
 // 数据清理：只保留 sudo 企业（已禁用，不再自动清理）
 const cleanupData = () => {
   // 已禁用自动清理，避免丢失用户数据
-  // const sudoEnt = db.prepare("SELECT * FROM enterprises WHERE code = 'sudo'").get();
-  // if (sudoEnt) {
-  //   db.run("UPDATE enterprises SET name = '数牍科技' WHERE code = 'sudo'");
-  //   db.run("DELETE FROM enterprises WHERE code != 'sudo'");
-  //   db.run("DELETE FROM users WHERE role NOT IN ('SUPER_ADMIN', 'ENTERPRISE_ADMIN')");
-  //   db.run("DELETE FROM ledger");
-  //   console.log("=== 数据清理完成 ===");
-  // }
   console.log("=== 数据清理已跳过 ===");
 };
 cleanupData();
 
-const seed = () => {
+// 初始化 sudo 企业
+const initEnterprise = () => {
   const ent = db.prepare("SELECT * FROM enterprises WHERE code = 'sudo'").get();
   if (!ent) {
     db.run("INSERT INTO enterprises (name, code) VALUES (?, ?)", [
-      "Sudowork 演示企业",
+      "Sudowork",
       "sudo",
     ]);
-    const newEnt = db
-      .prepare("SELECT id FROM enterprises WHERE code = 'sudo'")
-      .get() as any;
-    db.run(
-      "INSERT INTO users (phone, nickname, role, status, enterprise_id, balance) VALUES (?, ?, ?, ?, ?, ?)",
-      ["13653658804", "管理员", "ENTERPRISE_ADMIN", 1, newEnt.id, 1000],
-    );
-    const admin = db
-      .prepare("SELECT id FROM users WHERE phone = '13653658804'")
-      .get() as any;
-    db.run(
-      "INSERT INTO ledger (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
-      [admin.id, 1000, "BONUS", "系统初始化配额"],
-    );
-    console.log("=== 企业管理员账户初始化成功 ===");
-    console.log("手机号：13653658804");
-    console.log("角色：ENTERPRISE_ADMIN");
-    console.log("初始积分：1000");
+    console.log("=== 企业已创建 ===");
     console.log("企业码：sudo");
     console.log("========================");
   }
 };
-seed();
+initEnterprise();
 
 // Initialize super admin
 const initSuperAdmin = async () => {
