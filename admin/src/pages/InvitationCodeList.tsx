@@ -124,48 +124,54 @@ const InvitationCodeList: React.FC = () => {
       title: "邀请码",
       dataIndex: "code",
       key: "code",
+      width: 100,
       render: (val: string) => <code className="text-lg font-mono">{val}</code>,
     },
     {
       title: "所属企业",
       dataIndex: "enterprise_name",
       key: "enterprise_name",
+      width: 120,
+      ellipsis: true,
       render: (val: string) => val || "-",
     },
     {
       title: "状态",
       dataIndex: "status",
       key: "status",
+      width: 100,
       render: (val: number) =>
         val === 0 ? <Tag color="green">未使用</Tag> : <Tag color="orange">已使用</Tag>,
     },
     {
       title: "使用者",
       key: "used_by",
+      width: 120,
+      ellipsis: true,
       render: (_: any, record: InvitationCode) => {
         if (record.status === 0) return "-";
-        return (
-          <span>
-            {record.used_by_nickname || record.used_by_phone || "-"}
-          </span>
-        );
+        const name = record.used_by_nickname || record.used_by_phone || "-";
+        return <span title={name}>{name}</span>;
       },
     },
     {
       title: "创建时间",
       dataIndex: "created_at",
       key: "created_at",
+      width: 160,
       render: (val: string) => new Date(val).toLocaleString(),
     },
     {
       title: "使用时间",
       dataIndex: "used_at",
       key: "used_at",
+      width: 160,
       render: (val: string | null) => (val ? new Date(val).toLocaleString() : "-"),
     },
     {
       title: "操作",
       key: "action",
+      width: 80,
       render: (_: any, record: InvitationCode) => (
         <Space>
           {record.status === 0 && (
@@ -241,6 +247,7 @@ const InvitationCodeList: React.FC = () => {
           dataSource={codes}
           loading={loading}
           rowKey="id"
+          scroll={{ x: 800 }}
           pagination={{
             current: page,
             pageSize,
