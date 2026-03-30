@@ -381,16 +381,33 @@ bun run src/index.ts
 ```
 sudowork-server/
 ├── src/
-│   ├── index.ts                 # 主入口、路由定义
+│   ├── index.ts                 # 主入口（启动服务、挂载路由）
 │   ├── redis.ts                 # Redis 连接
+│   ├── db/
+│   │   ├── index.ts             # 数据库连接
+│   │   ├── schema.ts            # 表结构定义
+│   │   ├── migrations.ts        # 数据库迁移
+│   │   └── init.ts              # 初始化函数
 │   ├── middleware/
 │   │   ├── auth.ts              # JWT 认证中间件
 │   │   └── rateLimiter.ts       # 速率限制中间件
+│   ├── routes/
+│   │   ├── admin.ts             # 管理员路由挂载
+│   │   ├── admin-auth.ts        # 管理员登录/改密
+│   │   ├── admin-enterprises.ts # 企业管理接口
+│   │   ├── admin-invitation-codes.ts # 邀请码管理
+│   │   ├── admin-users.ts       # 用户管理接口
+│   │   ├── admin-logs.ts        # 操作日志接口
+│   │   ├── auth.ts              # 用户认证接口
+│   │   ├── user.ts              # 用户中心接口
+│   │   └── misc.ts              # 杂项路由
 │   ├── services/
 │   │   ├── SmsService.ts        # 短信服务
 │   │   └── SudorouterService.ts # Sudorouter API 封装
 │   └── utils/
-│       └── password.ts          # 密码加密工具
+│       ├── password.ts          # 密码加密工具
+│       ├── validation.ts        # 输入验证工具
+│       └── invitation.ts        # 邀请码生成工具
 ├── admin/                       # 管理后台前端源码
 ├── admin-dist/                  # 构建后的前端静态文件
 ├── data/                        # SQLite 数据库（持久化）
@@ -401,6 +418,18 @@ sudowork-server/
 ```
 
 ### 数据模型
+
+#### 模块化设计
+
+项目采用模块化架构，每个模块职责单一：
+
+| 模块 | 职责 | 文件 |
+|------|------|------|
+| **db/** | 数据库连接、表结构、迁移、初始化 | `index.ts`, `schema.ts`, `migrations.ts`, `init.ts` |
+| **routes/** | API 路由处理，按功能域拆分 | `admin-*.ts`, `auth.ts`, `user.ts`, `misc.ts` |
+| **services/** | 外部服务封装（Sudorouter、SMS） | `SudorouterService.ts`, `SmsService.ts` |
+| **middleware/** | 认证、授权、限流中间件 | `auth.ts`, `rateLimiter.ts` |
+| **utils/** | 通用工具函数 | `password.ts`, `validation.ts`, `invitation.ts` |
 
 #### 用户表 (users)
 
