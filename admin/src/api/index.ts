@@ -101,6 +101,9 @@ export const adminApi = {
   manageUser: (id: number, action: "enable" | "disable") =>
     api.post(`/v1/admin/users/${id}/manage`, { action }),
 
+  syncUserQuota: (id: number) =>
+    api.post(`/v1/admin/members/${id}/sync-quota`),
+
   getUserLedger: (id: number, limit?: number) =>
     api.get(`/v1/admin/users/${id}/ledger`, { params: { limit } }),
 

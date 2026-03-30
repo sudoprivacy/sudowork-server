@@ -23,34 +23,12 @@ userRoutes.get("/profile", async (c) => {
 
   if (!user) return c.json({ success: false, msg: "用户不存在" }, 404);
 
-  // 从 sudorouter 同步用户额度
-  let remainingPoints = 0;
-  let usedPoints = 0;
-  const bonusPoints = sudorouterService.getInitialPoints(); // 赠送积分 1000
-
-  if (user.sudorouter_user_id && sudorouterService.isConfigured()) {
-    const sudorouterUser = await sudorouterService.getUser(
-      user.sudorouter_user_id,
-    );
-    if (sudorouterUser) {
-      const quota = sudorouterUser.quota || 0;
-      const usedQuota = sudorouterUser.used_quota || 0;
-
-      // 积分计算：积分 = 额度 * 0.002
-      remainingPoints = sudorouterService.quotaToPoints(quota);
-      usedPoints = sudorouterService.quotaToPoints(usedQuota);
-
-      // 更新本地用户额度
-      db.run(
-        "UPDATE users SET quota = ?, used_quota = ?, balance = ? WHERE id = ?",
-        [quota, usedQuota, remainingPoints, user.id],
-      );
-
-      user.quota = quota;
-      user.used_quota = usedQuota;
-      user.balance = remainingPoints;
-    }
-  }
+  // 直接从本地数据库读取额度信息
+  const quota = user.quota || 0;
+  const usedQuota = user.used_quota || 0;
+  const remainingPoints = sudorouterService.quotaToPoints(quota);
+  const usedPoints = sudorouterService.quotaToPoints(usedQuota);
+  const bonusPoints = sudorouterService.getInitialPoints();
 
   return c.json({
     success: true,
@@ -63,12 +41,12 @@ userRoutes.get("/profile", async (c) => {
       enterprise_id: user.enterprise_id,
       enterprise_code: user.enterprise_code,
       // 积分信息
-      bonus_points: bonusPoints, // 赠送积分（固定1000）
-      remaining_points: remainingPoints, // 剩余积分
-      used_points: usedPoints, // 已用积分
-      // 原始额度信息（可选，用于调试）
-      quota: user.quota || 0,
-      used_quota: user.used_quota || 0,
+      bonus_points: bonusPoints,
+      remaining_points: remainingPoints,
+      used_points: usedPoints,
+      // 原始额度信息
+      quota: quota,
+      used_quota: usedQuota,
     },
   });
 });

@@ -12,7 +12,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { PlusOutlined, DeleteOutlined, EditOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, EditOutlined, SyncOutlined } from "@ant-design/icons";
 import { adminApi } from "../api";
 
 const { Title } = Typography;
@@ -51,6 +51,7 @@ const UserList: React.FC = () => {
   const [availableCodes, setAvailableCodes] = useState<InvitationCode[]>([]);
   const [visible, setVisible] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [syncingUserId, setSyncingUserId] = useState<number | null>(null);
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -194,6 +195,23 @@ const UserList: React.FC = () => {
     });
   };
 
+  const handleSyncQuota = async (id: number) => {
+    setSyncingUserId(id);
+    try {
+      const response = await adminApi.syncUserQuota(id);
+      if ((response as any).success) {
+        message.success("额度同步成功");
+        loadUsers();
+      } else {
+        message.error((response as any).msg || "同步失败");
+      }
+    } catch (error: any) {
+      message.error(error.response?.data?.msg || "同步失败");
+    } finally {
+      setSyncingUserId(null);
+    }
+  };
+
   const columns = [
     {
       title: "手机号",
@@ -238,10 +256,26 @@ const UserList: React.FC = () => {
     {
       title: "积分",
       key: "points",
-      width: 100,
+      width: 120,
       render: (_: any, record: User) => {
         const remainingPoints = Math.round((record.quota || 0) * 0.002);
-        return <span style={{ color: "#1890ff" }}>{remainingPoints}</span>;
+        const isSyncing = syncingUserId === record.id;
+        return (
+          <Space size="small">
+            <span style={{ color: "#1890ff" }}>{remainingPoints}</span>
+            {record.sudorouter_user_id && (
+              <Button
+                type="link"
+                size="small"
+                icon={<SyncOutlined spin={isSyncing} />}
+                onClick={() => handleSyncQuota(record.id)}
+                loading={isSyncing}
+                title="同步最新额度"
+                style={{ padding: 0 }}
+              />
+            )}
+          </Space>
+        );
       },
     },
     {

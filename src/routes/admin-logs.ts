@@ -4,6 +4,7 @@
 
 import { Hono } from "hono";
 import { db } from "../db/index.js";
+import { sudorouterService } from "../services/SudorouterService.js";
 import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
 
 const adminLogRoutes = new Hono();
@@ -90,6 +91,90 @@ adminLogRoutes.get(
     }
 
     return c.json({ success: true, data: users });
+  },
+);
+
+// POST /api/v1/admin/members/:id/sync-quota - 手动同步单个用户额度
+adminLogRoutes.post(
+  "/members/:id/sync-quota",
+  authMiddleware,
+  adminMiddleware,
+  async (c) => {
+    const admin = c.get("user");
+    const userId = c.req.param("id");
+
+    const targetUser = db
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(userId) as any;
+
+    if (!targetUser) {
+      return c.json({ success: false, msg: "用户不存在" }, 404);
+    }
+
+    // 权限检查
+    if (
+      admin.role !== "SUPER_ADMIN" &&
+      targetUser.enterprise_id !== admin.enterprise_id
+    ) {
+      return c.json({ success: false, msg: "无权操作该用户" }, 403);
+    }
+
+    // 检查是否绑定 sudorouter
+    if (!targetUser.sudorouter_user_id) {
+      return c.json({ success: false, msg: "用户未绑定 sudorouter" }, 400);
+    }
+
+    // 检查 sudorouter 服务
+    if (!sudorouterService.isConfigured()) {
+      return c.json({ success: false, msg: "sudorouter 服务未配置" }, 500);
+    }
+
+    // 从 sudorouter 获取最新额度
+    const sudorouterUser = await sudorouterService.getUser(
+      targetUser.sudorouter_user_id,
+    );
+
+    if (!sudorouterUser) {
+      return c.json({ success: false, msg: "获取 sudorouter 用户信息失败" }, 500);
+    }
+
+    const quota = sudorouterUser.quota || 0;
+    const usedQuota = sudorouterUser.used_quota || 0;
+    const balance = sudorouterService.quotaToPoints(quota);
+
+    // 更新本地数据库
+    db.run(
+      "UPDATE users SET quota = ?, used_quota = ?, balance = ? WHERE id = ?",
+      [quota, usedQuota, balance, userId],
+    );
+
+    // 记录操作日志
+    db.run(
+      `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        admin.id,
+        admin.phone,
+        "MEMBER_SYNC_QUOTA",
+        "user",
+        userId,
+        "POST",
+        `/api/v1/admin/members/${userId}/sync-quota`,
+        JSON.stringify({ target_user_id: userId }),
+        JSON.stringify({ quota, used_quota: usedQuota, balance }),
+      ],
+    );
+
+    return c.json({
+      success: true,
+      msg: "额度同步成功",
+      data: {
+        id: userId,
+        quota,
+        used_quota: usedQuota,
+        balance,
+      },
+    });
   },
 );
 

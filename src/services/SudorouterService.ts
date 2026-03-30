@@ -96,7 +96,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
 class SudorouterService {
   private config: SudorouterConfig;
   private modelsCache: { data: string[]; timestamp: number } | null = null;
-  private modelsCacheTtl = 10 * 60 * 1000; // 10 分钟缓存
+  private modelsCacheTtl = 24 * 60 * 60 * 1000; // 24 小时缓存
 
   constructor() {
     this.config = {
