@@ -1612,9 +1612,9 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
       try {
         if (getUserResult.success && getUserResult.data) {
           const sudorouterUserInfo = getUserResult.data;
-          totalPoints = sudorouterService.quotaToPoints(sudorouterUserInfo.quota || 0);
+          totalPoints = sudorouterService.quotaToPoints((sudorouterUserInfo.quota || 0) + (sudorouterUserInfo.used_quota || 0));
           usedPoints = sudorouterService.quotaToPoints(sudorouterUserInfo.used_quota || 0);
-          remainingPoints = totalPoints - usedPoints;
+          remainingPoints = sudorouterService.quotaToPoints(sudorouterUserInfo.quota || 0);
 
           // 更新本地数据库
           db.run(
@@ -1652,9 +1652,9 @@ app.post("/api/v1/auth/login", rateLimiter(rateLimitPresets.login), async (c) =>
       } catch (error) {
         console.error(`[Login] 同步用户 ${phone} 额度失败:`, error);
         // 使用本地缓存数据
-        totalPoints = sudorouterService.quotaToPoints(user.quota || 0);
+        totalPoints = sudorouterService.quotaToPoints((user.quota || 0) + (user.used_quota || 0));
         usedPoints = sudorouterService.quotaToPoints(user.used_quota || 0);
-        remainingPoints = totalPoints - usedPoints;
+        remainingPoints = sudorouterService.quotaToPoints(user.quota || 0);
       }
     }
 
@@ -2139,9 +2139,9 @@ app.get("/api/v1/user/dashboard", async (c) => {
     // 处理用户信息
     if (getUserResult.success && getUserResult.data) {
       const sudorouterUser = getUserResult.data;
-      totalPoints = sudorouterService.quotaToPoints(sudorouterUser.quota || 0);
+      totalPoints = sudorouterService.quotaToPoints((sudorouterUser.quota || 0) + (sudorouterUser.used_quota || 0));
       usedPoints = sudorouterService.quotaToPoints(sudorouterUser.used_quota || 0);
-      remainingPoints = totalPoints - usedPoints;
+      remainingPoints = sudorouterService.quotaToPoints(sudorouterUser.quota || 0);
 
       // 更新本地数据库
       db.run(
@@ -2324,9 +2324,9 @@ app.get("/api/v1/user/stats", async (c) => {
     const getUserResult = await sudorouterService.getUserWithLog(user.sudorouter_user_id);
     if (getUserResult.success && getUserResult.data) {
       const sudorouterUser = getUserResult.data;
-      totalPoints = sudorouterService.quotaToPoints(sudorouterUser.quota || 0);
+      totalPoints = sudorouterService.quotaToPoints((sudorouterUser.quota || 0) + (sudorouterUser.used_quota || 0));
       usedPoints = sudorouterService.quotaToPoints(sudorouterUser.used_quota || 0);
-      remainingPoints = totalPoints - usedPoints;
+      remainingPoints = sudorouterService.quotaToPoints(sudorouterUser.quota || 0);
 
       // 更新本地数据库
       db.run(
