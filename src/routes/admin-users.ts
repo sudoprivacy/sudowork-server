@@ -85,37 +85,8 @@ adminUserRoutes.get("/users", authMiddleware, adminMiddleware, async (c) => {
 
   const users = db.prepare(query).all(...params) as any[];
 
-  // 同步每个用户的额度信息（从 sudorouter）
-  if (sudorouterService.isConfigured()) {
-    for (const user of users) {
-      if (user.sudorouter_user_id) {
-        try {
-          const sudorouterUser = await sudorouterService.getUser(
-            user.sudorouter_user_id,
-          );
-          if (sudorouterUser) {
-            const quota = sudorouterUser.quota || 0;
-            const usedQuota = sudorouterUser.used_quota || 0;
-            const remainingPoints = sudorouterService.quotaToPoints(quota);
-            const usedPoints = sudorouterService.quotaToPoints(usedQuota);
-
-            // 更新本地用户额度
-            db.run(
-              "UPDATE users SET quota = ?, used_quota = ?, balance = ? WHERE id = ?",
-              [quota, usedQuota, remainingPoints, user.id],
-            );
-
-            // 更新返回数据
-            user.quota = quota;
-            user.used_quota = usedQuota;
-            user.balance = remainingPoints;
-          }
-        } catch (error) {
-          console.error(`[Admin] 同步用户 ${user.id} 额度失败:`, error);
-        }
-      }
-    }
-  }
+  // 不再自动同步额度，改为手动触发（前端点击刷新按钮调用 /members/:id/sync-quota）
+  // 直接返回本地数据库中的额度信息
 
   return c.json({
     success: true,
