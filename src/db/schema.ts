@@ -92,4 +92,154 @@ export function initSchema(): void {
   db.run(`CREATE INDEX IF NOT EXISTS idx_operation_logs_user_id ON operation_logs(user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_operation_logs_action ON operation_logs(action)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_operation_logs_created_at ON operation_logs(created_at)`);
+
+  // ============================================
+  // Recharge System Tables (富友支付充值系统)
+  // ============================================
+
+  // Recharge orders table (充值订单表)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS recharge_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+      -- Order info
+      order_no TEXT UNIQUE NOT NULL,
+      user_id INTEGER NOT NULL,
+      user_phone TEXT,
+      enterprise_id INTEGER,
+
+      -- Amount info
+      amount_usd REAL NOT NULL,           -- 美元金额
+      amount_yuan REAL NOT NULL,          -- 人民币金额（汇率转换后）
+      amount_cents INTEGER NOT NULL,      -- 人民币金额（分）
+      exchange_rate REAL DEFAULT 7.3,     -- 使用的汇率
+      quota_amount INTEGER NOT NULL,
+      points_amount INTEGER NOT NULL,
+      bonus_points INTEGER DEFAULT 0,
+
+      -- Payment info
+      payment_method TEXT NOT NULL,
+      order_date TEXT,
+
+      -- Fuiou response
+      fuiou_order_info TEXT,
+
+      -- Status tracking
+      status INTEGER DEFAULT 0,
+
+      -- Callback info
+      callback_data TEXT,
+      callback_time DATETIME,
+      callback_amount_cents INTEGER,
+
+      -- Timestamps
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expired_at DATETIME,
+
+      -- Remark
+      remark TEXT,
+
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id)
+    );
+  `);
+
+  // Recharge records table (充值记录表)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS recharge_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+
+      -- Quota changes
+      quota_before INTEGER,
+      quota_after INTEGER,
+      quota_delta INTEGER NOT NULL,
+
+      -- Points changes
+      balance_before REAL,
+      balance_after REAL,
+      balance_delta REAL NOT NULL,
+
+      -- Sudorouter sync
+      sudorouter_user_id INTEGER,
+      sudorouter_success BOOLEAN,
+
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+      FOREIGN KEY (order_id) REFERENCES recharge_orders(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
+  // Admin recharge records table (后台充值记录表)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS admin_recharge_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      admin_id INTEGER NOT NULL,
+
+      -- Recharge info
+      points INTEGER NOT NULL,
+      quota INTEGER NOT NULL,
+      reason TEXT,
+      payment_reference TEXT,
+
+      -- Sudorouter sync
+      sudorouter_user_id INTEGER,
+      sudorouter_success BOOLEAN DEFAULT TRUE,
+      sudorouter_error TEXT,
+
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (admin_id) REFERENCES users(id)
+    );
+  `);
+
+  // Refund records table (退款记录表)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS refund_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      refund_no TEXT UNIQUE NOT NULL,
+      order_id INTEGER NOT NULL,
+      order_no TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+
+      -- Refund amount
+      refund_amount_yuan REAL NOT NULL,
+      refund_quota INTEGER NOT NULL,
+      refund_points INTEGER NOT NULL,
+
+      -- Refund reason
+      refund_reason TEXT,
+      refund_type TEXT,
+
+      -- Status
+      status INTEGER DEFAULT 0,
+
+      -- Fuiou info
+      fuiou_refund_no TEXT,
+      fuiou_response TEXT,
+
+      -- Timestamps
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      processed_at DATETIME,
+
+      FOREIGN KEY (order_id) REFERENCES recharge_orders(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
+  // Create indexes for recharge tables
+  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_user_id ON recharge_orders(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_status ON recharge_orders(status)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_order_no ON recharge_orders(order_no)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_created_at ON recharge_orders(created_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_records_order_id ON recharge_records(order_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_records_user_id ON recharge_records(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_user_id ON admin_recharge_records(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_admin_id ON admin_recharge_records(admin_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_created_at ON admin_recharge_records(created_at)`);
 }

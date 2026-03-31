@@ -146,7 +146,12 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
     let totalPoints = 0;
     let usedPoints = 0;
     let remainingPoints = 0;
-    const bonusPoints = sudorouterService.getInitialPoints(); // 赠送积分
+
+    // 从 ledger 表查询实际获得的赠送积分
+    const bonusResult = db
+      .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM ledger WHERE user_id = ? AND type = 'BONUS'")
+      .get(user.id) as any;
+    const bonusPoints = bonusResult?.total || 0;
 
     // 并行调用：获取用户信息 + 获取可用模型
     const [getUserResult, models] =
@@ -574,7 +579,7 @@ authRoutes.post(
     );
 
     // 计算初始积分
-    const initialBalance = initialQuota * 0.002;
+    const initialBalance = sudorouterService.quotaToPoints(initialQuota);
 
     // 创建本地用户
     const result = db.run(

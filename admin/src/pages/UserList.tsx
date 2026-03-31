@@ -11,8 +11,11 @@ import {
   Select,
   Tag,
   Typography,
+  InputNumber,
+  Alert,
+  Spin,
 } from "antd";
-import { PlusOutlined, DeleteOutlined, EditOutlined, SyncOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, EditOutlined, SyncOutlined, DollarOutlined } from "@ant-design/icons";
 import { adminApi } from "../api";
 
 const { Title } = Typography;
@@ -53,6 +56,13 @@ const UserList: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [syncingUserId, setSyncingUserId] = useState<number | null>(null);
   const [form] = Form.useForm();
+
+  // Recharge modal state
+  const [rechargeVisible, setRechargeVisible] = useState(false);
+  const [rechargingUserId, setRechargingUserId] = useState<number | null>(null);
+  const [recharging, setRecharging] = useState(false);
+  const [rechargeForm] = Form.useForm();
+  const [rechargeAmount, setRechargeAmount] = useState<number>(0);
 
   useEffect(() => {
     loadUsers();
@@ -212,6 +222,56 @@ const UserList: React.FC = () => {
     }
   };
 
+  const openRechargeModal = (record: User) => {
+    setRechargingUserId(record.id);
+    setRechargeAmount(0);
+    rechargeForm.resetFields();
+    setRechargeVisible(true);
+  };
+
+  const handleRecharge = async (values: any) => {
+    if (!rechargingUserId) return;
+    setRecharging(true);
+    try {
+      // 1 美元 = 1000 积分
+      const points = values.amount * 1000;
+      const response = await adminApi.adminRecharge(rechargingUserId, {
+        points,
+        reason: values.reason,
+        payment_reference: values.payment_reference,
+      });
+      if ((response as any).success) {
+        const data = (response as any).data;
+        Modal.success({
+          title: "充值成功",
+          content: (
+            <div>
+              <p>充值金额：${values.amount.toFixed(2)}</p>
+              <p>充值积分：{data.points?.toLocaleString()}</p>
+              <p>充值后余额：{data.newBalance?.toLocaleString()} 积分</p>
+              <p>sudorouter 额度已同步更新</p>
+            </div>
+          ),
+        });
+        setRechargeVisible(false);
+        setRechargingUserId(null);
+        rechargeForm.resetFields();
+        loadUsers();
+      } else {
+        message.error((response as any).msg || "充值失败");
+      }
+    } catch (error: any) {
+      message.error(error.response?.data?.msg || "充值失败");
+    } finally {
+      setRecharging(false);
+    }
+  };
+
+  // 快捷金额（美元）- 与充值套餐一致
+  const quickAmounts = [1, 5, 10, 20, 50];
+  // 汇率
+  const EXCHANGE_RATE = 7.3;
+
   const columns = [
     {
       title: "手机号",
@@ -295,7 +355,7 @@ const UserList: React.FC = () => {
     {
       title: "操作",
       key: "action",
-      width: 180,
+      width: 220,
       render: (_: any, record: User) => (
         <Space size="small">
           <Button
@@ -306,6 +366,17 @@ const UserList: React.FC = () => {
           >
             编辑
           </Button>
+          {record.status === 1 && (
+            <Button
+              type="link"
+              size="small"
+              icon={<DollarOutlined />}
+              style={{ color: "#165DFF" }}
+              onClick={() => openRechargeModal(record)}
+            >
+              充值
+            </Button>
+          )}
           {record.status === 2 ? (
             <Button
               type="link"
@@ -433,6 +504,133 @@ const UserList: React.FC = () => {
             </Form.Item>
           )}
         </Form>
+      </Modal>
+
+      {/* Recharge Modal */}
+      <Modal
+        title={`后台充值 - ${users.find(u => u.id === rechargingUserId)?.nickname || users.find(u => u.id === rechargingUserId)?.phone}`}
+        open={rechargeVisible}
+        onOk={() => rechargeForm.submit()}
+        onCancel={() => {
+          setRechargeVisible(false);
+          setRechargingUserId(null);
+          rechargeForm.resetFields();
+        }}
+        okText="确认充值"
+        cancelText="取消"
+        confirmLoading={recharging}
+        width={500}
+      >
+        {rechargingUserId && (
+          <>
+            <div style={{ marginBottom: 16, color: "#86909c" }}>
+              当前余额：{(() => {
+                const user = users.find(u => u.id === rechargingUserId);
+                return user ? Math.round((user.quota || 0) * 0.002).toLocaleString() : 0;
+              })()} 积分
+            </div>
+
+            <Form
+              form={rechargeForm}
+              layout="vertical"
+              onFinish={handleRecharge}
+              onValuesChange={(changedValues) => {
+                if (changedValues.amount) {
+                  setRechargeAmount(changedValues.amount);
+                }
+              }}
+            >
+              <Form.Item
+                label="充值金额 (美元)"
+                name="amount"
+                rules={[{ required: true, message: "请输入充值金额" }]}
+              >
+                <InputNumber
+                  placeholder="请输入充值金额（美元）"
+                  min={1}
+                  precision={2}
+                  style={{ width: "100%" }}
+                  addonBefore="$"
+                />
+              </Form.Item>
+
+              <div style={{ marginBottom: 16 }}>
+                <span style={{ color: "#86909c", fontSize: 13 }}>快捷金额：</span>
+                <Space size="small" style={{ marginLeft: 8 }}>
+                  {quickAmounts.map((amount) => (
+                    <Button
+                      key={amount}
+                      size="small"
+                      onClick={() => {
+                        rechargeForm.setFieldsValue({ amount });
+                        setRechargeAmount(amount);
+                      }}
+                    >
+                      ${amount}
+                    </Button>
+                  ))}
+                </Space>
+              </div>
+
+              {rechargeAmount > 0 && (
+                <div style={{ marginBottom: 16, padding: 12, background: "#f7f8fa", borderRadius: 8 }}>
+                  <div style={{ color: "#86909c", fontSize: 13 }}>
+                    充值金额：${rechargeAmount.toFixed(2)} = ¥{(rechargeAmount * EXCHANGE_RATE).toFixed(2)}
+                  </div>
+                  <div style={{ color: "#86909c", fontSize: 13, marginTop: 4 }}>
+                    充值积分：{(() => {
+                      const user = users.find(u => u.id === rechargingUserId);
+                      const currentPoints = user ? Math.round((user.quota || 0) * 0.002) : 0;
+                      const addedPoints = rechargeAmount * 1000; // $1 = 1000 points
+                      return `${currentPoints.toLocaleString()} + ${addedPoints.toLocaleString()} = ${(currentPoints + addedPoints).toLocaleString()} 积分`;
+                    })()}
+                  </div>
+                  <div style={{ color: "#86909c", fontSize: 13, marginTop: 4 }}>
+                    充值后额度：{(() => {
+                      const user = users.find(u => u.id === rechargingUserId);
+                      const currentQuota = user?.quota || 0;
+                      const addedQuota = rechargeAmount * 1000 * 500; // $1 = 1000 points, 1 point = 500 quota
+                      return `${currentQuota.toLocaleString()} + ${addedQuota.toLocaleString()} = ${(currentQuota + addedQuota).toLocaleString()}`;
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              <Form.Item
+                label="充值原因"
+                name="reason"
+                rules={[{ required: true, message: "请选择或输入充值原因" }]}
+              >
+                <Input placeholder="请选择或输入充值原因" />
+              </Form.Item>
+
+              <div style={{ marginBottom: 16 }}>
+                <Space size="small">
+                  {["线下支付", "活动赠送", "补偿充值", "其他"].map((reason) => (
+                    <Button
+                      key={reason}
+                      size="small"
+                      onClick={() => rechargeForm.setFieldsValue({ reason })}
+                    >
+                      {reason}
+                    </Button>
+                  ))}
+                </Space>
+              </div>
+
+              <Form.Item label="支付参考号（可选）" name="payment_reference">
+                <Input placeholder="如：微信转账单号、支付宝交易号等" />
+              </Form.Item>
+            </Form>
+
+            <Alert
+              type="warning"
+              showIcon
+              message="充值将同步更新 sudorouter 额度"
+              style={{ marginTop: 16 }}
+            />
+          </>
+        )}
       </Modal>
     </div>
   );

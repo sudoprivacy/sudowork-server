@@ -126,4 +126,39 @@ export const adminApi = {
     page?: number;
     page_size?: number;
   }) => api.get("/v1/admin/logs", { params }),
+
+  // Recharge APIs
+  getRechargeStats: () =>
+    api.get("/v1/admin/recharge/stats"),
+
+  getRechargeOrders: (params?: {
+    order_no?: string;
+    user_phone?: string;
+    status?: string;
+    start_date?: string;
+    end_date?: string;
+    page?: number;
+    page_size?: number;
+  }) => api.get("/v1/admin/recharge/orders", { params }),
+
+  getRechargeOrderDetail: (orderNo: string) =>
+    api.get(`/v1/admin/recharge/orders/${orderNo}`),
+
+  retryRechargeOrder: (orderNo: string) =>
+    api.post(`/v1/admin/recharge/orders/${orderNo}/retry`),
+
+  // Admin Recharge (后台给用户充值)
+  adminRecharge: (userId: number, data: {
+    points: number;
+    reason: string;
+    payment_reference?: string;
+  }) => api.post(`/v1/admin/users/${userId}/recharge`, data),
+
+  // Sync user quota
+  syncUserQuotaNew: (userId: number) =>
+    api.post(`/v1/admin/users/${userId}/sync-quota`),
+
+  // Get user recharge records
+  getUserRecharges: (userId: number, params?: { page?: number; page_size?: number }) =>
+    api.get(`/v1/admin/users/${userId}/recharges`, { params }),
 };

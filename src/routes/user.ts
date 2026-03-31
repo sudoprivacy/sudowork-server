@@ -28,7 +28,12 @@ userRoutes.get("/profile", async (c) => {
   const usedQuota = user.used_quota || 0;
   const remainingPoints = sudorouterService.quotaToPoints(quota);
   const usedPoints = sudorouterService.quotaToPoints(usedQuota);
-  const bonusPoints = sudorouterService.getInitialPoints();
+
+  // 从 ledger 表查询实际获得的赠送积分（而非动态计算）
+  const bonusResult = db
+    .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM ledger WHERE user_id = ? AND type = 'BONUS'")
+    .get(user.id) as any;
+  const bonusPoints = bonusResult?.total || 0;
 
   return c.json({
     success: true,
@@ -67,7 +72,12 @@ userRoutes.get("/dashboard", async (c) => {
   let totalPoints = 0;
   let usedPoints = 0;
   let remainingPoints = 0;
-  const bonusPoints = sudorouterService.getInitialPoints();
+
+  // 从 ledger 表查询实际获得的赠送积分
+  const bonusResult = db
+    .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM ledger WHERE user_id = ? AND type = 'BONUS'")
+    .get(user.id) as any;
+  const bonusPoints = bonusResult?.total || 0;
 
   // 今日使用统计
   let todayTokens = 0;
@@ -161,7 +171,7 @@ userRoutes.get("/dashboard", async (c) => {
           todayRequests += 1;
           todayTokens +=
             (log.prompt_tokens || 0) + (log.completion_tokens || 0);
-          todayCostPoints += (log.quota || 0) * 0.002;
+          todayCostPoints += sudorouterService.quotaToPoints(log.quota || 0);
         }
       }
 
@@ -267,7 +277,7 @@ userRoutes.get("/ledger", async (c) => {
       const formattedLogs = logs.data.data.map((log: any) => ({
         id: log.id,
         user_id: user.id,
-        amount: -((log.quota || 0) * 0.002),
+        amount: -sudorouterService.quotaToPoints(log.quota || 0),
         type: "CONSUME",
         memo: `${log.model_name || "unknown"} (${log.prompt_tokens || 0}+${log.completion_tokens || 0} tokens)`,
         timestamp: new Date(log.created_at * 1000).toISOString(),
@@ -310,7 +320,12 @@ userRoutes.get("/stats", async (c) => {
   let totalPoints = 0;
   let usedPoints = 0;
   let remainingPoints = 0;
-  const bonusPoints = sudorouterService.getInitialPoints();
+
+  // 从 ledger 表查询实际获得的赠送积分
+  const bonusResult = db
+    .prepare("SELECT COALESCE(SUM(amount), 0) as total FROM ledger WHERE user_id = ? AND type = 'BONUS'")
+    .get(user.id) as any;
+  const bonusPoints = bonusResult?.total || 0;
 
   // 今日使用统计
   let todayTokens = 0;
@@ -411,7 +426,7 @@ userRoutes.get("/stats", async (c) => {
         if (log.type !== "manage" && log.model_name) {
           todayRequests += 1;
           todayTokens += (log.prompt_tokens || 0) + (log.completion_tokens || 0);
-          todayCostPoints += (log.quota || 0) * 0.002;
+          todayCostPoints += sudorouterService.quotaToPoints(log.quota || 0);
         }
       }
     }

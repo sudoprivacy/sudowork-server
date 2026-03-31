@@ -15,6 +15,7 @@ import {
   LogoutOutlined,
   GiftOutlined,
   FileTextOutlined,
+  PayCircleOutlined,
 } from "@ant-design/icons";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -22,6 +23,7 @@ import EnterpriseList from "./pages/EnterpriseList";
 import UserList from "./pages/UserList";
 import InvitationCodeList from "./pages/InvitationCodeList";
 import OperationLogs from "./pages/OperationLogs";
+import RechargeList from "./pages/RechargeList";
 import "antd/dist/reset.css";
 import "./components/Layout.css";
 
@@ -38,7 +40,14 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 const MainLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem("admin_user") || "{}");
+  const userStr = localStorage.getItem("admin_user");
+  let user: any = {};
+  try {
+    const parsed = userStr ? JSON.parse(userStr) : null;
+    user = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    user = {};
+  }
 
   const handleLogout = () => {
     localStorage.removeItem("admin_token");
@@ -51,6 +60,7 @@ const MainLayout = () => {
     { key: "/", icon: <DashboardOutlined />, label: "仪表盘" },
     { key: "/enterprises", icon: <AppstoreOutlined />, label: "企业管理" },
     { key: "/users", icon: <UserOutlined />, label: "用户管理" },
+    { key: "/recharge", icon: <PayCircleOutlined />, label: "充值管理" },
     { key: "/invitation-codes", icon: <GiftOutlined />, label: "邀请码管理" },
     { key: "/logs", icon: <FileTextOutlined />, label: "操作日志" },
   ];
@@ -123,6 +133,7 @@ const App = () => {
           <Route index element={<Dashboard />} />
           <Route path="enterprises" element={<EnterpriseList />} />
           <Route path="users" element={<UserList />} />
+          <Route path="recharge" element={<RechargeList />} />
           <Route path="invitation-codes" element={<InvitationCodeList />} />
           <Route path="logs" element={<OperationLogs />} />
         </Route>

@@ -17,6 +17,7 @@ import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
 import { userRoutes } from "./routes/user.js";
 import { miscRoutes } from "./routes/misc.js";
+import { rechargeRoutes } from "./routes/recharge.js";
 
 // Initialize database
 initSchema();
@@ -47,6 +48,7 @@ app.get("/", async (c) => {
 app.route("/api/v1/admin", adminRoutes);
 app.route("/api/v1/auth", authRoutes);
 app.route("/api/v1/user", userRoutes);
+app.route("/api/v1/recharge", rechargeRoutes);
 app.route("/api/v1", miscRoutes);
 
 // SPA fallback - serve index.html for all other routes (must be after all API routes)

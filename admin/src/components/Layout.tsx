@@ -15,7 +15,14 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const user = JSON.parse(localStorage.getItem("admin_user") || "{}");
+  const userStr = localStorage.getItem("admin_user");
+  let user: any = {};
+  try {
+    const parsed = userStr ? JSON.parse(userStr) : null;
+    user = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    user = {};
+  }
 
   const handleLogout = () => {
     localStorage.removeItem("admin_token");

@@ -83,11 +83,57 @@ export function initLogCleanup(): void {
 }
 
 /**
+ * Initialize order cleanup job (runs every minute)
+ * Cancels expired recharge orders
+ */
+export function initOrderCleanup(): void {
+  const cleanExpiredOrders = () => {
+    const now = new Date().toISOString();
+    const result = db.run(
+      "UPDATE recharge_orders SET status = 5 WHERE status IN (0, 1) AND expired_at < ?",
+      [now]
+    );
+    if (result.changes > 0) {
+      console.log(`[订单清理] 已取消 ${result.changes} 个过期订单`);
+    }
+  };
+
+  // Run cleanup every minute
+  setInterval(cleanExpiredOrders, 60 * 1000);
+  // Run once on startup
+  cleanExpiredOrders();
+}
+
+/**
  * Initialize all database components
  */
 export async function initDatabase(): Promise<void> {
   cleanupData();
+
+  // Migration: Add amount_usd and exchange_rate columns to recharge_orders
+  try {
+    const columns = db.prepare("PRAGMA table_info(recharge_orders)").all() as any[];
+    const columnNames = columns.map(c => c.name);
+
+    if (!columnNames.includes('amount_usd')) {
+      console.log("[Migration] Adding amount_usd column to recharge_orders...");
+      db.run("ALTER TABLE recharge_orders ADD COLUMN amount_usd REAL");
+    }
+
+    if (!columnNames.includes('exchange_rate')) {
+      console.log("[Migration] Adding exchange_rate column to recharge_orders...");
+      db.run("ALTER TABLE recharge_orders ADD COLUMN exchange_rate REAL DEFAULT 7.3");
+    }
+
+    // Migrate existing data: if amount_usd is null, set it from amount_yuan (assuming USD=amount_yuan/7.3)
+    db.run("UPDATE recharge_orders SET amount_usd = ROUND(amount_yuan / 7.3, 2) WHERE amount_usd IS NULL");
+    db.run("UPDATE recharge_orders SET exchange_rate = 7.3 WHERE exchange_rate IS NULL");
+  } catch (e) {
+    // Table might not exist yet, ignore
+  }
+
   initEnterprise();
   await initSuperAdmin();
   initLogCleanup();
+  initOrderCleanup();
 }
