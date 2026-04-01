@@ -119,12 +119,13 @@ class SudorouterService {
   }
 
   // 创建用户（返回详细结果用于日志）
-  async createUserWithLog(phone: string): Promise<ApiCallResult<SudorouterUser>> {
+  async createUserWithLog(phone: string, nickname?: string): Promise<ApiCallResult<SudorouterUser>> {
     const url = `${this.config.baseUrl}/api/user/`;
+    const displayName = nickname || phone; // 如果昵称为空则使用手机号
     const body = {
       username: phone,
       password: phone,
-      display_name: phone,
+      display_name: displayName,
       role: 1,
       utm_source: "sudowork",
     };
@@ -178,8 +179,8 @@ class SudorouterService {
   }
 
   // 简化版创建用户（兼容旧代码）
-  async createUser(phone: string): Promise<SudorouterUser | null> {
-    const result = await this.createUserWithLog(phone);
+  async createUser(phone: string, nickname?: string): Promise<SudorouterUser | null> {
+    const result = await this.createUserWithLog(phone, nickname);
     return result.data;
   }
 

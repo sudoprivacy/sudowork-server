@@ -114,6 +114,7 @@ const RechargeList: React.FC = () => {
   const [refundLoading, setRefundLoading] = useState(false);
   const [refundCalc, setRefundCalc] = useState<any>(null);
   const [refundReason, setRefundReason] = useState("");
+  const [syncLoading, setSyncLoading] = useState(false);
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -296,6 +297,49 @@ const RechargeList: React.FC = () => {
     }
   };
 
+  const handleSyncOrders = async () => {
+    Modal.confirm({
+      title: "同步待处理订单",
+      content: "确定要同步所有待处理订单的支付状态吗？",
+      okText: "确认",
+      cancelText: "取消",
+      onOk: async () => {
+        setSyncLoading(true);
+        try {
+          const response = await adminApi.syncPendingOrders();
+          if ((response as any).success) {
+            const data = (response as any).data;
+            message.success(`同步完成: 总计${data.total}笔, 成功${data.success}笔, 失败${data.failed}笔`);
+            loadOrders();
+            loadStats();
+          } else {
+            message.error((response as any).msg || "同步失败");
+          }
+        } catch (error: any) {
+          message.error(error.response?.data?.msg || "同步失败");
+        } finally {
+          setSyncLoading(false);
+        }
+      },
+    });
+  };
+
+  const handleSyncOrder = async (orderNo: string) => {
+    try {
+      const response = await adminApi.syncOrderStatus(orderNo);
+      if ((response as any).success) {
+        message.success("订单状态已更新");
+        setDetailVisible(false);
+        loadOrders();
+        loadStats();
+      } else {
+        message.error((response as any).msg || "同步失败");
+      }
+    } catch (error: any) {
+      message.error(error.response?.data?.msg || "同步失败");
+    }
+  };
+
   const columns = [
     {
       title: "订单号",
@@ -401,13 +445,14 @@ const RechargeList: React.FC = () => {
               重试
             </Button>
           )}
-          {(record.status === 0 || record.status === 1) && (
+          {record.status === 1 && (
             <Button
               type="link"
               size="small"
-              onClick={() => handleSimulatePayment(record.order_no)}
+              icon={<SyncOutlined />}
+              onClick={() => handleSyncOrder(record.order_no)}
             >
-              模拟支付
+              同步
             </Button>
           )}
           {record.status === 2 && (
@@ -511,7 +556,22 @@ const RechargeList: React.FC = () => {
       </Card>
 
       {/* 订单表格 */}
-      <Card>
+      <Card
+        extra={
+          <Space>
+            <Button
+              icon={<SyncOutlined />}
+              loading={syncLoading}
+              onClick={handleSyncOrders}
+            >
+              同步待处理订单
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { loadOrders(); loadStats(); }}>
+              刷新
+            </Button>
+          </Space>
+        }
+      >
         <Table
           columns={columns}
           dataSource={orders}
@@ -549,19 +609,6 @@ const RechargeList: React.FC = () => {
                   onClick={() => handleRetry(currentOrder.order_no)}
                 >
                   重试充值
-                </Button>,
-              ]
-            : (currentOrder?.status === 0 || currentOrder?.status === 1)
-            ? [
-                <Button key="close" onClick={() => setDetailVisible(false)}>
-                  关闭
-                </Button>,
-                <Button
-                  key="simulate"
-                  type="primary"
-                  onClick={() => handleSimulatePayment(currentOrder.order_no)}
-                >
-                  模拟支付成功
                 </Button>,
               ]
             : [

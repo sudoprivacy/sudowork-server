@@ -413,7 +413,7 @@ authRoutes.post(
     }
 
     // 调用 sudorouter 创建用户
-    const createUserResult = await sudorouterService.createUserWithLog(phone);
+    const createUserResult = await sudorouterService.createUserWithLog(phone, nickname);
     if (!createUserResult.success || !createUserResult.data) {
       // 记录失败日志
       db.run(

@@ -4,6 +4,8 @@
 
 import { db } from "./index.js";
 import { hashPassword } from "../utils/password.js";
+import { rechargeService } from "../services/RechargeService.js";
+import { fuiouPayService } from "../services/FuiouPayService.js";
 
 /**
  * Data cleanup - currently disabled
@@ -105,6 +107,32 @@ export function initOrderCleanup(): void {
 }
 
 /**
+ * Initialize order sync job (runs every 5 minutes)
+ * Syncs pending orders from Fuiou payment status
+ */
+export function initOrderSync(): void {
+  const syncPendingOrders = async () => {
+    try {
+      // Initialize Fuiou service
+      await fuiouPayService.initialize();
+
+      // Sync all pending orders
+      const result = await rechargeService.syncAllPendingOrders();
+      if (result.total > 0) {
+        console.log(`[订单同步] 同步完成: 总计=${result.total}, 成功=${result.success}, 失败=${result.failed}`);
+      }
+    } catch (e) {
+      console.error("[订单同步] 定时任务执行失败:", e);
+    }
+  };
+
+  // Run sync every 5 minutes
+  setInterval(syncPendingOrders, 5 * 60 * 1000);
+  // Also run on startup after 1 minute delay
+  setTimeout(syncPendingOrders, 60 * 1000);
+}
+
+/**
  * Initialize all database components
  */
 export async function initDatabase(): Promise<void> {
@@ -136,4 +164,5 @@ export async function initDatabase(): Promise<void> {
   await initSuperAdmin();
   initLogCleanup();
   initOrderCleanup();
+  initOrderSync();
 }

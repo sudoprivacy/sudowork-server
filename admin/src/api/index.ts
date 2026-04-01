@@ -159,6 +159,13 @@ export const adminApi = {
   getRechargeRecords: (params?: { page?: number; pageSize?: number }) =>
     api.get("/v1/admin/recharge-records", { params }),
 
+  // Sync pending orders
+  syncPendingOrders: () =>
+    api.post("/v1/admin/recharge/sync"),
+
+  syncOrderStatus: (orderNo: string) =>
+    api.post(`/v1/admin/recharge/orders/${orderNo}/sync`),
+
   // Admin Recharge (后台给用户充值)
   adminRecharge: (userId: number, data: {
     points: number;

@@ -938,6 +938,129 @@ class RechargeService {
       return { success: false, error: "退款处理失败" };
     }
   }
+
+  /**
+   * Process recharge from callback or sync
+   * Used by order sync job to process successful payments
+   */
+  async processRechargeFromCallback(order: any): Promise<CallbackResult> {
+    db.run("BEGIN EXCLUSIVE TRANSACTION");
+    try {
+      const lockedOrder = db
+        .prepare("SELECT * FROM recharge_orders WHERE id = ?")
+        .get(order.id) as any;
+
+      if (lockedOrder.status === 2) {
+        db.run("ROLLBACK");
+        return { success: true, order_no: order.order_no };
+      }
+
+      // Create a minimal payload for processRecharge
+      const payload: CallbackPayload = {
+        mchnt_cd: fuiouPayService.getMerchantCode(),
+        message: "SYNC",
+        resp_code: "0000",
+        resp_desc: "定时同步",
+      };
+
+      const result = await this.processRecharge(lockedOrder, payload);
+
+      if (result.success) {
+        db.run("COMMIT");
+      } else {
+        db.run("ROLLBACK");
+      }
+
+      return result;
+    } catch (e) {
+      db.run("ROLLBACK");
+      throw e;
+    }
+  }
+
+  /**
+   * Sync single order status from Fuiou
+   */
+  async syncOrderStatus(orderNo: string): Promise<{ success: boolean; error?: string; status?: number }> {
+    const order = db
+      .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
+      .get(orderNo) as any;
+
+    if (!order) {
+      return { success: false, error: "订单不存在" };
+    }
+
+    if (order.status === 2) {
+      return { success: true, status: 2 };
+    }
+
+    if (order.status !== 1) {
+      return { success: true, status: order.status };
+    }
+
+    try {
+      await fuiouPayService.initialize();
+      const result = await fuiouPayService.queryOrder(order.order_no, order.order_date);
+
+      if (!result.success) {
+        return { success: false, error: result.error || "查询失败" };
+      }
+
+      if (result.data?.order_st === "1") {
+        // Payment success
+        const rechargeResult = await this.processRechargeFromCallback(order);
+        return { success: rechargeResult.success, error: rechargeResult.error, status: rechargeResult.success ? 2 : 1 };
+      } else if (result.data?.order_st === "2") {
+        // Payment failed
+        db.run("UPDATE recharge_orders SET status = 3 WHERE id = ?", [order.id]);
+        return { success: true, status: 3 };
+      }
+
+      return { success: true, status: 1 };
+    } catch (e: any) {
+      return { success: false, error: e.message || "同步失败" };
+    }
+  }
+
+  /**
+   * Sync all pending orders
+   */
+  async syncAllPendingOrders(): Promise<{ total: number; success: number; failed: number }> {
+    const pendingOrders = db
+      .prepare(
+        `SELECT * FROM recharge_orders
+         WHERE status = 1
+         AND expired_at > datetime('now')
+         AND created_at > datetime('now', '-30 minutes')`
+      )
+      .all() as any[];
+
+    const result = { total: pendingOrders.length, success: 0, failed: 0 };
+
+    if (pendingOrders.length === 0) {
+      return result;
+    }
+
+    console.log(`[订单同步] 发现 ${pendingOrders.length} 个待处理订单`);
+
+    for (const order of pendingOrders) {
+      try {
+        const syncResult = await this.syncOrderStatus(order.order_no);
+        if (syncResult.success) {
+          result.success++;
+        } else {
+          result.failed++;
+          console.error(`[订单同步] 订单 ${order.order_no} 同步失败:`, syncResult.error);
+        }
+      } catch (e) {
+        result.failed++;
+        console.error(`[订单同步] 订单 ${order.order_no} 同步异常:`, e);
+      }
+    }
+
+    console.log(`[订单同步] 完成: 总计=${result.total}, 成功=${result.success}, 失败=${result.failed}`);
+    return result;
+  }
 }
 
 // Export singleton

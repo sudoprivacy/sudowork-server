@@ -14,6 +14,7 @@
 - ✅ **管理后台**: Web 管理界面，支持企业/用户/邀请码管理
 - ✅ **充值系统**: 富友支付集成，支持支付宝/微信扫码充值，美元计价
 - ✅ **退款功能**: 按积分使用比例计算退款金额，富友退款接口对接
+- ✅ **订单同步**: 回调失败时自动/手动同步订单状态，确保积分到账
 
 ## 🔐 安全特性
 
@@ -137,7 +138,7 @@ bun run src/index.ts
 - 📊 仪表盘 - 查看统计数据
 - 🏢 企业列表 - 添加/删除企业
 - 👥 用户管理 - 添加/修改/删除用户，设置积分，后台充值
-- 📋 订单管理 - 充值订单列表，统计报表，失败订单重试，订单退款
+- 📋 订单管理 - 充值订单列表，统计报表，失败订单重试，订单退款，订单同步
 - 💰 充值记录 - 客户端充值 + 后台充值综合记录
 - 🎫 邀请码 - 批量生成/查看邀请码
 - 📝 操作日志 - 查看系统操作记录
@@ -391,11 +392,25 @@ bun run src/index.ts
 - `GET /api/v1/admin/recharge/orders` - 充值订单列表
 - `GET /api/v1/admin/recharge/orders/:orderNo` - 订单详情
 - `POST /api/v1/admin/recharge/orders/:orderNo/retry` - 重试失败订单
+- `POST /api/v1/admin/recharge/orders/:orderNo/sync` - 同步单个订单状态
+- `POST /api/v1/admin/recharge/sync` - 同步所有待处理订单
 - `GET /api/v1/admin/recharge/refund-calc/:orderNo` - 计算退款金额
 - `POST /api/v1/admin/recharge/orders/:orderNo/refund` - 执行退款
 - `GET /api/v1/admin/recharge-records` - 充值记录列表（客户端+后台）
 
-#### 13. 退款规则
+#### 13. 订单同步机制
+
+当富友支付回调失败时，系统会自动同步订单状态：
+
+**自动同步**：服务启动后，每 5 分钟自动查询富友订单状态，同步"支付中"订单的真实状态。
+
+**手动同步**：
+- 后台订单管理页面提供"同步待处理订单"按钮
+- 单个订单可点击"同步"按钮查询最新状态
+
+**同步范围**：只同步 30 分钟内创建的"支付中"订单。
+
+#### 14. 退款规则
 
 退款金额根据用户剩余积分计算：
 - 剩余积分 ≥ 订单积分：全额退款，扣除全部订单积分
@@ -427,7 +442,7 @@ bun run src/index.ts
 
 需要 JWT 认证：`Authorization: Bearer <token>`
 
-#### 14. 获取充值套餐
+#### 15. 获取充值套餐
 
 **GET** `/api/v1/recharge/packages`
 
@@ -445,7 +460,7 @@ bun run src/index.ts
 }
 ```
 
-#### 15. 创建充值订单
+#### 16. 创建充值订单
 
 **POST** `/api/v1/recharge/create`
 
@@ -467,7 +482,7 @@ bun run src/index.ts
 }
 ```
 
-#### 16. 发起支付
+#### 17. 发起支付
 
 **POST** `/api/v1/recharge/pay`
 
@@ -486,15 +501,15 @@ bun run src/index.ts
 }
 ```
 
-#### 17. 查询订单状态
+#### 18. 查询订单状态
 
 **GET** `/api/v1/recharge/query/:orderNo`
 
-#### 18. 充值记录列表
+#### 19. 充值记录列表
 
 **GET** `/api/v1/recharge/list`
 
-#### 19. 取消订单
+#### 20. 取消订单
 
 **POST** `/api/v1/recharge/cancel/:orderNo`
 
