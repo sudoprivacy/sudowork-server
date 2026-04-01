@@ -13,6 +13,7 @@
 - ✅ **权限控制**: JWT 认证，角色管理（SUPER_ADMIN/ENTERPRISE_ADMIN/USER）
 - ✅ **管理后台**: Web 管理界面，支持企业/用户/邀请码管理
 - ✅ **充值系统**: 富友支付集成，支持支付宝/微信扫码充值，美元计价
+- ✅ **退款功能**: 按积分使用比例计算退款金额，富友退款接口对接
 
 ## 🔐 安全特性
 
@@ -20,7 +21,7 @@
 |------|------|
 | **Rate Limiting** | 登录/验证码接口 15 分钟最多 5-10 次/IP |
 | **余额检查** | 消费前检查余额，防止负数 |
-| **JWT 认证** | 24 小时过期，支持多角色权限 |
+| **JWT 认证** | 支持多角色权限 |
 | **密码加密** | bcrypt 加密存储 |
 | **敏感信息保护** | Token/验证码不打印日志 |
 | **支付安全** | RSA 加密验签、商户号验证、金额验证、并发锁 |
@@ -136,7 +137,8 @@ bun run src/index.ts
 - 📊 仪表盘 - 查看统计数据
 - 🏢 企业列表 - 添加/删除企业
 - 👥 用户管理 - 添加/修改/删除用户，设置积分，后台充值
-- 💰 充值管理 - 充值订单列表，统计报表，失败订单重试
+- 📋 订单管理 - 充值订单列表，统计报表，失败订单重试，订单退款
+- 💰 充值记录 - 客户端充值 + 后台充值综合记录
 - 🎫 邀请码 - 批量生成/查看邀请码
 - 📝 操作日志 - 查看系统操作记录
 
@@ -383,11 +385,41 @@ bun run src/index.ts
 - `POST /api/v1/admin/users/:id/sync-quota` - 同步用户额度
 - `POST /api/v1/admin/users/:id/manage` - 启用/禁用用户
 
-#### 12. 充值管理
+#### 12. 订单管理
 
 - `GET /api/v1/admin/recharge/stats` - 充值统计
 - `GET /api/v1/admin/recharge/orders` - 充值订单列表
-- `POST /api/v1/admin/recharge/orders/:id/retry` - 重试失败订单
+- `GET /api/v1/admin/recharge/orders/:orderNo` - 订单详情
+- `POST /api/v1/admin/recharge/orders/:orderNo/retry` - 重试失败订单
+- `GET /api/v1/admin/recharge/refund-calc/:orderNo` - 计算退款金额
+- `POST /api/v1/admin/recharge/orders/:orderNo/refund` - 执行退款
+- `GET /api/v1/admin/recharge-records` - 充值记录列表（客户端+后台）
+
+#### 13. 退款规则
+
+退款金额根据用户剩余积分计算：
+- 剩余积分 ≥ 订单积分：全额退款，扣除全部订单积分
+- 剩余积分 < 订单积分：按使用比例退款，扣除剩余积分
+
+```json
+// GET /api/v1/admin/recharge/refund-calc/:orderNo
+{
+  "success": true,
+  "data": {
+    "orderPoints": 11000,      // 订单积分（购买+赠送）
+    "userBalance": 5000,       // 用户剩余积分
+    "usedPoints": 6000,        // 已使用积分
+    "originalAmount": 73.0,    // 订单原金额（元）
+    "refundAmount": 43.8,      // 退款金额（元）
+    "deductPoints": 5000       // 扣除积分
+  }
+}
+```
+
+退款后：
+- 订单状态变为 `4`（已退款）
+- 用户积分和额度同步扣减
+- 退款记录写入 `refund_records` 表
 
 ---
 
@@ -395,7 +427,7 @@ bun run src/index.ts
 
 需要 JWT 认证：`Authorization: Bearer <token>`
 
-#### 13. 获取充值套餐
+#### 14. 获取充值套餐
 
 **GET** `/api/v1/recharge/packages`
 
@@ -413,7 +445,7 @@ bun run src/index.ts
 }
 ```
 
-#### 14. 创建充值订单
+#### 15. 创建充值订单
 
 **POST** `/api/v1/recharge/create`
 
@@ -435,7 +467,7 @@ bun run src/index.ts
 }
 ```
 
-#### 15. 发起支付
+#### 16. 发起支付
 
 **POST** `/api/v1/recharge/pay`
 
@@ -454,15 +486,15 @@ bun run src/index.ts
 }
 ```
 
-#### 16. 查询订单状态
+#### 17. 查询订单状态
 
 **GET** `/api/v1/recharge/query/:orderNo`
 
-#### 17. 充值记录列表
+#### 18. 充值记录列表
 
 **GET** `/api/v1/recharge/list`
 
-#### 18. 取消订单
+#### 19. 取消订单
 
 **POST** `/api/v1/recharge/cancel/:orderNo`
 
@@ -613,6 +645,26 @@ sudowork-server/
 | `points` | INTEGER | 充值积分 |
 | `reason` | TEXT | 充值原因 |
 | `payment_reference` | TEXT | 支付参考号 |
+
+#### 退款记录表 (refund_records)
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | INTEGER | 主键 |
+| `refund_no` | TEXT | 退款单号（唯一） |
+| `order_id` | INTEGER | 原订单 ID |
+| `order_no` | TEXT | 原订单号 |
+| `user_id` | INTEGER | 用户 ID |
+| `refund_amount_yuan` | REAL | 退款金额（元） |
+| `refund_quota` | INTEGER | 退款额度 |
+| `refund_points` | INTEGER | 扣除积分 |
+| `refund_reason` | TEXT | 退款原因 |
+| `refund_type` | TEXT | 退款类型 |
+| `status` | INTEGER | 退款状态 |
+| `fuiou_refund_no` | TEXT | 富友退款流水号 |
+| `fuiou_response` | TEXT | 富友响应 |
+| `created_at` | DATETIME | 创建时间 |
+| `processed_at` | DATETIME | 处理时间 |
 
 #### 流水表 (ledger)
 

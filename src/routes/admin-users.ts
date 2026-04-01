@@ -1112,6 +1112,152 @@ adminUserRoutes.get(
   },
 );
 
+// GET /api/v1/admin/recharge/orders/:orderNo - Get order detail
+adminUserRoutes.get(
+  "/recharge/orders/:orderNo",
+  authMiddleware,
+  adminMiddleware,
+  async (c) => {
+    const orderNo = c.req.param("orderNo");
+    if (!orderNo) {
+      return c.json({ success: false, msg: "订单号不能为空" }, 400);
+    }
+
+    const order = db
+      .prepare(
+        `SELECT ro.*, u.phone as user_phone, u.nickname as user_nickname
+         FROM recharge_orders ro
+         LEFT JOIN users u ON ro.user_id = u.id
+         WHERE ro.order_no = ?`
+      )
+      .get(orderNo) as any;
+
+    if (!order) {
+      return c.json({ success: false, msg: "订单不存在" }, 404);
+    }
+
+    const statusText = ["待支付", "支付中", "支付成功", "支付失败", "已退款", "已取消"];
+
+    return c.json({
+      success: true,
+      data: {
+        order_no: order.order_no,
+        user_id: order.user_id,
+        user_phone: order.user_phone,
+        user_nickname: order.user_nickname,
+        amount_usd: order.amount_usd,
+        amount_cny: order.amount_yuan,
+        exchange_rate: order.exchange_rate,
+        points: order.points_amount,
+        bonus_points: order.bonus_points,
+        quota: order.quota_amount,
+        payment_method: order.payment_method,
+        status: order.status,
+        status_text: statusText[order.status] || "未知",
+        created_at: order.created_at,
+        callback_time: order.callback_time,
+        expired_at: order.expired_at,
+        remark: order.remark,
+        fuiou_order_info: order.fuiou_order_info,
+      },
+    });
+  },
+);
+
+// POST /api/v1/admin/recharge/simulate-payment/:orderNo - Simulate payment success (test mode only)
+adminUserRoutes.post(
+  "/recharge/simulate-payment/:orderNo",
+  authMiddleware,
+  adminMiddleware,
+  async (c) => {
+    const orderNo = c.req.param("orderNo");
+    if (!orderNo) {
+      return c.json({ success: false, msg: "订单号不能为空" }, 400);
+    }
+
+    const { rechargeService } = await import("../services/RechargeService.js");
+    const result = await rechargeService.simulatePaymentSuccess(orderNo);
+
+    if (!result.success) {
+      return c.json({ success: false, msg: result.error }, 400);
+    }
+
+    return c.json({
+      success: true,
+      msg: "模拟支付成功",
+      data: { order_no: result.order_no },
+    });
+  },
+);
+
+// POST /api/v1/admin/recharge/orders/:orderNo/refund - Refund order
+adminUserRoutes.post(
+  "/recharge/orders/:orderNo/refund",
+  authMiddleware,
+  adminMiddleware,
+  async (c) => {
+    const orderNo = c.req.param("orderNo");
+    if (!orderNo) {
+      return c.json({ success: false, msg: "订单号不能为空" }, 400);
+    }
+
+    const body = await c.req.json().catch(() => ({}));
+    const reason = body.reason || "用户申请退款";
+
+    const adminUser = (await getAuthUser(c)) as any;
+    const { rechargeService } = await import("../services/RechargeService.js");
+
+    const result = await rechargeService.refundOrder(orderNo, reason, adminUser.id);
+
+    if (!result.success) {
+      return c.json({ success: false, msg: result.error }, 400);
+    }
+
+    return c.json({
+      success: true,
+      msg: "退款成功",
+      data: {
+        refund_no: result.refund_no,
+        refund_amount: result.refund_amount,
+      },
+    });
+  },
+);
+
+// GET /api/v1/admin/recharge/refund-calc/:orderNo - Calculate refund amount
+adminUserRoutes.get(
+  "/recharge/refund-calc/:orderNo",
+  authMiddleware,
+  adminMiddleware,
+  async (c) => {
+    const orderNo = c.req.param("orderNo");
+    if (!orderNo) {
+      return c.json({ success: false, msg: "订单号不能为空" }, 400);
+    }
+
+    const { rechargeService } = await import("../services/RechargeService.js");
+    const calc = rechargeService.calculateRefund(orderNo);
+
+    if (!calc.success) {
+      return c.json({ success: false, msg: calc.error }, 400);
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        order_points: calc.orderPoints,
+        user_balance: calc.userBalance,
+        used_points: calc.usedPoints,
+        refund_amount: calc.refundAmount,
+        refund_amount_yuan: (calc.refundAmount / 100).toFixed(2),
+        deduct_points: calc.deductPoints,
+        original_amount: calc.originalAmount,
+        original_amount_yuan: (calc.originalAmount / 100).toFixed(2),
+      },
+    });
+  },
+);
+
 // GET /api/v1/admin/recharge/stats - Recharge statistics
 adminUserRoutes.get(
   "/recharge/stats",
@@ -1209,6 +1355,100 @@ adminUserRoutes.get(
           },
         },
         daily: dailyStats,
+      },
+    });
+  }
+);
+
+// GET /api/v1/admin/recharge-records - Get all recharge records (client + admin)
+adminUserRoutes.get(
+  "/recharge-records",
+  authMiddleware,
+  adminMiddleware,
+  async (c) => {
+    const page = parseInt(c.req.query("page") || "1");
+    const pageSize = parseInt(c.req.query("pageSize") || "20");
+    const offset = (page - 1) * pageSize;
+
+    // Client recharge records (from recharge_records via recharge_orders)
+    const clientRecords = db
+      .prepare(
+        `SELECT
+          rr.id,
+          'CLIENT' as type,
+          ro.order_no,
+          u.phone as user_phone,
+          u.nickname as user_nickname,
+          rr.balance_delta as points,
+          rr.quota_delta as quota,
+          ro.amount_yuan as amount_cny,
+          ro.payment_method,
+          ro.created_at,
+          rr.created_at as processed_at
+        FROM recharge_records rr
+        JOIN recharge_orders ro ON rr.order_id = ro.id
+        LEFT JOIN users u ON rr.user_id = u.id
+        WHERE ro.status = 2
+        ORDER BY rr.created_at DESC`
+      )
+      .all() as any[];
+
+    // Admin recharge records
+    const adminRecords = db
+      .prepare(
+        `SELECT
+          arr.id,
+          'ADMIN' as type,
+          NULL as order_no,
+          u.phone as user_phone,
+          u.nickname as user_nickname,
+          arr.points,
+          arr.quota,
+          NULL as amount_cny,
+          NULL as payment_method,
+          arr.created_at,
+          arr.created_at as processed_at,
+          a.nickname as admin_nickname,
+          arr.reason,
+          arr.payment_reference
+        FROM admin_recharge_records arr
+        LEFT JOIN users u ON arr.user_id = u.id
+        LEFT JOIN users a ON arr.admin_id = a.id
+        ORDER BY arr.created_at DESC`
+      )
+      .all() as any[];
+
+    // Combine and sort by date
+    const allRecords = [...clientRecords, ...adminRecords]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    // Paginate
+    const total = allRecords.length;
+    const list = allRecords.slice(offset, offset + pageSize);
+
+    // Format response
+    const formattedList = list.map((r) => ({
+      id: r.id,
+      type: r.type,
+      order_no: r.order_no,
+      user_phone: r.user_phone,
+      user_nickname: r.user_nickname,
+      points: r.points,
+      quota: r.quota,
+      amount_cny: r.amount_cny,
+      payment_method: r.payment_method,
+      admin_nickname: r.admin_nickname || null,
+      reason: r.reason || null,
+      created_at: r.created_at,
+    }));
+
+    return c.json({
+      success: true,
+      data: {
+        list: formattedList,
+        total,
+        page,
+        pageSize,
       },
     });
   }

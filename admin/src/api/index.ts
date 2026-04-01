@@ -147,6 +147,18 @@ export const adminApi = {
   retryRechargeOrder: (orderNo: string) =>
     api.post(`/v1/admin/recharge/orders/${orderNo}/retry`),
 
+  simulatePayment: (orderNo: string) =>
+    api.post(`/v1/admin/recharge/simulate-payment/${orderNo}`),
+
+  refundOrder: (orderNo: string, reason?: string) =>
+    api.post(`/v1/admin/recharge/orders/${orderNo}/refund`, { reason }),
+
+  getRefundCalc: (orderNo: string) =>
+    api.get(`/v1/admin/recharge/refund-calc/${orderNo}`),
+
+  getRechargeRecords: (params?: { page?: number; pageSize?: number }) =>
+    api.get("/v1/admin/recharge-records", { params }),
+
   // Admin Recharge (后台给用户充值)
   adminRecharge: (userId: number, data: {
     points: number;

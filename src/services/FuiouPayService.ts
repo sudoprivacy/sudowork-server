@@ -9,6 +9,9 @@ import iconv from "iconv-lite";
 // 默认 API 地址
 const DEFAULT_TEST_URL = "https://hlwnets-test.fuioupay.com";
 const DEFAULT_PROD_URL = "https://hlwnets.fuioupay.com";
+// 退款接口地址
+const DEFAULT_REFUND_TEST_URL = "https://refund-transfer-test.fuioupay.com";
+const DEFAULT_REFUND_PROD_URL = "https://refund-transfer.fuioupay.com";
 
 // 富友支付使用 GBK 编码
 const FUIOU_CHARSET = "GBK";
@@ -22,6 +25,8 @@ interface FuiouConfig {
   timeoutMs: number;
   testApiUrl: string;
   prodApiUrl: string;
+  testRefundUrl: string;
+  prodRefundUrl: string;
   // Private key (3 ways)
   merchantPrivateKeyPem?: string;
   merchantPrivateKeyBase64?: string;
@@ -41,13 +46,14 @@ export interface OrderRequest {
   goodsDetail: string;
 }
 
+// API returns underscore fields, use underscore naming to match
 export interface OrderResponse {
-  orderDate: string;
-  orderPayType: string;
-  orderAmt: string;
-  mchntCd: string;
-  orderId: string;
-  orderInfo: string;
+  order_date: string;
+  order_pay_type: string;
+  order_amt: string;
+  mchnt_cd: string;
+  order_id: string;
+  order_info: string;  // QR code URL/content
 }
 
 export interface CallbackPayload {
@@ -57,18 +63,48 @@ export interface CallbackPayload {
   resp_desc: string;
 }
 
+// API returns underscore fields, use underscore naming to match
 export interface CallbackMessage {
-  orderId: string;
-  orderSt: "1" | "2";
-  orderAmt: string;
-  orderDate: string;
+  order_id: string;
+  order_st: "1" | "2";  // 1=success, 2=failed
+  order_amt: string;
+  order_date: string;
 }
 
+// API returns underscore fields, use underscore naming to match
 export interface QueryResponse {
-  orderId: string;
-  orderSt: string;
-  orderAmt: string;
-  orderDate: string;
+  order_id: string;
+  order_st: string;
+  order_amt: string;
+  order_date: string;
+}
+
+// Refund request interface
+export interface RefundRequest {
+  refund_order_date: string;  // 退款日期 YYYYMMDD
+  refund_order_id: string;    // 退款流水号（商户生成，唯一）
+  pay_order_date: string;     // 原支付订单日期
+  pay_order_id: string;       // 原支付订单号
+  refund_amt: string;         // 退款金额（单位：分）
+}
+
+// API returns underscore fields, use underscore naming to match
+export interface RefundResponse {
+  mchnt_cd: string;
+  refund_order_date: string;
+  refund_order_id: string;
+  pay_order_date: string;
+  pay_order_id: string;
+  refund_amt: string;         // 退款金额（分）
+  refund_st: string;          // 退款状态 5=成功 6=失败
+  refund_fas_date: string;    // 退款富友日期
+  refund_fas_ssn: string;     // 退款富友流水号
+}
+
+// Refund query request interface
+export interface RefundQueryRequest {
+  refund_order_date: string;
+  refund_order_id: string;
 }
 
 // API call result interface (reused from SudorouterService pattern)
@@ -93,6 +129,7 @@ export interface ApiCallResult<T> {
 class FuiouPayService {
   private config: FuiouConfig;
   private baseUrl: string;
+  private refundUrl: string;
   private rsa: RsaCrypto;
   private initialized: boolean = false;
 
@@ -101,6 +138,9 @@ class FuiouPayService {
     this.baseUrl = this.config.isTest
       ? this.config.testApiUrl
       : this.config.prodApiUrl;
+    this.refundUrl = this.config.isTest
+      ? this.config.testRefundUrl
+      : this.config.prodRefundUrl;
     this.rsa = new RsaCrypto();
   }
 
@@ -112,6 +152,8 @@ class FuiouPayService {
       timeoutMs: parseInt(process.env.FUIOU_TIMEOUT_MS || "10000"),
       testApiUrl: process.env.FUIOU_TEST_API_URL || DEFAULT_TEST_URL,
       prodApiUrl: process.env.FUIOU_PROD_API_URL || DEFAULT_PROD_URL,
+      testRefundUrl: process.env.FUIOU_TEST_REFUND_URL || DEFAULT_REFUND_TEST_URL,
+      prodRefundUrl: process.env.FUIOU_PROD_REFUND_URL || DEFAULT_REFUND_PROD_URL,
       merchantPrivateKeyPem: process.env.FUIOU_MERCHANT_PRIVATE_KEY,
       merchantPrivateKeyBase64: process.env.FUIOU_MERCHANT_PRIVATE_KEY_BASE64,
       merchantPrivateKeyFile: process.env.FUIOU_MERCHANT_PRIVATE_KEY_FILE,
@@ -364,6 +406,168 @@ class FuiouPayService {
       return {
         success: true,
         data: queryResponse,
+        request: { method: "POST", url, body: requestBody },
+        response: { status: response.status, data },
+        duration_ms: duration,
+      };
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      return {
+        success: false,
+        data: null,
+        request: { method: "POST", url, body: requestBody },
+        response: { status: 0, data: null },
+        duration_ms: duration,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Refund order
+   * 订单退款接口
+   */
+  async refundOrder(request: RefundRequest): Promise<ApiCallResult<RefundResponse>> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    const url = `${this.refundUrl}/refund_transfer/aggposRefund.fuiou`;
+    const startTime = Date.now();
+
+    // Build request message
+    const message: Record<string, string> = {
+      mchnt_cd: this.config.merchantCode,
+      refund_order_date: request.refund_order_date,
+      refund_order_id: request.refund_order_id,
+      pay_order_date: request.pay_order_date,
+      pay_order_id: request.pay_order_id,
+      refund_amt: request.refund_amt,
+      ver: "1.0.0",
+    };
+
+    const messageJson = JSON.stringify(message);
+    const messageBuffer = iconv.encode(messageJson, FUIOU_CHARSET);
+    const encryptedMessage = this.rsa.encryptWithPublicKey(messageBuffer);
+    const requestBody = {
+      mchnt_cd: this.config.merchantCode,
+      message: encryptedMessage.toString("base64"),
+    };
+
+    try {
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json;charset=UTF-8" },
+          body: JSON.stringify(requestBody),
+        },
+        this.config.timeoutMs
+      );
+
+      const data = (await response.json()) as any;
+      const duration = Date.now() - startTime;
+
+      if (data.resp_code !== "0000") {
+        return {
+          success: false,
+          data: null,
+          request: { method: "POST", url, body: requestBody },
+          response: { status: response.status, data },
+          duration_ms: duration,
+          error: `Refund failed: ${data.resp_code} - ${data.resp_desc}`,
+        };
+      }
+
+      // Decrypt response
+      const decryptedMessage = this.rsa.decryptWithPrivateKey(
+        Buffer.from(data.message, "base64")
+      );
+      const decryptedJson = iconv.decode(decryptedMessage, FUIOU_CHARSET);
+      const refundResponse: RefundResponse = JSON.parse(decryptedJson);
+
+      return {
+        success: true,
+        data: refundResponse,
+        request: { method: "POST", url, body: requestBody },
+        response: { status: response.status, data },
+        duration_ms: duration,
+      };
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      return {
+        success: false,
+        data: null,
+        request: { method: "POST", url, body: requestBody },
+        response: { status: 0, data: null },
+        duration_ms: duration,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Query refund status
+   * 退款查询接口
+   */
+  async queryRefund(request: RefundQueryRequest): Promise<ApiCallResult<RefundResponse>> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    const url = `${this.refundUrl}/refund_transfer/aggposRefundQuery.fuiou`;
+    const startTime = Date.now();
+
+    const message = {
+      mchnt_cd: this.config.merchantCode,
+      refund_order_date: request.refund_order_date,
+      refund_order_id: request.refund_order_id,
+      ver: "1.0.0",
+    };
+
+    const messageJson = JSON.stringify(message);
+    const messageBuffer = iconv.encode(messageJson, FUIOU_CHARSET);
+    const encryptedMessage = this.rsa.encryptWithPublicKey(messageBuffer);
+    const requestBody = {
+      mchnt_cd: this.config.merchantCode,
+      message: encryptedMessage.toString("base64"),
+    };
+
+    try {
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json;charset=UTF-8" },
+          body: JSON.stringify(requestBody),
+        },
+        this.config.timeoutMs
+      );
+
+      const data = (await response.json()) as any;
+      const duration = Date.now() - startTime;
+
+      if (data.resp_code !== "0000") {
+        return {
+          success: false,
+          data: null,
+          request: { method: "POST", url, body: requestBody },
+          response: { status: response.status, data },
+          duration_ms: duration,
+          error: `Query refund failed: ${data.resp_code}`,
+        };
+      }
+
+      // Decrypt response
+      const decryptedMessage = this.rsa.decryptWithPrivateKey(
+        Buffer.from(data.message, "base64")
+      );
+      const decryptedJson = iconv.decode(decryptedMessage, FUIOU_CHARSET);
+      const refundResponse: RefundResponse = JSON.parse(decryptedJson);
+
+      return {
+        success: true,
+        data: refundResponse,
         request: { method: "POST", url, body: requestBody },
         response: { status: response.status, data },
         duration_ms: duration,

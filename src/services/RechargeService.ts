@@ -198,9 +198,9 @@ class RechargeService {
         return { success: false, error: result.error || "支付请求失败" };
       }
 
-      // Get QR code URL from response
-      const qrCodeUrl = result.data?.orderInfo || "";
-      const orderInfo = result.data?.orderInfo || "";
+      // Get QR code URL from response (underscore field from Fuiou API)
+      const qrCodeUrl = result.data?.order_info || "";
+      const orderInfo = result.data?.order_info || "";
 
       if (!qrCodeUrl) {
         console.error("[RechargeService] No QR code URL in response:", result.data);
@@ -241,10 +241,10 @@ class RechargeService {
       // 2. Query order
       const order = db
         .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
-        .get(callbackMessage.orderId) as any;
+        .get(callbackMessage.order_id) as any;
 
       if (!order) {
-        console.error(`[Recharge] Order not found: ${callbackMessage.orderId}`);
+        console.error(`[Recharge] Order not found: ${callbackMessage.order_id}`);
         return { success: false, error: "订单不存在" };
       }
 
@@ -263,7 +263,7 @@ class RechargeService {
         }
 
         // 4. Verify amount
-        const callbackAmount = parseInt(callbackMessage.orderAmt);
+        const callbackAmount = parseInt(callbackMessage.order_amt);
         const isTest = fuiouPayService.isTestMode();
         const expectedAmount = isTest ? 1 : lockedOrder.amount_cents;
 
@@ -276,7 +276,7 @@ class RechargeService {
         }
 
         // 5. Check payment status
-        if (callbackMessage.orderSt === "2") {
+        if (callbackMessage.order_st === "2") {
           // Payment failed
           db.run(
             "UPDATE recharge_orders SET status = 3, callback_data = ?, callback_time = ? WHERE id = ?",
@@ -286,8 +286,8 @@ class RechargeService {
           return { success: true, order_no: order.order_no };
         }
 
-        if (callbackMessage.orderSt !== "1") {
-          console.log(`[Recharge] Unknown order status: ${callbackMessage.orderSt}`);
+        if (callbackMessage.order_st !== "1") {
+          console.log(`[Recharge] Unknown order status: ${callbackMessage.order_st}`);
           db.run("ROLLBACK");
           return { success: true, order_no: order.order_no };
         }
@@ -645,6 +645,297 @@ class RechargeService {
     } catch (error) {
       db.run("ROLLBACK");
       return { success: false, error: "订单重试失败" };
+    }
+  }
+
+  /**
+   * Simulate payment success (test mode only)
+   * 用于本地测试，跳过富友回调验证
+   */
+  async simulatePaymentSuccess(orderNo: string): Promise<CallbackResult> {
+    // 仅允许测试模式
+    // if (!fuiouPayService.isTestMode()) {
+    //   return { success: false, error: "仅在测试模式下可用" };
+    // }
+
+    const order = db
+      .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
+      .get(orderNo) as any;
+
+    if (!order) {
+      return { success: false, error: "订单不存在" };
+    }
+
+    if (order.status !== 0 && order.status !== 1) {
+      return { success: false, error: "订单状态无效" };
+    }
+
+    // 开始事务
+    db.run("BEGIN EXCLUSIVE TRANSACTION");
+
+    try {
+      const lockedOrder = db
+        .prepare("SELECT * FROM recharge_orders WHERE id = ?")
+        .get(order.id) as any;
+
+      if (lockedOrder.status === 2) {
+        db.run("ROLLBACK");
+        return { success: true, order_no: order.order_no };
+      }
+
+      // 模拟回调数据
+      const simulatedPayload: CallbackPayload = {
+        mchnt_cd: fuiouPayService.getMerchantCode(),
+        message: "SIMULATED",
+        resp_code: "0000",
+        resp_desc: "模拟支付成功",
+      };
+
+      // 处理充值
+      const result = await this.processRecharge(lockedOrder, simulatedPayload);
+
+      if (result.success) {
+        db.run("COMMIT");
+      } else {
+        db.run("ROLLBACK");
+      }
+
+      return result;
+    } catch (e) {
+      db.run("ROLLBACK");
+      throw e;
+    }
+  }
+
+  /**
+   * Calculate refund amount based on remaining points
+   * 计算退款金额
+   *
+   * 规则：
+   * - 订单积分 = 购买积分 + 赠送积分
+   * - 如果剩余积分 >= 订单积分，全额退款
+   * - 如果剩余积分 < 订单积分，按已使用积分扣减后退款
+   */
+  calculateRefund(orderNo: string): {
+    success: boolean;
+    orderPoints: number;      // 订单总积分（购买+赠送）
+    userBalance: number;      // 用户当前积分
+    usedPoints: number;       // 已使用积分
+    refundAmount: number;     // 退款金额（分）
+    deductPoints: number;     // 需扣除积分
+    originalAmount: number;   // 原订单金额（分）
+    error?: string;
+  } {
+    // Query order
+    const order = db
+      .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
+      .get(orderNo) as any;
+
+    if (!order) {
+      return { success: false, orderPoints: 0, userBalance: 0, usedPoints: 0, refundAmount: 0, deductPoints: 0, originalAmount: 0, error: "订单不存在" };
+    }
+
+    if (order.status !== 2) {
+      return { success: false, orderPoints: 0, userBalance: 0, usedPoints: 0, refundAmount: 0, deductPoints: 0, originalAmount: 0, error: "订单状态不支持退款" };
+    }
+
+    // Query user
+    const user = db
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(order.user_id) as any;
+
+    if (!user) {
+      return { success: false, orderPoints: 0, userBalance: 0, usedPoints: 0, refundAmount: 0, deductPoints: 0, originalAmount: 0, error: "用户不存在" };
+    }
+
+    const orderPoints = order.points_amount+order.bonus_points;  // 订单总积分
+    const userBalance = user.balance || 0;    // 用户当前积分
+    const originalAmount = order.amount_cents; // 原订单金额（分）
+    const exchangeRate = order.exchange_rate || 7.3;
+
+    let refundAmount: number;
+    let deductPoints: number;
+    let usedPoints: number;
+    if (userBalance >= orderPoints) {
+      // 剩余积分 >= 订单积分，全额退款
+      refundAmount = originalAmount;
+      deductPoints = orderPoints;
+      usedPoints = 0;
+    } else {
+      // 剩余积分 < 订单积分，已使用部分
+      usedPoints = orderPoints - userBalance;
+      // 已用金额 = 已使用积分 / 1000 * 汇率 * 100（转换为分）
+      const usedAmountCents = Math.round((usedPoints / 1000) * exchangeRate * 100);
+      refundAmount = Math.max(0, originalAmount - usedAmountCents);
+      deductPoints = userBalance; // 只扣剩余积分
+    }
+
+    return {
+      success: true,
+      orderPoints,
+      userBalance,
+      usedPoints,
+      refundAmount,
+      deductPoints,
+      originalAmount,
+    };
+  }
+
+  /**
+   * Refund order
+   * 订单退款
+   */
+  async refundOrder(
+    orderNo: string,
+    reason: string,
+    adminId: number
+  ): Promise<{ success: boolean; error?: string; refund_no?: string; refund_amount?: number }> {
+    // Calculate refund
+    const calc = this.calculateRefund(orderNo);
+    if (!calc.success) {
+      return { success: false, error: calc.error };
+    }
+
+    // Query order and user
+    const order = db
+      .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
+      .get(orderNo) as any;
+    const user = db
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(order.user_id) as any;
+
+    if (!user || !user.sudorouter_user_id) {
+      return { success: false, error: "用户信息异常" };
+    }
+
+    // Check if user has enough points to deduct
+    if (calc.deductPoints > 0 && (user.balance || 0) < calc.deductPoints) {
+      return { success: false, error: "用户积分不足，无法退款" };
+    }
+
+    // Generate refund number
+    const refundNo = `RF${Date.now()}${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const refundDate = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+
+    // Call Fuiou refund API (skip in test mode with simulated payment)
+    const isTest = fuiouPayService.isTestMode();
+
+    if (!isTest) {
+      // Production mode: call Fuiou refund API
+      const refundResult = await fuiouPayService.refundOrder({
+        refund_order_date: refundDate,
+        refund_order_id: refundNo,
+        pay_order_date: order.order_date,
+        pay_order_id: order.order_no,
+        refund_amt: calc.refundAmount.toString(),
+      });
+
+      if (!refundResult.success) {
+        console.error("[Recharge] Fuiou refund failed:", refundResult.error);
+        return { success: false, error: refundResult.error || "退款请求失败" };
+      }
+
+      // Check refund status
+      if (refundResult.data?.refund_st !== "5") {
+        console.error("[Recharge] Refund status not success:", refundResult.data);
+        return { success: false, error: "退款状态异常" };
+      }
+    }
+
+    // Begin transaction
+    db.run("BEGIN EXCLUSIVE TRANSACTION");
+
+    try {
+      // Update order status
+      db.run(
+        "UPDATE recharge_orders SET status = 4, remark = ? WHERE id = ?",
+        [`退款原因: ${reason}`, order.id]
+      );
+
+      // Deduct user points and quota
+      const newBalance = (user.balance || 0) - calc.deductPoints;
+      const quotaToDeduct = sudorouterService.pointsToQuota(calc.deductPoints);
+      const newQuota = (user.quota || 0) - quotaToDeduct;
+
+      db.run("UPDATE users SET balance = ?, quota = ? WHERE id = ?", [
+        newBalance,
+        newQuota,
+        user.id,
+      ]);
+
+      // Sync sudorouter quota (deduct)
+      if (quotaToDeduct > 0) {
+        await sudorouterService.updateUserQuotaWithLog(
+          user.sudorouter_user_id,
+          -quotaToDeduct,
+          `退款扣除: ${order.order_no}`
+        );
+      }
+
+      // Insert refund record
+      db.run(
+        `INSERT INTO refund_records (
+          refund_no, order_id, order_no, user_id,
+          refund_amount_yuan, refund_quota, refund_points,
+          refund_reason, refund_type, status,
+          fuiou_refund_no, created_at, processed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          refundNo,
+          order.id,
+          order.order_no,
+          user.id,
+          calc.refundAmount / 100,
+          quotaToDeduct,
+          calc.deductPoints,
+          reason,
+          isTest ? "SIMULATED" : "FUIOU",
+          1, // success
+          refundNo,
+          new Date().toISOString(),
+          new Date().toISOString(),
+        ]
+      );
+
+      // Write ledger
+      db.run(
+        "INSERT INTO ledger (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
+        [user.id, -calc.deductPoints, "REFUND", `退款: ${order.order_no}, 原因: ${reason}`]
+      );
+
+      // Log operation
+      const admin = db.prepare("SELECT * FROM users WHERE id = ?").get(adminId) as any;
+      db.run(
+        `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          adminId,
+          admin?.phone || "",
+          "REFUND",
+          "recharge_order",
+          order.id,
+          "POST",
+          `/api/v1/admin/recharge/orders/${order.order_no}/refund`,
+          JSON.stringify({ order_no: order.order_no, reason, refund_amount: calc.refundAmount }),
+          JSON.stringify({ success: true, refund_no: refundNo }),
+        ]
+      );
+
+      db.run("COMMIT");
+
+      console.log(
+        `[Recharge] Refund success: order=${order.order_no}, refund=${refundNo}, amount=${calc.refundAmount}分, deduct=${calc.deductPoints}积分`
+      );
+
+      return {
+        success: true,
+        refund_no: refundNo,
+        refund_amount: calc.refundAmount,
+      };
+    } catch (e) {
+      db.run("ROLLBACK");
+      console.error("[Recharge] Refund transaction failed:", e);
+      return { success: false, error: "退款处理失败" };
     }
   }
 }
