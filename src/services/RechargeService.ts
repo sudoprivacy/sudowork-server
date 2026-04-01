@@ -177,6 +177,12 @@ class RechargeService {
       const isTest = fuiouPayService.isTestMode();
       const payCents = isTest ? 1 : order.amount_cents;
 
+      console.log("[RechargeService] Creating Fuiou order:", {
+        order_no: order.order_no,
+        amount: payCents,
+        isTest,
+      });
+
       const result = await fuiouPayService.createOrder({
         orderId: order.order_no,
         orderDate: order.order_date,
@@ -186,20 +192,31 @@ class RechargeService {
         goodsDetail: `充值${order.amount_usd}美元 (¥${order.amount_yuan.toFixed(2)})`,
       });
 
+      console.log("[RechargeService] Fuiou createOrder result:", JSON.stringify(result));
+
       if (!result.success) {
         return { success: false, error: result.error || "支付请求失败" };
+      }
+
+      // Get QR code URL from response
+      const qrCodeUrl = result.data?.orderInfo || "";
+      const orderInfo = result.data?.orderInfo || "";
+
+      if (!qrCodeUrl) {
+        console.error("[RechargeService] No QR code URL in response:", result.data);
+        return { success: false, error: "支付二维码获取失败" };
       }
 
       // Update order status to "paying"
       db.run(
         "UPDATE recharge_orders SET status = 1, fuiou_order_info = ? WHERE id = ?",
-        [result.data?.orderInfo, order.id]
+        [orderInfo, order.id]
       );
 
       return {
         success: true,
-        qr_code_url: result.data?.orderInfo,
-        order_info: result.data?.orderInfo,
+        qr_code_url: qrCodeUrl,
+        order_info: orderInfo,
       };
     } catch (error: any) {
       console.error("[RechargeService] Fuiou payment failed:", error);
