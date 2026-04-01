@@ -170,7 +170,7 @@ adminUserRoutes.post("/users", authMiddleware, adminMiddleware, async (c) => {
   }
 
   // 调用 sudorouter 创建用户（带详细日志）
-  const createUserResult = await sudorouterService.createUserWithLog(phone);
+  const createUserResult = await sudorouterService.createUserWithLog(phone,nickname);
   if (!createUserResult.success || !createUserResult.data) {
     // 记录失败的 API 调用日志
     db.run(
