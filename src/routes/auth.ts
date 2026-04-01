@@ -248,7 +248,7 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
         phone: user.phone,
         role: user.role,
         enterprise_id: user.enterprise_id,
-        exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
+        // exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
       },
       SECRET,
     );
