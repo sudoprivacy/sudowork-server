@@ -654,9 +654,9 @@ class RechargeService {
    */
   async simulatePaymentSuccess(orderNo: string): Promise<CallbackResult> {
     // 仅允许测试模式
-    // if (!fuiouPayService.isTestMode()) {
-    //   return { success: false, error: "仅在测试模式下可用" };
-    // }
+    if (!fuiouPayService.isTestMode()) {
+      return { success: false, error: "仅在测试模式下可用" };
+    }
 
     const order = db
       .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
