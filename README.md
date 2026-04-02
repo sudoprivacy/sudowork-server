@@ -539,6 +539,8 @@ sudowork-server/
 ├── src/
 │   ├── index.ts                 # 主入口（启动服务、挂载路由）
 │   ├── redis.ts                 # Redis 连接
+│   ├── types/
+│   │   └── index.ts             # 类型定义（User, RechargeOrder 等）
 │   ├── db/
 │   │   ├── index.ts             # 数据库连接
 │   │   ├── schema.ts            # 表结构定义（含充值相关表）
@@ -548,11 +550,17 @@ sudowork-server/
 │   │   ├── auth.ts              # JWT 认证中间件
 │   │   └── rateLimiter.ts       # 速率限制中间件
 │   ├── routes/
-│   │   ├── admin.ts             # 管理员路由挂载
+│   │   ├── admin.ts             # 管理员路由聚合器
+│   │   ├── admin/               # 管理员路由模块（按功能拆分）
+│   │   │   ├── index.ts         # 路由挂载
+│   │   │   ├── stats.ts         # 仪表盘统计
+│   │   │   ├── users.ts         # 用户管理
+│   │   │   ├── points.ts        # 积分管理（调整、充值、同步）
+│   │   │   ├── recharge.ts      # 充值订单管理
+│   │   │   └── sync.ts          # 订单同步、重试
 │   │   ├── admin-auth.ts        # 管理员登录/改密
 │   │   ├── admin-enterprises.ts # 企业管理接口
 │   │   ├── admin-invitation-codes.ts # 邀请码管理
-│   │   ├── admin-users.ts       # 用户管理接口（含后台充值、额度同步）
 │   │   ├── admin-logs.ts        # 操作日志接口
 │   │   ├── auth.ts              # 用户认证接口
 │   │   ├── user.ts              # 用户中心接口
@@ -564,6 +572,8 @@ sudowork-server/
 │   │   ├── FuiouPayService.ts   # 富友支付服务
 │   │   └── RechargeService.ts   # 充值业务逻辑
 │   └── utils/
+│       ├── constants.ts         # 状态常量（ORDER_STATUS, USER_STATUS 等）
+│       ├── logger.ts            # 操作日志工具
 │       ├── password.ts          # 密码加密工具
 │       ├── validation.ts        # 输入验证工具
 │       ├── invitation.ts        # 邀请码生成工具
@@ -585,11 +595,12 @@ sudowork-server/
 
 | 模块 | 职责 | 文件 |
 |------|------|------|
+| **types/** | TypeScript 类型定义 | `index.ts` |
 | **db/** | 数据库连接、表结构、迁移、初始化 | `index.ts`, `schema.ts`, `migrations.ts`, `init.ts` |
-| **routes/** | API 路由处理，按功能域拆分 | `admin-*.ts`, `auth.ts`, `user.ts`, `recharge.ts`, `misc.ts` |
+| **routes/** | API 路由处理，按功能域拆分 | `admin/`, `admin-*.ts`, `auth.ts`, `user.ts`, `recharge.ts` |
 | **services/** | 外部服务封装（Sudorouter、SMS、FuiouPay） | `SudorouterService.ts`, `SmsService.ts`, `FuiouPayService.ts`, `RechargeService.ts` |
 | **middleware/** | 认证、授权、限流中间件 | `auth.ts`, `rateLimiter.ts` |
-| **utils/** | 通用工具函数 | `password.ts`, `validation.ts`, `invitation.ts`, `crypto.ts` |
+| **utils/** | 通用工具函数和常量 | `constants.ts`, `logger.ts`, `password.ts`, `validation.ts`, `invitation.ts`, `crypto.ts` |
 
 #### 用户表 (users)
 
