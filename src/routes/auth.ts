@@ -10,6 +10,8 @@ import { sudorouterService } from "../services/SudorouterService.js";
 import { isValidPhone, isValidSmsCode } from "../utils/validation.js";
 import { rateLimiter, rateLimitPresets } from "../middleware/rateLimiter.js";
 import { redis } from "../redis.js";
+import type { User } from "../types/index.js";
+import { logSudorouterCall } from "../utils/logger.js";
 
 const authRoutes = new Hono();
 
@@ -127,7 +129,7 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
   // 查询用户是否存在
   let user = db
     .prepare("SELECT * FROM users WHERE phone = ?")
-    .get(phone) as any;
+    .get(phone) as User | undefined;
 
   if (user) {
     // 检查用户是否被禁用 (status: 2=禁用)
@@ -188,47 +190,37 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
           );
 
           // 记录 Sudorouter API 调用日志
-          db.run(
-            `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              user.id,
-              phone,
-              "SUDOROUTER_GET_USER",
-              "sudorouter_api",
-              user.sudorouter_user_id,
-              getUserResult.request.method,
-              getUserResult.request.url,
-              JSON.stringify({ user_id: user.sudorouter_user_id }),
-              JSON.stringify({
-                success: true,
-                quota: sudorouterUserInfo.quota,
-                used_quota: sudorouterUserInfo.used_quota,
-              }),
-              getUserResult.response.status,
-              getUserResult.duration_ms,
-            ],
-          );
+          logSudorouterCall({
+            userId: user.id,
+            userPhone: phone,
+            action: "SUDOROUTER_GET_USER",
+            resourceId: user.sudorouter_user_id,
+            method: getUserResult.request.method,
+            url: getUserResult.request.url,
+            requestBody: { user_id: user.sudorouter_user_id },
+            responseBody: {
+              success: true,
+              quota: sudorouterUserInfo.quota,
+              used_quota: sudorouterUserInfo.used_quota,
+            },
+            responseStatus: getUserResult.response.status,
+            durationMs: getUserResult.duration_ms,
+          });
         } else {
           // 记录失败日志
-          db.run(
-            `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms, error_message)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              user.id,
-              phone,
-              "SUDOROUTER_GET_USER",
-              "sudorouter_api",
-              user.sudorouter_user_id,
-              getUserResult.request.method,
-              getUserResult.request.url,
-              JSON.stringify({ user_id: user.sudorouter_user_id }),
-              JSON.stringify(getUserResult.response.data),
-              getUserResult.response.status,
-              getUserResult.duration_ms,
-              getUserResult.error || "获取用户信息失败",
-            ],
-          );
+          logSudorouterCall({
+            userId: user.id,
+            userPhone: phone,
+            action: "SUDOROUTER_GET_USER",
+            resourceId: user.sudorouter_user_id,
+            method: getUserResult.request.method,
+            url: getUserResult.request.url,
+            requestBody: { user_id: user.sudorouter_user_id },
+            responseBody: getUserResult.response.data,
+            responseStatus: getUserResult.response.status,
+            durationMs: getUserResult.duration_ms,
+            errorMessage: getUserResult.error || "获取用户信息失败",
+          });
         }
       } catch (error) {
         console.error(`[Login] 同步用户 ${phone} 额度失败:`, error);
@@ -347,7 +339,7 @@ authRoutes.post(
     // 检查用户是否已被创建（防止重复注册）
     const existingUser = db
       .prepare("SELECT * FROM users WHERE phone = ?")
-      .get(phone) as any;
+      .get(phone) as User | undefined;
 
     if (existingUser) {
       // 删除 register_token
@@ -416,23 +408,18 @@ authRoutes.post(
     const createUserResult = await sudorouterService.createUserWithLog(phone, nickname);
     if (!createUserResult.success || !createUserResult.data) {
       // 记录失败日志
-      db.run(
-        `INSERT INTO operation_logs (user_id, user_phone, action, resource, method, path, request_data, response_data, response_status, duration_ms, error_message)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          0,
-          phone,
-          "SUDOROUTER_CREATE_USER",
-          "sudorouter_api",
-          createUserResult.request.method,
-          createUserResult.request.url,
-          JSON.stringify(createUserResult.request.body),
-          JSON.stringify(createUserResult.response.data),
-          createUserResult.response.status,
-          createUserResult.duration_ms,
-          createUserResult.error || "创建用户失败",
-        ],
-      );
+      logSudorouterCall({
+        userId: 0,
+        userPhone: phone,
+        action: "SUDOROUTER_CREATE_USER",
+        method: createUserResult.request.method,
+        url: createUserResult.request.url,
+        requestBody: createUserResult.request.body,
+        responseBody: createUserResult.response.data,
+        responseStatus: createUserResult.response.status,
+        durationMs: createUserResult.duration_ms,
+        errorMessage: createUserResult.error || "创建用户失败",
+      });
       return c.json(
         {
           success: false,
@@ -445,27 +432,22 @@ authRoutes.post(
     const sudorouterUser = createUserResult.data;
 
     // 记录创建用户成功日志
-    db.run(
-      `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        0,
-        phone,
-        "SUDOROUTER_CREATE_USER",
-        "sudorouter_api",
-        sudorouterUser.id,
-        createUserResult.request.method,
-        createUserResult.request.url,
-        JSON.stringify(createUserResult.request.body),
-        JSON.stringify({
-          success: true,
-          id: sudorouterUser.id,
-          username: sudorouterUser.username,
-        }),
-        createUserResult.response.status,
-        createUserResult.duration_ms,
-      ],
-    );
+    logSudorouterCall({
+      userId: 0,
+      userPhone: phone,
+      action: "SUDOROUTER_CREATE_USER",
+      resourceId: sudorouterUser.id,
+      method: createUserResult.request.method,
+      url: createUserResult.request.url,
+      requestBody: createUserResult.request.body,
+      responseBody: {
+        success: true,
+        id: sudorouterUser.id,
+        username: sudorouterUser.username,
+      },
+      responseStatus: createUserResult.response.status,
+      durationMs: createUserResult.duration_ms,
+    });
 
     // 充值初始额度
     const initialQuota = sudorouterService.getInitialQuota();
@@ -477,44 +459,34 @@ authRoutes.post(
 
     if (!quotaResult.success) {
       // 记录失败日志
-      db.run(
-        `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms, error_message)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          0,
-          phone,
-          "SUDOROUTER_UPDATE_QUOTA",
-          "sudorouter_api",
-          sudorouterUser.id,
-          quotaResult.request.method,
-          quotaResult.request.url,
-          JSON.stringify(quotaResult.request.body),
-          JSON.stringify(quotaResult.response.data),
-          quotaResult.response.status,
-          quotaResult.duration_ms,
-          quotaResult.error || "额度充值失败",
-        ],
-      );
+      logSudorouterCall({
+        userId: 0,
+        userPhone: phone,
+        action: "SUDOROUTER_UPDATE_QUOTA",
+        resourceId: sudorouterUser.id,
+        method: quotaResult.request.method,
+        url: quotaResult.request.url,
+        requestBody: quotaResult.request.body,
+        responseBody: quotaResult.response.data,
+        responseStatus: quotaResult.response.status,
+        durationMs: quotaResult.duration_ms,
+        errorMessage: quotaResult.error || "额度充值失败",
+      });
       console.error(`[Register] 用户 ${phone} 额度充值失败`);
     } else {
       // 记录成功日志
-      db.run(
-        `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          0,
-          phone,
-          "SUDOROUTER_UPDATE_QUOTA",
-          "sudorouter_api",
-          sudorouterUser.id,
-          quotaResult.request.method,
-          quotaResult.request.url,
-          JSON.stringify(quotaResult.request.body),
-          JSON.stringify({ success: true, quota: initialQuota }),
-          quotaResult.response.status,
-          quotaResult.duration_ms,
-        ],
-      );
+      logSudorouterCall({
+        userId: 0,
+        userPhone: phone,
+        action: "SUDOROUTER_UPDATE_QUOTA",
+        resourceId: sudorouterUser.id,
+        method: quotaResult.request.method,
+        url: quotaResult.request.url,
+        requestBody: quotaResult.request.body,
+        responseBody: { success: true, quota: initialQuota },
+        responseStatus: quotaResult.response.status,
+        durationMs: quotaResult.duration_ms,
+      });
       console.log(`[Register] 用户 ${phone} 充值成功: ${initialQuota}`);
     }
 
@@ -527,24 +499,19 @@ authRoutes.post(
 
     if (!createTokenResult.success || !createTokenResult.data) {
       // 记录失败日志
-      db.run(
-        `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms, error_message)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          0,
-          phone,
-          "SUDOROUTER_CREATE_TOKEN",
-          "sudorouter_api",
-          sudorouterUser.id,
-          createTokenResult.request.method,
-          createTokenResult.request.url,
-          JSON.stringify(createTokenResult.request.body),
-          JSON.stringify(createTokenResult.response.data),
-          createTokenResult.response.status,
-          createTokenResult.duration_ms,
-          createTokenResult.error || "创建令牌失败",
-        ],
-      );
+      logSudorouterCall({
+        userId: 0,
+        userPhone: phone,
+        action: "SUDOROUTER_CREATE_TOKEN",
+        resourceId: sudorouterUser.id,
+        method: createTokenResult.request.method,
+        url: createTokenResult.request.url,
+        requestBody: createTokenResult.request.body,
+        responseBody: createTokenResult.response.data,
+        responseStatus: createTokenResult.response.status,
+        durationMs: createTokenResult.duration_ms,
+        errorMessage: createTokenResult.error || "创建令牌失败",
+      });
       return c.json(
         {
           success: false,
@@ -557,26 +524,21 @@ authRoutes.post(
     const sudorouterKey = createTokenResult.data;
 
     // 记录创建令牌成功日志
-    db.run(
-      `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        0,
-        phone,
-        "SUDOROUTER_CREATE_TOKEN",
-        "sudorouter_api",
-        sudorouterUser.id,
-        createTokenResult.request.method,
-        createTokenResult.request.url,
-        JSON.stringify(createTokenResult.request.body),
-        JSON.stringify({
-          success: true,
-          key_preview: sudorouterKey.substring(0, 20) + "...",
-        }),
-        createTokenResult.response.status,
-        createTokenResult.duration_ms,
-      ],
-    );
+    logSudorouterCall({
+      userId: 0,
+      userPhone: phone,
+      action: "SUDOROUTER_CREATE_TOKEN",
+      resourceId: sudorouterUser.id,
+      method: createTokenResult.request.method,
+      url: createTokenResult.request.url,
+      requestBody: createTokenResult.request.body,
+      responseBody: {
+        success: true,
+        key_preview: sudorouterKey.substring(0, 20) + "...",
+      },
+      responseStatus: createTokenResult.response.status,
+      durationMs: createTokenResult.duration_ms,
+    });
 
     // 计算初始积分
     const initialBalance = sudorouterService.quotaToPoints(initialQuota);
