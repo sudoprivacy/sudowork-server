@@ -234,13 +234,26 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
     }
 
     // 登录成功
-    const token = await sign(
+    const deviceId = c.req.header('X-Device-Id') || 'default';
+    const refreshToken = crypto.randomUUID();
+
+    // 存储 refresh_token 到 Redis（30天）
+    await redis.setex(
+      `refresh_token:${user.id}:${deviceId}:${refreshToken}`,
+      30 * 24 * 60 * 60,
+      JSON.stringify({ phone: user.phone, role: user.role, enterprise_id: user.enterprise_id })
+    );
+
+    // 生成 access_token（2小时）
+    const now = Math.floor(Date.now() / 1000);
+    const accessToken = await sign(
       {
         id: user.id,
         phone: user.phone,
         role: user.role,
         enterprise_id: user.enterprise_id,
-        // exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
+        iat: now,
+        exp: now + 2 * 60 * 60, // 2小时
       },
       SECRET,
     );
@@ -251,7 +264,9 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
     return c.json({
       success: true,
       data: {
-        token,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: 2 * 60 * 60, // 2小时（秒）
         user: {
           id: user.id,
           phone: user.phone,
@@ -597,14 +612,27 @@ authRoutes.post(
     // 删除 register_token
     await redis.del(`register_token:${register_token}`);
 
-    // 生成 JWT
-    const token = await sign(
+    // 生成 refresh_token
+    const deviceId = c.req.header('X-Device-Id') || 'default';
+    const refreshToken = crypto.randomUUID();
+
+    // 存储 refresh_token 到 Redis（30天）
+    await redis.setex(
+      `refresh_token:${newUserId}:${deviceId}:${refreshToken}`,
+      30 * 24 * 60 * 60,
+      JSON.stringify({ phone, role: "USER", enterprise_id: enterprise.id })
+    );
+
+    // 生成 access_token（2小时）
+    const now = Math.floor(Date.now() / 1000);
+    const accessToken = await sign(
       {
         id: newUserId,
         phone: phone,
         role: "USER",
         enterprise_id: enterprise.id,
-        exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
+        iat: now,
+        exp: now + 2 * 60 * 60, // 2小时
       },
       SECRET,
     );
@@ -622,7 +650,9 @@ authRoutes.post(
     return c.json({
       success: true,
       data: {
-        token,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: 2 * 60 * 60, // 2小时（秒）
         user: {
           id: newUserId,
           phone: phone,
@@ -644,5 +674,112 @@ authRoutes.post(
     });
   },
 );
+
+// POST /api/v1/auth/refresh - Refresh access token
+authRoutes.post("/refresh", async (c) => {
+  const { refresh_token, device_id } = await c.req.json();
+
+  if (!refresh_token) {
+    return c.json({ success: false, msg: "refresh_token 不能为空" }, 400);
+  }
+
+  const deviceId = device_id || 'default';
+
+  // 查找 refresh_token（支持多设备）
+  const keys = await redis.keys(`refresh_token:*:${deviceId}:${refresh_token}`);
+
+  if (!keys || keys.length === 0) {
+    return c.json({ success: false, msg: "refresh_token 无效或已过期" }, 401);
+  }
+
+  const key = keys[0];
+  const tokenDataStr = await redis.get(key);
+
+  if (!tokenDataStr) {
+    return c.json({ success: false, msg: "refresh_token 无效或已过期" }, 401);
+  }
+
+  const tokenData = JSON.parse(tokenDataStr);
+
+  // 从 key 中提取 userId: refresh_token:{userId}:{deviceId}:{refreshToken}
+  const keyParts = key.split(':');
+  const userId = parseInt(keyParts[1]);
+
+  // 删除旧 refresh_token（滚动刷新）
+  await redis.del(key);
+
+  // 生成新的 refresh_token
+  const newRefreshToken = crypto.randomUUID();
+
+  // 存储新 refresh_token（30天）
+  await redis.setex(
+    `refresh_token:${userId}:${deviceId}:${newRefreshToken}`,
+    30 * 24 * 60 * 60,
+    JSON.stringify(tokenData)
+  );
+
+  // 生成新的 access_token（2小时）
+  const now = Math.floor(Date.now() / 1000);
+  const accessToken = await sign(
+    {
+      id: userId,
+      phone: tokenData.phone,
+      role: tokenData.role,
+      enterprise_id: tokenData.enterprise_id,
+      iat: now,
+      exp: now + 2 * 60 * 60,
+    },
+    SECRET,
+  );
+
+  return c.json({
+    success: true,
+    access_token: accessToken,
+    refresh_token: newRefreshToken,
+    expires_in: 2 * 60 * 60,
+  });
+});
+
+// POST /api/v1/auth/logout - Logout (revoke refresh_token)
+authRoutes.post("/logout", async (c) => {
+  const { refresh_token, device_id, all } = await c.req.json();
+
+  if (!refresh_token && !all) {
+    return c.json({ success: false, msg: "参数不完整" }, 400);
+  }
+
+  // 从 refresh_token 中提取 userId（格式：refresh_token:{userId}:{deviceId}:{refreshToken}）
+  // 或者从请求头获取当前用户
+  const authHeader = c.req.header("Authorization");
+  let userId: number | null = null;
+
+  if (authHeader?.startsWith("Bearer ")) {
+    try {
+      const token = authHeader.split(" ")[1];
+      const { verify } = await import("hono/jwt");
+      const payload = await verify(token, SECRET, "HS256");
+      userId = (payload as any).id;
+    } catch {
+      // Token 无效，继续尝试其他方式
+    }
+  }
+
+  if (all && userId) {
+    // 删除该用户所有设备的 refresh_token
+    const keys = await redis.keys(`refresh_token:${userId}:*`);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } else if (refresh_token) {
+    // 删除指定 refresh_token
+    const deviceId = device_id || 'default';
+    const keys = await redis.keys(`refresh_token:*:${deviceId}:${refresh_token}`);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  }
+
+  return c.json({ success: true, msg: "注销成功" });
+});
 
 export { authRoutes };

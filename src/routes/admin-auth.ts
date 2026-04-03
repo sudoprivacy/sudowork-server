@@ -8,6 +8,7 @@ import { db, SECRET } from "../db/index.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { rateLimiter, rateLimitPresets } from "../middleware/rateLimiter.js";
+import { redis } from "../redis.js";
 
 const adminAuthRoutes = new Hono();
 
@@ -61,14 +62,31 @@ adminAuthRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) =>
     );
   }
 
-  // Generate JWT Token
-  const token = await sign(
+  // Generate refresh_token
+  const deviceId = c.req.header('X-Device-Id') || 'default';
+  const refreshToken = crypto.randomUUID();
+
+  // 存储 refresh_token 到 Redis（30天）
+  await redis.setex(
+    `refresh_token:${(admin as any).id}:${deviceId}:${refreshToken}`,
+    30 * 24 * 60 * 60,
+    JSON.stringify({
+      phone: (admin as any).phone,
+      role: (admin as any).role,
+      enterprise_id: (admin as any).enterprise_id,
+    })
+  );
+
+  // Generate access_token (2 hours)
+  const now = Math.floor(Date.now() / 1000);
+  const accessToken = await sign(
     {
       id: (admin as any).id,
       phone: (admin as any).phone,
       role: (admin as any).role,
       enterprise_id: (admin as any).enterprise_id,
-      exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
+      iat: now,
+      exp: now + 2 * 60 * 60, // 2 hours
     },
     SECRET,
   );
@@ -76,7 +94,9 @@ adminAuthRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) =>
   return c.json({
     success: true,
     data: {
-      token,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_in: 2 * 60 * 60, // 2 hours (seconds)
       user: {
         id: (admin as any).id,
         phone: (admin as any).phone,
