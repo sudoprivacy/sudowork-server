@@ -253,6 +253,7 @@ bun run src/index.ts
 {
   "success": true,
   "data": {
+    "token": "eyJhbGciOiJIUzI1NiIs...",      // 兼容旧客户端（30天有效，过渡期）
     "access_token": "eyJhbGciOiJIUzI1NiIs...",
     "refresh_token": "uuid-xxx-xxx",
     "expires_in": 7200,
@@ -274,6 +275,10 @@ bun run src/index.ts
 |-----------|--------|------|
 | `access_token` | 2 小时 | JWT 格式，用于 API 认证 |
 | `refresh_token` | 30 天 | UUID 格式，用于刷新 access_token |
+| `token` | 30 天 | 兼容旧客户端，过渡期结束后移除 |
+
+> **兼容说明**: `token` 字段用于支持未更新的旧版本客户端（期望 `data.token` 格式）。
+> 过渡期（1-3个月）结束后将移除该字段，届时旧客户端需强制升级。
 
 **刷新 Token：** access_token 过期前 5 分钟，客户端应使用 refresh_token 调用刷新接口获取新 token。
 ```

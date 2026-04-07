@@ -258,12 +258,26 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
       SECRET,
     );
 
+    // 生成兼容旧客户端的 token（30天）- 过渡期结束后移除
+    const legacyToken = await sign(
+      {
+        id: user.id,
+        phone: user.phone,
+        role: user.role,
+        enterprise_id: user.enterprise_id,
+        iat: now,
+        exp: now + 30 * 24 * 60 * 60, // 30天
+      },
+      SECRET,
+    );
+
     // 获取模型服务配置
     const modelServiceUrl = sudorouterService.getModelServiceUrl();
 
     return c.json({
       success: true,
       data: {
+        token: legacyToken,             // 兼容旧客户端（过渡期）
         access_token: accessToken,
         refresh_token: refreshToken,
         expires_in: 2 * 60 * 60, // 2小时（秒）
@@ -637,6 +651,19 @@ authRoutes.post(
       SECRET,
     );
 
+    // 生成兼容旧客户端的 token（30天）- 过渡期结束后移除
+    const legacyToken = await sign(
+      {
+        id: newUserId,
+        phone: phone,
+        role: "USER",
+        enterprise_id: enterprise.id,
+        iat: now,
+        exp: now + 30 * 24 * 60 * 60, // 30天
+      },
+      SECRET,
+    );
+
     console.log(
       `[用户注册] 手机号: ${phone}, 昵称: ${nickname}, sudorouter用户ID: ${sudorouterUser.id}, 初始积分: ${initialBalance}`,
     );
@@ -650,6 +677,7 @@ authRoutes.post(
     return c.json({
       success: true,
       data: {
+        token: legacyToken,             // 兼容旧客户端（过渡期）
         access_token: accessToken,
         refresh_token: refreshToken,
         expires_in: 2 * 60 * 60, // 2小时（秒）

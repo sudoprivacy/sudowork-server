@@ -91,9 +91,23 @@ adminAuthRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) =>
     SECRET,
   );
 
+  // Generate legacy token (30 days) for backward compatibility - remove after transition period
+  const legacyToken = await sign(
+    {
+      id: (admin as any).id,
+      phone: (admin as any).phone,
+      role: (admin as any).role,
+      enterprise_id: (admin as any).enterprise_id,
+      iat: now,
+      exp: now + 30 * 24 * 60 * 60, // 30 days
+    },
+    SECRET,
+  );
+
   return c.json({
     success: true,
     data: {
+      token: legacyToken,             // backward compatibility (transition period)
       access_token: accessToken,
       refresh_token: refreshToken,
       expires_in: 2 * 60 * 60, // 2 hours (seconds)
