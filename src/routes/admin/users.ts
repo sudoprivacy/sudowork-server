@@ -16,6 +16,7 @@ usersRoutes.get('/users', authMiddleware, adminMiddleware, async (c) => {
   const enterpriseId = c.req.query('enterprise_id');
   const status = c.req.query('status');
   const role = c.req.query('role');
+  const keyword = c.req.query('keyword');
 
   let query = `
     SELECT u.*, e.name as enterprise_name, ic.code as invitation_code
@@ -39,6 +40,11 @@ usersRoutes.get('/users', authMiddleware, adminMiddleware, async (c) => {
   if (role) {
     query += ' AND u.role = ?';
     params.push(role);
+  }
+
+  if (keyword) {
+    query += ' AND (u.phone LIKE ? OR u.nickname LIKE ?)';
+    params.push(`%${keyword}%`, `%${keyword}%`);
   }
 
   query += ' ORDER BY u.created_at DESC';
