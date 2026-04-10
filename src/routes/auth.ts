@@ -111,21 +111,6 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
     );
   }
 
-  // 获取默认企业
-  const enterprise = db
-    .prepare("SELECT * FROM enterprises WHERE code = 'sudo'")
-    .get() as any;
-
-  if (!enterprise) {
-    return c.json(
-      {
-        success: false,
-        msg: "系统配置错误",
-      },
-      500,
-    );
-  }
-
   // 查询用户是否存在
   let user = db
     .prepare("SELECT * FROM users WHERE phone = ?")
@@ -140,6 +125,21 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
           msg: "该账户已被禁用，请联系管理员",
         },
         403,
+      );
+    }
+
+    // 查询用户关联的企业
+    const enterprise = db
+      .prepare("SELECT * FROM enterprises WHERE id = ?")
+      .get(user.enterprise_id) as any;
+
+    if (!enterprise) {
+      return c.json(
+        {
+          success: false,
+          msg: "用户企业信息异常",
+        },
+        500,
       );
     }
 
@@ -407,16 +407,16 @@ authRoutes.post(
       );
     }
 
-    // 获取默认企业
+    // 获取邀请码关联的企业
     const enterprise = db
-      .prepare("SELECT * FROM enterprises WHERE code = 'sudo'")
-      .get() as any;
+      .prepare("SELECT * FROM enterprises WHERE id = ?")
+      .get(invitationCode.enterprise_id) as any;
 
     if (!enterprise) {
       return c.json(
         {
           success: false,
-          msg: "系统配置错误",
+          msg: "邀请码关联企业不存在",
         },
         500,
       );
