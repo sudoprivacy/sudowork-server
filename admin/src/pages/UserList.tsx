@@ -56,6 +56,7 @@ const UserList: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [syncingUserId, setSyncingUserId] = useState<number | null>(null);
   const [form] = Form.useForm();
+  const [filterForm] = Form.useForm();
 
   // Recharge modal state
   const [rechargeVisible, setRechargeVisible] = useState(false);
@@ -69,10 +70,10 @@ const UserList: React.FC = () => {
     loadEnterprises();
   }, []);
 
-  const loadUsers = async () => {
+  const loadUsers = async (params?: { keyword?: string; enterprise_id?: number; status?: number }) => {
     setLoading(true);
     try {
-      const response = await adminApi.getUsers();
+      const response = await adminApi.getUsers(params);
       if ((response as any).success) {
         const allUsers = (response as any).data;
         setUsers(allUsers.filter((u: User) => u.phone !== "sudo"));
@@ -93,6 +94,20 @@ const UserList: React.FC = () => {
     } catch (error) {
       console.error("Failed to load enterprises:", error);
     }
+  };
+
+  const handleFilterSearch = () => {
+    const values = filterForm.getFieldsValue();
+    loadUsers({
+      keyword: values.keyword,
+      enterprise_id: values.enterprise_id,
+      status: values.status,
+    });
+  };
+
+  const handleFilterReset = () => {
+    filterForm.resetFields();
+    loadUsers();
   };
 
   const loadAvailableCodes = async (enterpriseId: number) => {
@@ -419,6 +434,38 @@ const UserList: React.FC = () => {
           新建用户
         </Button>
       </div>
+
+      <Card style={{ marginBottom: 24 }}>
+        <Form form={filterForm} layout="inline">
+          <Form.Item name="keyword">
+            <Input placeholder="手机号/昵称" allowClear style={{ width: 160 }} />
+          </Form.Item>
+          <Form.Item name="enterprise_id">
+            <Select placeholder="所属企业" allowClear style={{ width: 140 }}>
+              {enterprises.map((e) => (
+                <Select.Option key={e.id} value={e.id}>
+                  {e.name}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item name="status">
+            <Select placeholder="状态" allowClear style={{ width: 120 }}>
+              <Select.Option value={0}>待审批</Select.Option>
+              <Select.Option value={1}>正常</Select.Option>
+              <Select.Option value={2}>禁用</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button onClick={handleFilterReset}>重置</Button>
+              <Button type="primary" onClick={handleFilterSearch}>
+                查询
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Card>
 
       <Card>
         <Table
