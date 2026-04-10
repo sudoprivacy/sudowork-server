@@ -16,7 +16,7 @@ usersRoutes.get('/users', authMiddleware, adminMiddleware, async (c) => {
   const enterpriseId = c.req.query('enterprise_id');
   const status = c.req.query('status');
   const role = c.req.query('role');
-  const keyword = c.req.query('keyword');
+  const keyword = c.req.query('keyword')?.trim().substring(0, 50);
 
   let query = `
     SELECT u.*, e.name as enterprise_name, ic.code as invitation_code
