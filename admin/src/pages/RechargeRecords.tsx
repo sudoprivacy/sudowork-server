@@ -25,13 +25,15 @@ const RechargeRecords: React.FC = () => {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const [filterForm] = Form.useForm();
 
-  const loadRecords = async (params?: { keyword?: string; type?: string; payment_method?: string }) => {
+  const loadRecords = async (params?: { keyword?: string; type?: string; payment_method?: string; page?: number; pageSize?: number }) => {
     setLoading(true);
     try {
       const response = await adminApi.getRechargeRecords({
-        page: pagination.current,
-        pageSize: pagination.pageSize,
-        ...params,
+        page: params?.page ?? pagination.current,
+        pageSize: params?.pageSize ?? pagination.pageSize,
+        keyword: params?.keyword,
+        type: params?.type,
+        payment_method: params?.payment_method,
       });
       if ((response as any).success) {
         setRecords((response as any).data.list || []);
