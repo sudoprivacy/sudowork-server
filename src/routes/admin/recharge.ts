@@ -301,57 +301,91 @@ rechargeRoutes.get("/recharge-records", authMiddleware, adminMiddleware, async (
   const pageSize = parseInt(c.req.query("pageSize") || "20");
   const offset = (page - 1) * pageSize;
 
+  // Filter parameters
+  const keyword = c.req.query("keyword")?.trim().substring(0, 50);
+  const type = c.req.query("type");
+  const paymentMethod = c.req.query("payment_method");
+
   // Client recharge records (from recharge_records via recharge_orders)
-  const clientRecords = db
-    .prepare(
-      `SELECT
-        rr.id,
-        'CLIENT' as type,
-        ro.order_no,
-        u.phone as user_phone,
-        u.nickname as user_nickname,
-        rr.balance_delta as points,
-        rr.quota_delta as quota,
-        ro.amount_yuan as amount_cny,
-        ro.payment_method,
-        ro.created_at,
-        rr.created_at as processed_at
-      FROM recharge_records rr
-      JOIN recharge_orders ro ON rr.order_id = ro.id
-      LEFT JOIN users u ON rr.user_id = u.id
-      WHERE ro.status = 2
-      ORDER BY rr.created_at DESC`
-    )
-    .all() as any[];
+  let clientQuery = `
+    SELECT
+      rr.id,
+      'CLIENT' as type,
+      ro.order_no,
+      u.phone as user_phone,
+      u.nickname as user_nickname,
+      rr.balance_delta as points,
+      rr.quota_delta as quota,
+      ro.amount_yuan as amount_cny,
+      ro.payment_method,
+      ro.created_at,
+      rr.created_at as processed_at
+    FROM recharge_records rr
+    JOIN recharge_orders ro ON rr.order_id = ro.id
+    LEFT JOIN users u ON rr.user_id = u.id
+    WHERE ro.status = 2
+  `;
+  const clientParams: any[] = [];
+
+  if (keyword) {
+    clientQuery += " AND (u.phone LIKE ? OR u.nickname LIKE ?)";
+    clientParams.push(`%${keyword}%`, `%${keyword}%`);
+  }
+
+  if (paymentMethod) {
+    clientQuery += " AND ro.payment_method = ?";
+    clientParams.push(paymentMethod);
+  }
+
+  clientQuery += " ORDER BY rr.created_at DESC";
+
+  const clientRecords = db.prepare(clientQuery).all(...clientParams) as any[];
 
   // Admin recharge records
-  const adminRecords = db
-    .prepare(
-      `SELECT
-        arr.id,
-        'ADMIN' as type,
-        NULL as order_no,
-        u.phone as user_phone,
-        u.nickname as user_nickname,
-        arr.points,
-        arr.quota,
-        NULL as amount_cny,
-        NULL as payment_method,
-        arr.created_at,
-        arr.created_at as processed_at,
-        a.nickname as admin_nickname,
-        arr.reason,
-        arr.payment_reference
-      FROM admin_recharge_records arr
-      LEFT JOIN users u ON arr.user_id = u.id
-      LEFT JOIN users a ON arr.admin_id = a.id
-      ORDER BY arr.created_at DESC`
-    )
-    .all() as any[];
+  let adminQuery = `
+    SELECT
+      arr.id,
+      'ADMIN' as type,
+      NULL as order_no,
+      u.phone as user_phone,
+      u.nickname as user_nickname,
+      arr.points,
+      arr.quota,
+      NULL as amount_cny,
+      NULL as payment_method,
+      arr.created_at,
+      arr.created_at as processed_at,
+      a.nickname as admin_nickname,
+      arr.reason,
+      arr.payment_reference
+    FROM admin_recharge_records arr
+    LEFT JOIN users u ON arr.user_id = u.id
+    LEFT JOIN users a ON arr.admin_id = a.id
+    WHERE 1=1
+  `;
+  const adminParams: any[] = [];
 
-  // Combine and sort by date
-  const allRecords = [...clientRecords, ...adminRecords]
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  if (keyword) {
+    adminQuery += " AND (u.phone LIKE ? OR u.nickname LIKE ?)";
+    adminParams.push(`%${keyword}%`, `%${keyword}%`);
+  }
+
+  adminQuery += " ORDER BY arr.created_at DESC";
+
+  const adminRecords = db.prepare(adminQuery).all(...adminParams) as any[];
+
+  // Filter by type if specified
+  let allRecords: any[];
+  if (type === "CLIENT") {
+    allRecords = clientRecords;
+  } else if (type === "ADMIN") {
+    allRecords = adminRecords;
+  } else {
+    // Combine and sort by date (default behavior)
+    allRecords = [...clientRecords, ...adminRecords].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }
 
   // Paginate
   const total = allRecords.length;
