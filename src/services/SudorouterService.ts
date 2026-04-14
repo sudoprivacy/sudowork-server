@@ -464,6 +464,73 @@ class SudorouterService {
     }
   }
 
+  // 删除用户（返回详细结果用于日志）
+  async deleteUserWithLog(sudorouterUserId: number): Promise<ApiCallResult<boolean>> {
+    const url = `${this.config.baseUrl}/api/user/${sudorouterUserId}`;
+
+    const startTime = Date.now();
+    try {
+      const response = await fetchWithTimeout(url, {
+        method: "DELETE",
+        headers: this.getHeaders(),
+      }, this.config.timeoutMs);
+
+      const duration = Date.now() - startTime;
+
+      // Sudorouter 删除接口无返回内容，判断 HTTP 状态码即可
+      // 200-299 状态码表示删除成功
+      if (response.ok) {
+        console.log(`[Sudorouter] 用户删除成功: userId=${sudorouterUserId}, status=${response.status}`);
+        return {
+          success: true,
+          data: true,
+          request: { method: "DELETE", url },
+          response: { status: response.status, data: null },
+          duration_ms: duration,
+        };
+      }
+
+      // 非 2xx 状态码表示失败，尝试解析错误信息
+      let errorMsg = `删除失败 (HTTP ${response.status})`;
+      try {
+        const errorData = await response.json() as { message?: string };
+        errorMsg = errorData.message || errorMsg;
+      } catch {
+        // 无法解析响应体，使用状态码信息
+      }
+
+      console.error(`[Sudorouter] 用户删除失败: userId=${sudorouterUserId}, status=${response.status}`);
+      return {
+        success: false,
+        data: false,
+        request: { method: "DELETE", url },
+        response: { status: response.status, data: null },
+        duration_ms: duration,
+        error: errorMsg,
+      };
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      const errorMsg = error.name === "AbortError"
+        ? `请求超时 (${this.config.timeoutMs}ms)`
+        : `网络错误: ${error.message || String(error)}`;
+      console.error(`[Sudorouter] 用户删除异常:`, errorMsg);
+      return {
+        success: false,
+        data: false,
+        request: { method: "DELETE", url },
+        response: { status: 0, data: null },
+        duration_ms: duration,
+        error: errorMsg,
+      };
+    }
+  }
+
+  // 简化版删除用户（兼容旧代码）
+  async deleteUser(sudorouterUserId: number): Promise<boolean> {
+    const result = await this.deleteUserWithLog(sudorouterUserId);
+    return result.success && result.data === true;
+  }
+
   getInitialQuota(): number {
     return this.config.initialQuota;
   }

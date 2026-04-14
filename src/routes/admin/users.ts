@@ -450,15 +450,26 @@ usersRoutes.post('/users/:id/manage', authMiddleware, adminMiddleware, async (c)
   });
 });
 
-// DELETE /users/:id - Delete user
+// DELETE /users/:id - Delete user (hard delete with Sudorouter sync)
 usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
   const adminUser = (await getAuthUser(c)) as User;
   const id = c.req.param('id');
 
-  // Check if user is admin
+  // Check if user exists
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
 
-  if (user?.role === 'SUPER_ADMIN') {
+  if (!user) {
+    return c.json(
+      {
+        success: false,
+        msg: '用户不存在',
+      },
+      404,
+    );
+  }
+
+  // Cannot delete SUPER_ADMIN
+  if (user.role === 'SUPER_ADMIN') {
     return c.json(
       {
         success: false,
@@ -468,61 +479,165 @@ usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
     );
   }
 
-  // Log operation with deleted user details
-  if (user) {
-    // Log invitation code deletion
-    if (user.invitation_code_id) {
-      const invitationCode = db
-        .prepare('SELECT * FROM invitation_codes WHERE id = ?')
-        .get(user.invitation_code_id) as { code: string; enterprise_id: number } | undefined;
+  // Step 1: Call Sudorouter delete API first
+  if (user.sudorouter_user_id && sudorouterService.isConfigured()) {
+    const deleteResult = await sudorouterService.deleteUserWithLog(user.sudorouter_user_id);
 
-      logOperation({
-        userId: adminUser.id,
-        userPhone: adminUser.phone,
-        action: 'INVITATION_CODE_DELETE',
-        resource: 'invitation_code',
-        resourceId: user.invitation_code_id,
-        method: 'DELETE',
-        path: `/api/v1/admin/invitation-codes/${user.invitation_code_id}`,
-        requestData: { deleted_with_user: id, user_phone: user.phone },
-        responseData: {
-          code: invitationCode?.code,
-          enterprise_id: invitationCode?.enterprise_id,
-        },
-      });
-
-      db.run('DELETE FROM invitation_codes WHERE id = ?', [user.invitation_code_id]);
-      console.log(`[Admin] 删除用户 ${id} 的邀请码: ${user.invitation_code_id}`);
-    }
-
-    // Log user deletion
     logOperation({
       userId: adminUser.id,
       userPhone: adminUser.phone,
-      action: 'USER_DELETE',
+      action: 'SUDOROUTER_DELETE_USER',
+      resource: 'sudorouter_user',
+      resourceId: user.sudorouter_user_id,
+      method: deleteResult.request.method,
+      path: deleteResult.request.url,
+      requestData: { user_id: user.sudorouter_user_id },
+      responseData: deleteResult.response.data,
+      responseStatus: deleteResult.response.status,
+      durationMs: deleteResult.duration_ms,
+      errorMessage: deleteResult.success ? undefined : deleteResult.error,
+    });
+
+    if (!deleteResult.success) {
+      return c.json(
+        {
+          success: false,
+          msg: `Sudorouter 用户删除失败: ${deleteResult.error || '未知错误'}`,
+        },
+        500,
+      );
+    }
+  }
+
+  // Step 2: Get complete data snapshot for logging (before deletion)
+  const invitationCode = user.invitation_code_id
+    ? db.prepare('SELECT * FROM invitation_codes WHERE id = ?').get(user.invitation_code_id) as { code: string; enterprise_id: number } | undefined
+    : undefined;
+
+  // Query complete financial data for snapshot
+  const ledgerRecords = db.prepare('SELECT * FROM ledger WHERE user_id = ?').all(id) as any[];
+  const rechargeOrders = db.prepare('SELECT * FROM recharge_orders WHERE user_id = ?').all(id) as any[];
+  const rechargeRecords = db.prepare('SELECT * FROM recharge_records WHERE user_id = ?').all(id) as any[];
+  const adminRechargeRecords = db.prepare('SELECT * FROM admin_recharge_records WHERE user_id = ?').all(id) as any[];
+  const refundRecords = db.prepare('SELECT * FROM refund_records WHERE user_id = ?').all(id) as any[];
+
+  // Calculate summary statistics
+  const totalBonus = ledgerRecords.filter(r => r.type === 'BONUS').reduce((sum, r) => sum + r.amount, 0);
+  const totalRecharge = ledgerRecords.filter(r => r.type === 'RECHARGE').reduce((sum, r) => sum + r.amount, 0);
+  const totalUsage = ledgerRecords.filter(r => r.type === 'USAGE').reduce((sum, r) => sum + Math.abs(r.amount), 0);
+  const totalAdjustment = ledgerRecords.filter(r => r.type === 'ADMIN_ADJUST').reduce((sum, r) => sum + r.amount, 0);
+
+  // Step 3: Delete all related data in local database using transaction
+  // Note: operation_logs is preserved for audit purposes
+  try {
+    db.run('BEGIN EXCLUSIVE TRANSACTION');
+
+    // Delete recharge-related records (child tables first)
+    db.run('DELETE FROM recharge_records WHERE user_id = ?', [id]);
+    db.run('DELETE FROM admin_recharge_records WHERE user_id = ?', [id]);
+    db.run('DELETE FROM refund_records WHERE user_id = ?', [id]);
+    db.run('DELETE FROM recharge_orders WHERE user_id = ?', [id]);
+
+    // Delete ledger (points history)
+    db.run('DELETE FROM ledger WHERE user_id = ?', [id]);
+
+    // Delete invitation code
+    if (user.invitation_code_id) {
+      db.run('DELETE FROM invitation_codes WHERE id = ?', [user.invitation_code_id]);
+    }
+
+    // Delete user (main table last)
+    db.run('DELETE FROM users WHERE id = ?', [id]);
+
+    db.run('COMMIT');
+  } catch (error) {
+    db.run('ROLLBACK');
+    console.error(`[Admin] 删除用户 ${id} 失败，事务已回滚:`, error);
+
+    // Log the failure
+    logOperation({
+      userId: adminUser.id,
+      userPhone: adminUser.phone,
+      action: 'USER_DELETE_FAILED',
       resource: 'user',
       resourceId: parseInt(id),
       method: 'DELETE',
       path: `/api/v1/admin/users/${id}`,
-      requestData: { target_user_id: id },
-      responseData: {
-        phone: user.phone,
-        nickname: user.nickname,
-        sudorouter_user_id: user.sudorouter_user_id,
-        sudorouter_key: user.sudorouter_key ? user.sudorouter_key.substring(0, 20) + '...' : null,
-        invitation_code_id: user.invitation_code_id,
-        balance: user.balance,
-      },
+      requestData: { target_user_id: id, hard_delete: true },
+      responseData: { error: String(error) },
+      errorMessage: String(error),
     });
+
+    return c.json(
+      {
+        success: false,
+        msg: `本地数据删除失败: ${String(error)}`,
+      },
+      500,
+    );
   }
 
-  // Delete user and ledger records
-  db.run('DELETE FROM users WHERE id = ?', [id]);
-  db.run('DELETE FROM ledger WHERE user_id = ?', [id]);
+  // Step 4: Log user deletion operation with complete snapshot
+  logOperation({
+    userId: adminUser.id,
+    userPhone: adminUser.phone,
+    action: 'USER_DELETE',
+    resource: 'user',
+    resourceId: parseInt(id),
+    method: 'DELETE',
+    path: `/api/v1/admin/users/${id}`,
+    requestData: { target_user_id: id, hard_delete: true },
+    responseData: {
+      // User basic info
+      user: {
+        phone: user.phone,
+        nickname: user.nickname,
+        role: user.role,
+        status: user.status,
+        enterprise_id: user.enterprise_id,
+        sudorouter_user_id: user.sudorouter_user_id,
+        balance: user.balance,
+        quota: user.quota,
+        used_quota: user.used_quota,
+        created_at: user.created_at,
+      },
+      // Invitation code
+      invitation_code: invitationCode ? {
+        code: invitationCode.code,
+        enterprise_id: invitationCode.enterprise_id,
+      } : null,
+      // Sudorouter deletion status
+      sudorouter_deleted: user.sudorouter_user_id ? true : null,
+      // Financial summary
+      financial_summary: {
+        total_bonus_points: totalBonus,
+        total_recharge_points: totalRecharge,
+        total_usage_points: totalUsage,
+        total_adjustment_points: totalAdjustment,
+        final_balance: user.balance,
+        ledger_count: ledgerRecords.length,
+        recharge_orders_count: rechargeOrders.length,
+        admin_recharge_count: adminRechargeRecords.length,
+        refund_count: refundRecords.length,
+      },
+      // Complete data export (for audit)
+      data_export: {
+        ledger: ledgerRecords,
+        recharge_orders: rechargeOrders,
+        recharge_records: rechargeRecords,
+        admin_recharge_records: adminRechargeRecords,
+        refund_records: refundRecords,
+      },
+      // Deleted tables list
+      deleted_tables: ['recharge_records', 'admin_recharge_records', 'refund_records', 'recharge_orders', 'ledger', 'invitation_codes', 'users'],
+    },
+  });
+
+  console.log(`[Admin] 用户 ${id} (${user.phone}) 已彻底删除，包含 Sudorouter 用户 ${user.sudorouter_user_id}`);
 
   return c.json({
     success: true,
-    msg: '用户删除成功',
+    msg: '用户删除成功，所有关联数据已清除',
   });
 });
 

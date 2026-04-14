@@ -10,11 +10,15 @@ import { ORDER_STATUS, ORDER_STATUS_TEXT } from "../../utils/constants.js";
 
 const rechargeRoutes = new Hono();
 
-// GET /recharge/orders - Get recharge orders list
+// GET /recharge/orders - Get recharge orders list with filters
 rechargeRoutes.get("/recharge/orders", authMiddleware, adminMiddleware, async (c) => {
   const status = c.req.query("status");
+  const orderNo = c.req.query("order_no");
+  const userPhone = c.req.query("user_phone");
+  const startDate = c.req.query("start_date");
+  const endDate = c.req.query("end_date");
   const page = parseInt(c.req.query("page") || "1");
-  const pageSize = parseInt(c.req.query("pageSize") || "20");
+  const pageSize = parseInt(c.req.query("pageSize") || c.req.query("page_size") || "20");
   const offset = (page - 1) * pageSize;
 
   let query = `
@@ -25,9 +29,32 @@ rechargeRoutes.get("/recharge/orders", authMiddleware, adminMiddleware, async (c
   `;
   const params: any[] = [];
 
+  // Filter by status
   if (status !== undefined && status !== "") {
     query += " AND ro.status = ?";
     params.push(parseInt(status));
+  }
+
+  // Filter by order_no
+  if (orderNo !== undefined && orderNo !== "") {
+    query += " AND ro.order_no LIKE ?";
+    params.push(`%${orderNo}%`);
+  }
+
+  // Filter by user_phone
+  if (userPhone !== undefined && userPhone !== "") {
+    query += " AND u.phone LIKE ?";
+    params.push(`%${userPhone}%`);
+  }
+
+  // Filter by date range
+  if (startDate !== undefined && startDate !== "") {
+    query += " AND DATE(ro.created_at) >= ?";
+    params.push(startDate);
+  }
+  if (endDate !== undefined && endDate !== "") {
+    query += " AND DATE(ro.created_at) <= ?";
+    params.push(endDate);
   }
 
   query += " ORDER BY ro.created_at DESC LIMIT ? OFFSET ?";
@@ -35,13 +62,34 @@ rechargeRoutes.get("/recharge/orders", authMiddleware, adminMiddleware, async (c
 
   const orders = db.prepare(query).all(...params) as any[];
 
-  // Get total count
-  let countQuery = "SELECT COUNT(*) as count FROM recharge_orders WHERE 1=1";
+  // Get total count with same filters
+  let countQuery = `
+    SELECT COUNT(*) as count
+    FROM recharge_orders ro
+    LEFT JOIN users u ON ro.user_id = u.id
+    WHERE 1=1
+  `;
   const countParams: any[] = [];
 
   if (status !== undefined && status !== "") {
-    countQuery += " AND status = ?";
+    countQuery += " AND ro.status = ?";
     countParams.push(parseInt(status));
+  }
+  if (orderNo !== undefined && orderNo !== "") {
+    countQuery += " AND ro.order_no LIKE ?";
+    countParams.push(`%${orderNo}%`);
+  }
+  if (userPhone !== undefined && userPhone !== "") {
+    countQuery += " AND u.phone LIKE ?";
+    countParams.push(`%${userPhone}%`);
+  }
+  if (startDate !== undefined && startDate !== "") {
+    countQuery += " AND DATE(ro.created_at) >= ?";
+    countParams.push(startDate);
+  }
+  if (endDate !== undefined && endDate !== "") {
+    countQuery += " AND DATE(ro.created_at) <= ?";
+    countParams.push(endDate);
   }
 
   const total = db.prepare(countQuery).get(...countParams) as any;

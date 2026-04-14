@@ -15,7 +15,7 @@ import {
   Alert,
   Spin,
 } from "antd";
-import { PlusOutlined, DeleteOutlined, EditOutlined, SyncOutlined, DollarOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, EditOutlined, SyncOutlined, DollarOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
 import { adminApi } from "../api";
 
 const { Title } = Typography;
@@ -179,16 +179,35 @@ const UserList: React.FC = () => {
     setVisible(true);
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (user: User) => {
     Modal.confirm({
-      title: "确认删除",
-      content: "确定要删除该用户吗？",
-      okText: "确认",
+      title: "⚠️ 删除用户确认",
+      icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+      content: (
+        <div>
+          <p style={{ marginBottom: 12 }}>
+            您确定要删除用户「<strong>{user.nickname || user.phone}</strong>」(<strong>{user.phone}</strong>) 吗？
+          </p>
+          <div style={{ background: '#fffbe6', padding: 12, borderRadius: 4, border: '1px solid #ffe58f' }}>
+            <p style={{ color: '#d48806', fontWeight: 'bold', marginBottom: 8 }}>⚠️ 删除后以下数据将被永久清除，无法恢复：</p>
+            <ul style={{ marginLeft: 20, marginBottom: 0 }}>
+              <li>用户账号信息</li>
+              <li>积分余额和历史流水</li>
+              <li>充值订单和记录</li>
+              <li>Sudorouter API 账号</li>
+              <li>已使用的邀请码</li>
+            </ul>
+          </div>
+          <p style={{ color: '#ff4d4f', marginTop: 12 }}>请谨慎操作！</p>
+        </div>
+      ),
+      okText: "确认删除",
+      okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
         try {
-          await adminApi.deleteUser(id);
-          message.success("删除成功");
+          await adminApi.deleteUser(user.id);
+          message.success("删除成功，所有关联数据已清除");
           loadUsers();
         } catch (error: any) {
           message.error(error.response?.data?.msg || "删除失败");
@@ -415,7 +434,7 @@ const UserList: React.FC = () => {
             type="link"
             size="small"
             danger
-            onClick={() => handleDelete(record.id)}
+            onClick={() => handleDelete(record)}
           >
             删除
           </Button>
