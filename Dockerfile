@@ -56,8 +56,8 @@ COPY --from=backend-deps /app/package.json ./
 COPY src ./src
 COPY tsconfig.json ./
 
-# Copy built frontend from Stage 1
-COPY --from=frontend-builder /app/admin/dist ./admin-dist
+# Copy built frontend from Stage 1 (vite outputs to ../admin-dist)
+COPY --from=frontend-builder /app/admin-dist ./admin-dist
 
 # Create data directory with proper permissions
 RUN mkdir -p /app/data && chmod 777 /app/data
