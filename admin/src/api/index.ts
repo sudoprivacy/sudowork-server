@@ -64,6 +64,7 @@ export const adminApi = {
 
   // User APIs
   getUsers: (params?: {
+    keyword?: string;
     enterprise_id?: number;
     status?: number;
     role?: string;
@@ -156,8 +157,13 @@ export const adminApi = {
   getRefundCalc: (orderNo: string) =>
     api.get(`/v1/admin/recharge/refund-calc/${orderNo}`),
 
-  getRechargeRecords: (params?: { page?: number; pageSize?: number }) =>
-    api.get("/v1/admin/recharge-records", { params }),
+  getRechargeRecords: (params?: {
+    keyword?: string;
+    type?: string;
+    payment_method?: string;
+    page?: number;
+    pageSize?: number;
+  }) => api.get("/v1/admin/recharge-records", { params }),
 
   // Sync pending orders
   syncPendingOrders: () =>

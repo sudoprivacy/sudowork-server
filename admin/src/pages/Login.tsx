@@ -19,8 +19,14 @@ const LoginForm: React.FC = () => {
     try {
       const data = await adminApi.login(values);
       if ((data as any).success) {
-        localStorage.setItem("admin_token", (data as any).data.token);
+        // 兼容新旧返回格式
+        const token = (data as any).data.access_token || (data as any).data.token;
+        localStorage.setItem("admin_token", token);
         localStorage.setItem("admin_user", JSON.stringify((data as any).data.user));
+        // 存储 refresh_token（如果有）
+        if ((data as any).data.refresh_token) {
+          localStorage.setItem("admin_refresh_token", (data as any).data.refresh_token);
+        }
         message.success("登录成功");
         navigate("/");
       } else {

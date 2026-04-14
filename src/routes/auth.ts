@@ -10,6 +10,8 @@ import { sudorouterService } from "../services/SudorouterService.js";
 import { isValidPhone, isValidSmsCode } from "../utils/validation.js";
 import { rateLimiter, rateLimitPresets } from "../middleware/rateLimiter.js";
 import { redis } from "../redis.js";
+import type { User } from "../types/index.js";
+import { logSudorouterCall } from "../utils/logger.js";
 
 const authRoutes = new Hono();
 
@@ -109,25 +111,10 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
     );
   }
 
-  // 获取默认企业
-  const enterprise = db
-    .prepare("SELECT * FROM enterprises WHERE code = 'sudo'")
-    .get() as any;
-
-  if (!enterprise) {
-    return c.json(
-      {
-        success: false,
-        msg: "系统配置错误",
-      },
-      500,
-    );
-  }
-
   // 查询用户是否存在
   let user = db
     .prepare("SELECT * FROM users WHERE phone = ?")
-    .get(phone) as any;
+    .get(phone) as User | undefined;
 
   if (user) {
     // 检查用户是否被禁用 (status: 2=禁用)
@@ -138,6 +125,21 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
           msg: "该账户已被禁用，请联系管理员",
         },
         403,
+      );
+    }
+
+    // 查询用户关联的企业
+    const enterprise = db
+      .prepare("SELECT * FROM enterprises WHERE id = ?")
+      .get(user.enterprise_id) as any;
+
+    if (!enterprise) {
+      return c.json(
+        {
+          success: false,
+          msg: "用户企业信息异常",
+        },
+        500,
       );
     }
 
@@ -188,47 +190,37 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
           );
 
           // 记录 Sudorouter API 调用日志
-          db.run(
-            `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              user.id,
-              phone,
-              "SUDOROUTER_GET_USER",
-              "sudorouter_api",
-              user.sudorouter_user_id,
-              getUserResult.request.method,
-              getUserResult.request.url,
-              JSON.stringify({ user_id: user.sudorouter_user_id }),
-              JSON.stringify({
-                success: true,
-                quota: sudorouterUserInfo.quota,
-                used_quota: sudorouterUserInfo.used_quota,
-              }),
-              getUserResult.response.status,
-              getUserResult.duration_ms,
-            ],
-          );
+          logSudorouterCall({
+            userId: user.id,
+            userPhone: phone,
+            action: "SUDOROUTER_GET_USER",
+            resourceId: user.sudorouter_user_id,
+            method: getUserResult.request.method,
+            url: getUserResult.request.url,
+            requestBody: { user_id: user.sudorouter_user_id },
+            responseBody: {
+              success: true,
+              quota: sudorouterUserInfo.quota,
+              used_quota: sudorouterUserInfo.used_quota,
+            },
+            responseStatus: getUserResult.response.status,
+            durationMs: getUserResult.duration_ms,
+          });
         } else {
           // 记录失败日志
-          db.run(
-            `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms, error_message)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              user.id,
-              phone,
-              "SUDOROUTER_GET_USER",
-              "sudorouter_api",
-              user.sudorouter_user_id,
-              getUserResult.request.method,
-              getUserResult.request.url,
-              JSON.stringify({ user_id: user.sudorouter_user_id }),
-              JSON.stringify(getUserResult.response.data),
-              getUserResult.response.status,
-              getUserResult.duration_ms,
-              getUserResult.error || "获取用户信息失败",
-            ],
-          );
+          logSudorouterCall({
+            userId: user.id,
+            userPhone: phone,
+            action: "SUDOROUTER_GET_USER",
+            resourceId: user.sudorouter_user_id,
+            method: getUserResult.request.method,
+            url: getUserResult.request.url,
+            requestBody: { user_id: user.sudorouter_user_id },
+            responseBody: getUserResult.response.data,
+            responseStatus: getUserResult.response.status,
+            durationMs: getUserResult.duration_ms,
+            errorMessage: getUserResult.error || "获取用户信息失败",
+          });
         }
       } catch (error) {
         console.error(`[Login] 同步用户 ${phone} 额度失败:`, error);
@@ -242,13 +234,39 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
     }
 
     // 登录成功
-    const token = await sign(
+    const deviceId = c.req.header('X-Device-Id') || 'default';
+    const refreshToken = crypto.randomUUID();
+
+    // 存储 refresh_token 到 Redis（30天）
+    await redis.setex(
+      `refresh_token:${user.id}:${deviceId}:${refreshToken}`,
+      30 * 24 * 60 * 60,
+      JSON.stringify({ phone: user.phone, role: user.role, enterprise_id: user.enterprise_id })
+    );
+
+    // 生成 access_token（2小时）
+    const now = Math.floor(Date.now() / 1000);
+    const accessToken = await sign(
       {
         id: user.id,
         phone: user.phone,
         role: user.role,
         enterprise_id: user.enterprise_id,
-        // exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
+        iat: now,
+        exp: now + 2 * 60 * 60, // 2小时
+      },
+      SECRET,
+    );
+
+    // 生成兼容旧客户端的 token（30天）- 过渡期结束后移除
+    const legacyToken = await sign(
+      {
+        id: user.id,
+        phone: user.phone,
+        role: user.role,
+        enterprise_id: user.enterprise_id,
+        iat: now,
+        exp: now + 30 * 24 * 60 * 60, // 30天
       },
       SECRET,
     );
@@ -259,7 +277,10 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
     return c.json({
       success: true,
       data: {
-        token,
+        token: legacyToken,             // 兼容旧客户端（过渡期）
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: 2 * 60 * 60, // 2小时（秒）
         user: {
           id: user.id,
           phone: user.phone,
@@ -347,7 +368,7 @@ authRoutes.post(
     // 检查用户是否已被创建（防止重复注册）
     const existingUser = db
       .prepare("SELECT * FROM users WHERE phone = ?")
-      .get(phone) as any;
+      .get(phone) as User | undefined;
 
     if (existingUser) {
       // 删除 register_token
@@ -386,16 +407,16 @@ authRoutes.post(
       );
     }
 
-    // 获取默认企业
+    // 获取邀请码关联的企业
     const enterprise = db
-      .prepare("SELECT * FROM enterprises WHERE code = 'sudo'")
-      .get() as any;
+      .prepare("SELECT * FROM enterprises WHERE id = ?")
+      .get(invitationCode.enterprise_id) as any;
 
     if (!enterprise) {
       return c.json(
         {
           success: false,
-          msg: "系统配置错误",
+          msg: "邀请码关联企业不存在",
         },
         500,
       );
@@ -416,23 +437,18 @@ authRoutes.post(
     const createUserResult = await sudorouterService.createUserWithLog(phone, nickname);
     if (!createUserResult.success || !createUserResult.data) {
       // 记录失败日志
-      db.run(
-        `INSERT INTO operation_logs (user_id, user_phone, action, resource, method, path, request_data, response_data, response_status, duration_ms, error_message)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          0,
-          phone,
-          "SUDOROUTER_CREATE_USER",
-          "sudorouter_api",
-          createUserResult.request.method,
-          createUserResult.request.url,
-          JSON.stringify(createUserResult.request.body),
-          JSON.stringify(createUserResult.response.data),
-          createUserResult.response.status,
-          createUserResult.duration_ms,
-          createUserResult.error || "创建用户失败",
-        ],
-      );
+      logSudorouterCall({
+        userId: 0,
+        userPhone: phone,
+        action: "SUDOROUTER_CREATE_USER",
+        method: createUserResult.request.method,
+        url: createUserResult.request.url,
+        requestBody: createUserResult.request.body,
+        responseBody: createUserResult.response.data,
+        responseStatus: createUserResult.response.status,
+        durationMs: createUserResult.duration_ms,
+        errorMessage: createUserResult.error || "创建用户失败",
+      });
       return c.json(
         {
           success: false,
@@ -445,27 +461,22 @@ authRoutes.post(
     const sudorouterUser = createUserResult.data;
 
     // 记录创建用户成功日志
-    db.run(
-      `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        0,
-        phone,
-        "SUDOROUTER_CREATE_USER",
-        "sudorouter_api",
-        sudorouterUser.id,
-        createUserResult.request.method,
-        createUserResult.request.url,
-        JSON.stringify(createUserResult.request.body),
-        JSON.stringify({
-          success: true,
-          id: sudorouterUser.id,
-          username: sudorouterUser.username,
-        }),
-        createUserResult.response.status,
-        createUserResult.duration_ms,
-      ],
-    );
+    logSudorouterCall({
+      userId: 0,
+      userPhone: phone,
+      action: "SUDOROUTER_CREATE_USER",
+      resourceId: sudorouterUser.id,
+      method: createUserResult.request.method,
+      url: createUserResult.request.url,
+      requestBody: createUserResult.request.body,
+      responseBody: {
+        success: true,
+        id: sudorouterUser.id,
+        username: sudorouterUser.username,
+      },
+      responseStatus: createUserResult.response.status,
+      durationMs: createUserResult.duration_ms,
+    });
 
     // 充值初始额度
     const initialQuota = sudorouterService.getInitialQuota();
@@ -477,44 +488,34 @@ authRoutes.post(
 
     if (!quotaResult.success) {
       // 记录失败日志
-      db.run(
-        `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms, error_message)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          0,
-          phone,
-          "SUDOROUTER_UPDATE_QUOTA",
-          "sudorouter_api",
-          sudorouterUser.id,
-          quotaResult.request.method,
-          quotaResult.request.url,
-          JSON.stringify(quotaResult.request.body),
-          JSON.stringify(quotaResult.response.data),
-          quotaResult.response.status,
-          quotaResult.duration_ms,
-          quotaResult.error || "额度充值失败",
-        ],
-      );
+      logSudorouterCall({
+        userId: 0,
+        userPhone: phone,
+        action: "SUDOROUTER_UPDATE_QUOTA",
+        resourceId: sudorouterUser.id,
+        method: quotaResult.request.method,
+        url: quotaResult.request.url,
+        requestBody: quotaResult.request.body,
+        responseBody: quotaResult.response.data,
+        responseStatus: quotaResult.response.status,
+        durationMs: quotaResult.duration_ms,
+        errorMessage: quotaResult.error || "额度充值失败",
+      });
       console.error(`[Register] 用户 ${phone} 额度充值失败`);
     } else {
       // 记录成功日志
-      db.run(
-        `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          0,
-          phone,
-          "SUDOROUTER_UPDATE_QUOTA",
-          "sudorouter_api",
-          sudorouterUser.id,
-          quotaResult.request.method,
-          quotaResult.request.url,
-          JSON.stringify(quotaResult.request.body),
-          JSON.stringify({ success: true, quota: initialQuota }),
-          quotaResult.response.status,
-          quotaResult.duration_ms,
-        ],
-      );
+      logSudorouterCall({
+        userId: 0,
+        userPhone: phone,
+        action: "SUDOROUTER_UPDATE_QUOTA",
+        resourceId: sudorouterUser.id,
+        method: quotaResult.request.method,
+        url: quotaResult.request.url,
+        requestBody: quotaResult.request.body,
+        responseBody: { success: true, quota: initialQuota },
+        responseStatus: quotaResult.response.status,
+        durationMs: quotaResult.duration_ms,
+      });
       console.log(`[Register] 用户 ${phone} 充值成功: ${initialQuota}`);
     }
 
@@ -527,24 +528,19 @@ authRoutes.post(
 
     if (!createTokenResult.success || !createTokenResult.data) {
       // 记录失败日志
-      db.run(
-        `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms, error_message)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          0,
-          phone,
-          "SUDOROUTER_CREATE_TOKEN",
-          "sudorouter_api",
-          sudorouterUser.id,
-          createTokenResult.request.method,
-          createTokenResult.request.url,
-          JSON.stringify(createTokenResult.request.body),
-          JSON.stringify(createTokenResult.response.data),
-          createTokenResult.response.status,
-          createTokenResult.duration_ms,
-          createTokenResult.error || "创建令牌失败",
-        ],
-      );
+      logSudorouterCall({
+        userId: 0,
+        userPhone: phone,
+        action: "SUDOROUTER_CREATE_TOKEN",
+        resourceId: sudorouterUser.id,
+        method: createTokenResult.request.method,
+        url: createTokenResult.request.url,
+        requestBody: createTokenResult.request.body,
+        responseBody: createTokenResult.response.data,
+        responseStatus: createTokenResult.response.status,
+        durationMs: createTokenResult.duration_ms,
+        errorMessage: createTokenResult.error || "创建令牌失败",
+      });
       return c.json(
         {
           success: false,
@@ -557,26 +553,21 @@ authRoutes.post(
     const sudorouterKey = createTokenResult.data;
 
     // 记录创建令牌成功日志
-    db.run(
-      `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data, response_status, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        0,
-        phone,
-        "SUDOROUTER_CREATE_TOKEN",
-        "sudorouter_api",
-        sudorouterUser.id,
-        createTokenResult.request.method,
-        createTokenResult.request.url,
-        JSON.stringify(createTokenResult.request.body),
-        JSON.stringify({
-          success: true,
-          key_preview: sudorouterKey.substring(0, 20) + "...",
-        }),
-        createTokenResult.response.status,
-        createTokenResult.duration_ms,
-      ],
-    );
+    logSudorouterCall({
+      userId: 0,
+      userPhone: phone,
+      action: "SUDOROUTER_CREATE_TOKEN",
+      resourceId: sudorouterUser.id,
+      method: createTokenResult.request.method,
+      url: createTokenResult.request.url,
+      requestBody: createTokenResult.request.body,
+      responseBody: {
+        success: true,
+        key_preview: sudorouterKey.substring(0, 20) + "...",
+      },
+      responseStatus: createTokenResult.response.status,
+      durationMs: createTokenResult.duration_ms,
+    });
 
     // 计算初始积分
     const initialBalance = sudorouterService.quotaToPoints(initialQuota);
@@ -635,14 +626,40 @@ authRoutes.post(
     // 删除 register_token
     await redis.del(`register_token:${register_token}`);
 
-    // 生成 JWT
-    const token = await sign(
+    // 生成 refresh_token
+    const deviceId = c.req.header('X-Device-Id') || 'default';
+    const refreshToken = crypto.randomUUID();
+
+    // 存储 refresh_token 到 Redis（30天）
+    await redis.setex(
+      `refresh_token:${newUserId}:${deviceId}:${refreshToken}`,
+      30 * 24 * 60 * 60,
+      JSON.stringify({ phone, role: "USER", enterprise_id: enterprise.id })
+    );
+
+    // 生成 access_token（2小时）
+    const now = Math.floor(Date.now() / 1000);
+    const accessToken = await sign(
       {
         id: newUserId,
         phone: phone,
         role: "USER",
         enterprise_id: enterprise.id,
-        exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
+        iat: now,
+        exp: now + 2 * 60 * 60, // 2小时
+      },
+      SECRET,
+    );
+
+    // 生成兼容旧客户端的 token（30天）- 过渡期结束后移除
+    const legacyToken = await sign(
+      {
+        id: newUserId,
+        phone: phone,
+        role: "USER",
+        enterprise_id: enterprise.id,
+        iat: now,
+        exp: now + 30 * 24 * 60 * 60, // 30天
       },
       SECRET,
     );
@@ -660,7 +677,10 @@ authRoutes.post(
     return c.json({
       success: true,
       data: {
-        token,
+        token: legacyToken,             // 兼容旧客户端（过渡期）
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: 2 * 60 * 60, // 2小时（秒）
         user: {
           id: newUserId,
           phone: phone,
@@ -682,5 +702,112 @@ authRoutes.post(
     });
   },
 );
+
+// POST /api/v1/auth/refresh - Refresh access token
+authRoutes.post("/refresh", async (c) => {
+  const { refresh_token, device_id } = await c.req.json();
+
+  if (!refresh_token) {
+    return c.json({ success: false, msg: "refresh_token 不能为空" }, 400);
+  }
+
+  const deviceId = device_id || 'default';
+
+  // 查找 refresh_token（支持多设备）
+  const keys = await redis.keys(`refresh_token:*:${deviceId}:${refresh_token}`);
+
+  if (!keys || keys.length === 0) {
+    return c.json({ success: false, msg: "refresh_token 无效或已过期" }, 401);
+  }
+
+  const key = keys[0];
+  const tokenDataStr = await redis.get(key);
+
+  if (!tokenDataStr) {
+    return c.json({ success: false, msg: "refresh_token 无效或已过期" }, 401);
+  }
+
+  const tokenData = JSON.parse(tokenDataStr);
+
+  // 从 key 中提取 userId: refresh_token:{userId}:{deviceId}:{refreshToken}
+  const keyParts = key.split(':');
+  const userId = parseInt(keyParts[1]);
+
+  // 删除旧 refresh_token（滚动刷新）
+  await redis.del(key);
+
+  // 生成新的 refresh_token
+  const newRefreshToken = crypto.randomUUID();
+
+  // 存储新 refresh_token（30天）
+  await redis.setex(
+    `refresh_token:${userId}:${deviceId}:${newRefreshToken}`,
+    30 * 24 * 60 * 60,
+    JSON.stringify(tokenData)
+  );
+
+  // 生成新的 access_token（2小时）
+  const now = Math.floor(Date.now() / 1000);
+  const accessToken = await sign(
+    {
+      id: userId,
+      phone: tokenData.phone,
+      role: tokenData.role,
+      enterprise_id: tokenData.enterprise_id,
+      iat: now,
+      exp: now + 2 * 60 * 60,
+    },
+    SECRET,
+  );
+
+  return c.json({
+    success: true,
+    access_token: accessToken,
+    refresh_token: newRefreshToken,
+    expires_in: 2 * 60 * 60,
+  });
+});
+
+// POST /api/v1/auth/logout - Logout (revoke refresh_token)
+authRoutes.post("/logout", async (c) => {
+  const { refresh_token, device_id, all } = await c.req.json();
+
+  if (!refresh_token && !all) {
+    return c.json({ success: false, msg: "参数不完整" }, 400);
+  }
+
+  // 从 refresh_token 中提取 userId（格式：refresh_token:{userId}:{deviceId}:{refreshToken}）
+  // 或者从请求头获取当前用户
+  const authHeader = c.req.header("Authorization");
+  let userId: number | null = null;
+
+  if (authHeader?.startsWith("Bearer ")) {
+    try {
+      const token = authHeader.split(" ")[1];
+      const { verify } = await import("hono/jwt");
+      const payload = await verify(token, SECRET, "HS256");
+      userId = (payload as any).id;
+    } catch {
+      // Token 无效，继续尝试其他方式
+    }
+  }
+
+  if (all && userId) {
+    // 删除该用户所有设备的 refresh_token
+    const keys = await redis.keys(`refresh_token:${userId}:*`);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } else if (refresh_token) {
+    // 删除指定 refresh_token
+    const deviceId = device_id || 'default';
+    const keys = await redis.keys(`refresh_token:*:${deviceId}:${refresh_token}`);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  }
+
+  return c.json({ success: true, msg: "注销成功" });
+});
 
 export { authRoutes };

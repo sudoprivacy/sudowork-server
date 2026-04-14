@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Card, Table, Tag, Space, Button, message } from "antd";
+import { Card, Table, Tag, Space, Button, message, Form, Input, Select } from "antd";
 import { ReloadOutlined, AlipayCircleOutlined, WechatOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { adminApi } from "../api";
@@ -23,13 +23,17 @@ const RechargeRecords: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [records, setRecords] = useState<RechargeRecord[]>([]);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
+  const [filterForm] = Form.useForm();
 
-  const loadRecords = async () => {
+  const loadRecords = async (params?: { keyword?: string; type?: string; payment_method?: string; page?: number; pageSize?: number }) => {
     setLoading(true);
     try {
       const response = await adminApi.getRechargeRecords({
-        page: pagination.current,
-        pageSize: pagination.pageSize,
+        page: params?.page ?? pagination.current,
+        pageSize: params?.pageSize ?? pagination.pageSize,
+        keyword: params?.keyword,
+        type: params?.type,
+        payment_method: params?.payment_method,
       });
       if ((response as any).success) {
         setRecords((response as any).data.list || []);
@@ -45,12 +49,41 @@ const RechargeRecords: React.FC = () => {
     }
   };
 
+  const handleFilterSearch = () => {
+    const values = filterForm.getFieldsValue();
+    setPagination((prev) => ({ ...prev, current: 1 }));
+    loadRecords({
+      page: 1,
+      pageSize: pagination.pageSize,
+      keyword: values.keyword,
+      type: values.type,
+      payment_method: values.payment_method,
+    });
+  };
+
+  const handleFilterReset = () => {
+    filterForm.resetFields();
+    setPagination((prev) => ({ ...prev, current: 1 }));
+    loadRecords({
+      page: 1,
+      pageSize: pagination.pageSize,
+    });
+  };
+
   useEffect(() => {
     loadRecords();
-  }, [pagination.current, pagination.pageSize]);
+  }, []);
 
   const handleTableChange = (pag: any) => {
     setPagination(pag);
+    const values = filterForm.getFieldsValue();
+    loadRecords({
+      page: pag.current,
+      pageSize: pag.pageSize,
+      keyword: values.keyword,
+      type: values.type,
+      payment_method: values.payment_method,
+    });
   };
 
   const typeConfig = {
@@ -166,10 +199,45 @@ const RechargeRecords: React.FC = () => {
 
   return (
     <div className="recharge-records">
+      {/* 筛选条件 */}
+      <Card style={{ marginBottom: 24 }}>
+        <Form form={filterForm} layout="inline">
+          <Form.Item name="keyword">
+            <Input placeholder="用户手机/昵称" allowClear style={{ width: 160 }} />
+          </Form.Item>
+          <Form.Item name="type">
+            <Select placeholder="充值类型" allowClear style={{ width: 140 }}>
+              <Select.Option value="CLIENT">客户端充值</Select.Option>
+              <Select.Option value="ADMIN">后台充值</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="payment_method">
+            <Select placeholder="支付方式" allowClear style={{ width: 120 }}>
+              <Select.Option value="ALIPAY">支付宝</Select.Option>
+              <Select.Option value="WECHAT">微信</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button onClick={handleFilterReset}>重置</Button>
+              <Button type="primary" onClick={handleFilterSearch}>
+                查询
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Card>
+
       <Card
-        title="充值记录"
         extra={
-          <Button icon={<ReloadOutlined />} onClick={loadRecords}>
+          <Button icon={<ReloadOutlined />} onClick={() => {
+            const values = filterForm.getFieldsValue();
+            loadRecords({
+              keyword: values.keyword,
+              type: values.type,
+              payment_method: values.payment_method,
+            });
+          }}>
             刷新
           </Button>
         }

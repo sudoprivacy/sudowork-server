@@ -7,6 +7,8 @@ import { db } from "../db/index.js";
 import { sudorouterService } from "./SudorouterService.js";
 import { fuiouPayService } from "./FuiouPayService.js";
 import type { CallbackPayload } from "./FuiouPayService.js";
+import type { RechargeOrder, User } from '../types/index.js';
+import { ORDER_STATUS, ORDER_STATUS_TEXT } from '../utils/constants.js';
 
 // ==================== Type Definitions ====================
 
@@ -113,7 +115,7 @@ class RechargeService {
           amount_usd, amount_yuan, amount_cents, exchange_rate,
           quota_amount, points_amount, bonus_points,
           payment_method, order_date, status, expired_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderNo,
           userId,
@@ -128,6 +130,7 @@ class RechargeService {
           bonusPoints,
           paymentMethod,
           orderDate,
+          ORDER_STATUS.PENDING,
           expiredAt,
         ]
       );
@@ -156,19 +159,19 @@ class RechargeService {
     // Query order
     const order = db
       .prepare("SELECT * FROM recharge_orders WHERE order_no = ? AND user_id = ?")
-      .get(orderNo, userId) as any;
+      .get(orderNo, userId) as RechargeOrder | undefined;
 
     if (!order) {
       return { success: false, error: "订单不存在" };
     }
 
-    if (order.status !== 0) {
+    if (order.status !== ORDER_STATUS.PENDING) {
       return { success: false, error: "订单状态无效" };
     }
 
     // Check expiration
     if (new Date(order.expired_at) < new Date()) {
-      db.run("UPDATE recharge_orders SET status = 5 WHERE id = ?", [order.id]);
+      db.run("UPDATE recharge_orders SET status = ? WHERE id = ?", [ORDER_STATUS.CANCELLED, order.id]);
       return { success: false, error: "订单已过期" };
     }
 
@@ -209,8 +212,8 @@ class RechargeService {
 
       // Update order status to "paying"
       db.run(
-        "UPDATE recharge_orders SET status = 1, fuiou_order_info = ? WHERE id = ?",
-        [orderInfo, order.id]
+        "UPDATE recharge_orders SET status = ?, fuiou_order_info = ? WHERE id = ?",
+        [ORDER_STATUS.PAYING, orderInfo, order.id]
       );
 
       return {
@@ -241,7 +244,7 @@ class RechargeService {
       // 2. Query order
       const order = db
         .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
-        .get(callbackMessage.order_id) as any;
+        .get(callbackMessage.order_id) as RechargeOrder | undefined;
 
       if (!order) {
         console.error(`[Recharge] Order not found: ${callbackMessage.order_id}`);
@@ -255,9 +258,14 @@ class RechargeService {
         // Re-check order status (after row lock)
         const lockedOrder = db
           .prepare("SELECT * FROM recharge_orders WHERE id = ?")
-          .get(order.id) as any;
+          .get(order.id) as RechargeOrder | undefined;
 
-        if (lockedOrder.status === 2) {
+        if (!lockedOrder) {
+          db.run("ROLLBACK");
+          return { success: false, error: "订单不存在" };
+        }
+
+        if (lockedOrder.status === ORDER_STATUS.SUCCESS) {
           db.run("ROLLBACK");
           return { success: true, order_no: order.order_no }; // Already processed
         }
@@ -279,8 +287,8 @@ class RechargeService {
         if (callbackMessage.order_st === "2") {
           // Payment failed
           db.run(
-            "UPDATE recharge_orders SET status = 3, callback_data = ?, callback_time = ? WHERE id = ?",
-            [JSON.stringify(payload), new Date().toISOString(), lockedOrder.id]
+            "UPDATE recharge_orders SET status = ?, callback_data = ?, callback_time = ? WHERE id = ?",
+            [ORDER_STATUS.FAILED, JSON.stringify(payload), new Date().toISOString(), lockedOrder.id]
           );
           db.run("COMMIT");
           return { success: true, order_no: order.order_no };
@@ -315,21 +323,21 @@ class RechargeService {
   /**
    * Process recharge logic (internal method)
    */
-  private async processRecharge(order: any, payload: CallbackPayload): Promise<CallbackResult> {
-    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as any;
+  private async processRecharge(order: RechargeOrder, payload: CallbackPayload): Promise<CallbackResult> {
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(order.user_id) as User | undefined;
 
     if (!user || !user.sudorouter_user_id) {
       console.error(`[Recharge] User not found or not bound to sudorouter`);
       db.run(
-        "UPDATE recharge_orders SET status = 3, remark = '用户信息异常' WHERE id = ?",
-        [order.id]
+        "UPDATE recharge_orders SET status = ?, remark = '用户信息异常' WHERE id = ?",
+        [ORDER_STATUS.FAILED, order.id]
       );
       return { success: false, error: "用户信息异常" };
     }
 
     // Update sudorouter quota
     const quotaResult = await sudorouterService.updateUserQuotaWithLog(
-      user.sudorouter_user_id,
+      user.sudorouter_user_id!,
       order.quota_amount,
       `充值订单: ${order.order_no}`
     );
@@ -337,8 +345,8 @@ class RechargeService {
     if (!quotaResult.success) {
       console.error(`[Recharge] Sudorouter update failed:`, quotaResult.error);
       db.run(
-        "UPDATE recharge_orders SET status = 3, remark = ? WHERE id = ?",
-        [quotaResult.error, order.id]
+        "UPDATE recharge_orders SET status = ?, remark = ? WHERE id = ?",
+        [ORDER_STATUS.FAILED, quotaResult.error ?? 'Sudorouter更新失败', order.id]
       );
       return { success: false, error: quotaResult.error };
     }
@@ -372,7 +380,7 @@ class RechargeService {
         balanceBefore,
         balanceAfter,
         order.points_amount,
-        user.sudorouter_user_id,
+        user.sudorouter_user_id!,
         true,
       ]
     );
@@ -405,10 +413,11 @@ class RechargeService {
     // Update order status to success
     db.run(
       `UPDATE recharge_orders
-       SET status = 2, callback_data = ?, callback_time = ?,
+       SET status = ?, callback_data = ?, callback_time = ?,
            callback_amount_cents = ?, updated_at = ?
        WHERE id = ?`,
       [
+        ORDER_STATUS.SUCCESS,
         JSON.stringify(payload),
         new Date().toISOString(),
         parseInt(payload.message || "0"),
@@ -452,13 +461,11 @@ class RechargeService {
   queryOrder(userId: number, orderNo: string): any {
     const order = db
       .prepare("SELECT * FROM recharge_orders WHERE order_no = ? AND user_id = ?")
-      .get(orderNo, userId) as any;
+      .get(orderNo, userId) as RechargeOrder | undefined;
 
     if (!order) {
       return null;
     }
-
-    const statusText = ["待支付", "支付中", "支付成功", "支付失败", "已退款", "已取消"];
 
     return {
       order_no: order.order_no,
@@ -467,7 +474,7 @@ class RechargeService {
       exchange_rate: order.exchange_rate,
       points: order.points_amount,
       status: order.status,
-      status_text: statusText[order.status] || "未知",
+      status_text: ORDER_STATUS_TEXT[order.status] || "未知",
       payment_method: order.payment_method,
       created_at: order.created_at,
       expired_at: order.expired_at,
@@ -484,13 +491,11 @@ class RechargeService {
       .prepare(
         `SELECT * FROM recharge_orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`
       )
-      .all(userId, pageSize, offset) as any[];
+      .all(userId, pageSize, offset) as RechargeOrder[];
 
     const total = db
       .prepare("SELECT COUNT(*) as count FROM recharge_orders WHERE user_id = ?")
-      .get(userId) as any;
-
-    const statusText = ["待支付", "支付中", "支付成功", "支付失败", "已退款", "已取消"];
+      .get(userId) as { count: number };
 
     return {
       list: orders.map((o) => ({
@@ -500,7 +505,7 @@ class RechargeService {
         exchange_rate: o.exchange_rate,
         points: o.points_amount,
         status: o.status,
-        status_text: statusText[o.status] || "未知",
+        status_text: ORDER_STATUS_TEXT[o.status] || "未知",
         payment_method: o.payment_method,
         created_at: o.created_at,
       })),
@@ -516,17 +521,17 @@ class RechargeService {
   cancelOrder(userId: number, orderNo: string): { success: boolean; error?: string } {
     const order = db
       .prepare("SELECT * FROM recharge_orders WHERE order_no = ? AND user_id = ?")
-      .get(orderNo, userId) as any;
+      .get(orderNo, userId) as RechargeOrder | undefined;
 
     if (!order) {
       return { success: false, error: "订单不存在" };
     }
 
-    if (order.status !== 0 && order.status !== 1) {
+    if (order.status !== ORDER_STATUS.PENDING && order.status !== ORDER_STATUS.PAYING) {
       return { success: false, error: "订单状态不可取消" };
     }
 
-    db.run("UPDATE recharge_orders SET status = 5 WHERE id = ?", [order.id]);
+    db.run("UPDATE recharge_orders SET status = ? WHERE id = ?", [ORDER_STATUS.CANCELLED, order.id]);
 
     return { success: true };
   }
@@ -537,19 +542,19 @@ class RechargeService {
   async retryFailedOrder(orderId: number, adminId: number): Promise<{ success: boolean; error?: string }> {
     const order = db
       .prepare("SELECT * FROM recharge_orders WHERE id = ?")
-      .get(orderId) as any;
+      .get(orderId) as RechargeOrder | undefined;
 
     if (!order) {
       return { success: false, error: "订单不存在" };
     }
 
-    if (order.status !== 3) {
+    if (order.status !== ORDER_STATUS.FAILED) {
       return { success: false, error: "只能重试失败的订单" };
     }
 
     const user = db
       .prepare("SELECT * FROM users WHERE id = ?")
-      .get(order.user_id) as any;
+      .get(order.user_id) as User | undefined;
 
     if (!user || !user.sudorouter_user_id) {
       return { success: false, error: "用户信息异常" };
@@ -573,8 +578,8 @@ class RechargeService {
 
       // Update order status
       db.run(
-        "UPDATE recharge_orders SET status = 2, remark = '后台重试成功' WHERE id = ?",
-        [orderId]
+        "UPDATE recharge_orders SET status = ?, remark = '后台重试成功' WHERE id = ?",
+        [ORDER_STATUS.SUCCESS, orderId]
       );
 
       // Update user quota
@@ -660,13 +665,13 @@ class RechargeService {
 
     const order = db
       .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
-      .get(orderNo) as any;
+      .get(orderNo) as RechargeOrder | undefined;
 
     if (!order) {
       return { success: false, error: "订单不存在" };
     }
 
-    if (order.status !== 0 && order.status !== 1) {
+    if (order.status !== ORDER_STATUS.PENDING && order.status !== ORDER_STATUS.PAYING) {
       return { success: false, error: "订单状态无效" };
     }
 
@@ -676,9 +681,14 @@ class RechargeService {
     try {
       const lockedOrder = db
         .prepare("SELECT * FROM recharge_orders WHERE id = ?")
-        .get(order.id) as any;
+        .get(order.id) as RechargeOrder | undefined;
 
-      if (lockedOrder.status === 2) {
+      if (!lockedOrder) {
+        db.run("ROLLBACK");
+        return { success: false, error: "订单不存在" };
+      }
+
+      if (lockedOrder.status === ORDER_STATUS.SUCCESS) {
         db.run("ROLLBACK");
         return { success: true, order_no: order.order_no };
       }
@@ -729,20 +739,20 @@ class RechargeService {
     // Query order
     const order = db
       .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
-      .get(orderNo) as any;
+      .get(orderNo) as RechargeOrder | undefined;
 
     if (!order) {
       return { success: false, orderPoints: 0, userBalance: 0, usedPoints: 0, refundAmount: 0, deductPoints: 0, originalAmount: 0, error: "订单不存在" };
     }
 
-    if (order.status !== 2) {
+    if (order.status !== ORDER_STATUS.SUCCESS) {
       return { success: false, orderPoints: 0, userBalance: 0, usedPoints: 0, refundAmount: 0, deductPoints: 0, originalAmount: 0, error: "订单状态不支持退款" };
     }
 
     // Query user
     const user = db
       .prepare("SELECT * FROM users WHERE id = ?")
-      .get(order.user_id) as any;
+      .get(order.user_id) as User | undefined;
 
     if (!user) {
       return { success: false, orderPoints: 0, userBalance: 0, usedPoints: 0, refundAmount: 0, deductPoints: 0, originalAmount: 0, error: "用户不存在" };
@@ -799,10 +809,15 @@ class RechargeService {
     // Query order and user
     const order = db
       .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
-      .get(orderNo) as any;
+      .get(orderNo) as RechargeOrder | undefined;
+
+    if (!order) {
+      return { success: false, error: "订单不存在" };
+    }
+
     const user = db
       .prepare("SELECT * FROM users WHERE id = ?")
-      .get(order.user_id) as any;
+      .get(order.user_id) as User | undefined;
 
     if (!user || !user.sudorouter_user_id) {
       return { success: false, error: "用户信息异常" };
@@ -848,8 +863,8 @@ class RechargeService {
     try {
       // Update order status
       db.run(
-        "UPDATE recharge_orders SET status = 4, remark = ? WHERE id = ?",
-        [`退款原因: ${reason}`, order.id]
+        "UPDATE recharge_orders SET status = ?, remark = ? WHERE id = ?",
+        [ORDER_STATUS.REFUNDED, `退款原因: ${reason}`, order.id]
       );
 
       // Deduct user points and quota
@@ -904,7 +919,7 @@ class RechargeService {
       );
 
       // Log operation
-      const admin = db.prepare("SELECT * FROM users WHERE id = ?").get(adminId) as any;
+      const admin = db.prepare("SELECT * FROM users WHERE id = ?").get(adminId) as User | undefined;
       db.run(
         `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -943,14 +958,19 @@ class RechargeService {
    * Process recharge from callback or sync
    * Used by order sync job to process successful payments
    */
-  async processRechargeFromCallback(order: any): Promise<CallbackResult> {
+  async processRechargeFromCallback(order: RechargeOrder): Promise<CallbackResult> {
     db.run("BEGIN EXCLUSIVE TRANSACTION");
     try {
       const lockedOrder = db
         .prepare("SELECT * FROM recharge_orders WHERE id = ?")
-        .get(order.id) as any;
+        .get(order.id) as RechargeOrder | undefined;
 
-      if (lockedOrder.status === 2) {
+      if (!lockedOrder) {
+        db.run("ROLLBACK");
+        return { success: false, error: "订单不存在" };
+      }
+
+      if (lockedOrder.status === ORDER_STATUS.SUCCESS) {
         db.run("ROLLBACK");
         return { success: true, order_no: order.order_no };
       }
@@ -984,17 +1004,17 @@ class RechargeService {
   async syncOrderStatus(orderNo: string): Promise<{ success: boolean; error?: string; status?: number }> {
     const order = db
       .prepare("SELECT * FROM recharge_orders WHERE order_no = ?")
-      .get(orderNo) as any;
+      .get(orderNo) as RechargeOrder | undefined;
 
     if (!order) {
       return { success: false, error: "订单不存在" };
     }
 
-    if (order.status === 2) {
-      return { success: true, status: 2 };
+    if (order.status === ORDER_STATUS.SUCCESS) {
+      return { success: true, status: ORDER_STATUS.SUCCESS };
     }
 
-    if (order.status !== 1) {
+    if (order.status !== ORDER_STATUS.PAYING) {
       return { success: true, status: order.status };
     }
 
@@ -1009,14 +1029,14 @@ class RechargeService {
       if (result.data?.order_st === "1") {
         // Payment success
         const rechargeResult = await this.processRechargeFromCallback(order);
-        return { success: rechargeResult.success, error: rechargeResult.error, status: rechargeResult.success ? 2 : 1 };
+        return { success: rechargeResult.success, error: rechargeResult.error, status: rechargeResult.success ? ORDER_STATUS.SUCCESS : ORDER_STATUS.PAYING };
       } else if (result.data?.order_st === "2") {
         // Payment failed
-        db.run("UPDATE recharge_orders SET status = 3 WHERE id = ?", [order.id]);
-        return { success: true, status: 3 };
+        db.run("UPDATE recharge_orders SET status = ? WHERE id = ?", [ORDER_STATUS.FAILED, order.id]);
+        return { success: true, status: ORDER_STATUS.FAILED };
       }
 
-      return { success: true, status: 1 };
+      return { success: true, status: ORDER_STATUS.PAYING };
     } catch (e: any) {
       return { success: false, error: e.message || "同步失败" };
     }
@@ -1029,11 +1049,11 @@ class RechargeService {
     const pendingOrders = db
       .prepare(
         `SELECT * FROM recharge_orders
-         WHERE status = 1
+         WHERE status = ?
          AND expired_at > datetime('now')
          AND created_at > datetime('now', '-30 minutes')`
       )
-      .all() as any[];
+      .all(ORDER_STATUS.PAYING) as RechargeOrder[];
 
     const result = { total: pendingOrders.length, success: 0, failed: 0 };
 

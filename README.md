@@ -22,7 +22,9 @@
 |------|------|
 | **Rate Limiting** | 登录/验证码接口 15 分钟最多 5-10 次/IP |
 | **余额检查** | 消费前检查余额，防止负数 |
-| **JWT 认证** | 支持多角色权限 |
+| **JWT 认证** | 短期 access_token (2小时) + refresh_token (30天) |
+| **滚动刷新** | 每次 token 刷新生成新 refresh_token，旧 token 立即失效 |
+| **多设备支持** | 同一账号可多设备登录，独立管理 |
 | **密码加密** | bcrypt 加密存储 |
 | **敏感信息保护** | Token/验证码不打印日志 |
 | **支付安全** | RSA 加密验签、商户号验证、金额验证、并发锁 |
@@ -251,7 +253,10 @@ bun run src/index.ts
 {
   "success": true,
   "data": {
-    "token": "eyJhbGciOiJIUzI1NiIs...",
+    "token": "eyJhbGciOiJIUzI1NiIs...",      // 兼容旧客户端（30天有效，过渡期）
+    "access_token": "eyJhbGciOiJIUzI1NiIs...",
+    "refresh_token": "uuid-xxx-xxx",
+    "expires_in": 7200,
     "user": {
       "id": 1,
       "phone": "13800138000",
@@ -262,6 +267,20 @@ bun run src/index.ts
     }
   }
 }
+```
+
+**Token 机制说明：**
+
+| Token 类型 | 有效期 | 说明 |
+|-----------|--------|------|
+| `access_token` | 2 小时 | JWT 格式，用于 API 认证 |
+| `refresh_token` | 30 天 | UUID 格式，用于刷新 access_token |
+| `token` | 30 天 | 兼容旧客户端，过渡期结束后移除 |
+
+> **兼容说明**: `token` 字段用于支持未更新的旧版本客户端（期望 `data.token` 格式）。
+> 过渡期（1-3个月）结束后将移除该字段，届时旧客户端需强制升级。
+
+**刷新 Token：** access_token 过期前 5 分钟，客户端应使用 refresh_token 调用刷新接口获取新 token。
 ```
 
 **阶段二：新用户注册**
@@ -297,7 +316,9 @@ bun run src/index.ts
 {
   "success": true,
   "data": {
-    "token": "eyJhbGciOiJIUzI1NiIs...",
+    "access_token": "eyJhbGciOiJIUzI1NiIs...",
+    "refresh_token": "uuid-xxx-xxx",
+    "expires_in": 7200,
     "user": { ... }
   }
 }
@@ -305,21 +326,72 @@ bun run src/index.ts
 
 ---
 
+#### 4. 刷新 Token
+
+**POST** `/api/v1/auth/refresh`
+
+```json
+// Request
+{
+  "refresh_token": "uuid-xxx-xxx",
+  "device_id": "optional-device-uuid"
+}
+
+// Response
+{
+  "success": true,
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "new-uuid-xxx",  // 滚动刷新，返回新的 refresh_token
+  "expires_in": 7200
+}
+```
+
+**滚动刷新机制：** 每次刷新后，旧的 refresh_token 立即失效，需存储新 token。
+
+---
+
+#### 5. 注销登录
+
+**POST** `/api/v1/auth/logout`
+
+```json
+// Request - 注销当前设备
+{
+  "refresh_token": "uuid-xxx-xxx",
+  "device_id": "optional-device-uuid"
+}
+
+// Request - 注销所有设备
+{
+  "refresh_token": "uuid-xxx-xxx",
+  "all": true
+}
+
+// Response
+{
+  "success": true,
+  "msg": "注销成功"
+}
+```
+```
+
+---
+
 ### 用户接口
 
-需要 JWT 认证：`Authorization: Bearer <token>`
+需要 JWT 认证：`Authorization: Bearer <access_token>`
 
-#### 4. 获取用户信息
+#### 6. 获取用户信息
 
 **GET** `/api/v1/user/profile`
 
-#### 5. 获取用户仪表盘
+#### 7. 获取用户仪表盘
 
 **GET** `/api/v1/user/dashboard`
 
 返回积分、今日使用统计、使用流水。
 
-#### 6. 用量上报（扣费）
+#### 8. 用量上报（扣费）
 
 **POST** `/api/v1/usage/report`
 
@@ -354,28 +426,30 @@ bun run src/index.ts
 
 需要管理员权限（`SUPER_ADMIN` 或 `ENTERPRISE_ADMIN`）
 
-#### 7. 管理员登录
+#### 9. 管理员登录
 
 **POST** `/api/v1/admin/login`
 
-#### 8. 获取统计数据
+返回格式与用户登录相同（access_token + refresh_token）。
+
+#### 10. 获取统计数据
 
 **GET** `/api/v1/admin/stats`
 
-#### 9. 企业管理
+#### 11. 企业管理
 
 - `GET /api/v1/admin/enterprises` - 企业列表
 - `POST /api/v1/admin/enterprises` - 创建企业
 - `PUT /api/v1/admin/enterprises/:id` - 更新企业
 - `DELETE /api/v1/admin/enterprises/:id` - 删除企业
 
-#### 10. 邀请码管理
+#### 12. 邀请码管理
 
 - `GET /api/v1/admin/invitation-codes` - 邀请码列表
 - `POST /api/v1/admin/invitation-codes` - 批量创建邀请码
 - `DELETE /api/v1/admin/invitation-codes/:id` - 删除邀请码
 
-#### 11. 用户管理
+#### 13. 用户管理
 
 - `GET /api/v1/admin/users` - 用户列表
 - `POST /api/v1/admin/users` - 创建用户
@@ -386,7 +460,7 @@ bun run src/index.ts
 - `POST /api/v1/admin/users/:id/sync-quota` - 同步用户额度
 - `POST /api/v1/admin/users/:id/manage` - 启用/禁用用户
 
-#### 12. 订单管理
+#### 14. 订单管理
 
 - `GET /api/v1/admin/recharge/stats` - 充值统计
 - `GET /api/v1/admin/recharge/orders` - 充值订单列表
@@ -398,7 +472,7 @@ bun run src/index.ts
 - `POST /api/v1/admin/recharge/orders/:orderNo/refund` - 执行退款
 - `GET /api/v1/admin/recharge-records` - 充值记录列表（客户端+后台）
 
-#### 13. 订单同步机制
+#### 15. 订单同步机制
 
 当富友支付回调失败时，系统会自动同步订单状态：
 
@@ -410,7 +484,7 @@ bun run src/index.ts
 
 **同步范围**：只同步 30 分钟内创建的"支付中"订单。
 
-#### 14. 退款规则
+#### 16. 退款规则
 
 退款金额根据用户剩余积分计算：
 - 剩余积分 ≥ 订单积分：全额退款，扣除全部订单积分
@@ -440,9 +514,9 @@ bun run src/index.ts
 
 ### 充值接口（用户端）
 
-需要 JWT 认证：`Authorization: Bearer <token>`
+需要 JWT 认证：`Authorization: Bearer <access_token>`
 
-#### 15. 获取充值套餐
+#### 17. 获取充值套餐
 
 **GET** `/api/v1/recharge/packages`
 
@@ -460,7 +534,7 @@ bun run src/index.ts
 }
 ```
 
-#### 16. 创建充值订单
+#### 18. 创建充值订单
 
 **POST** `/api/v1/recharge/create`
 
@@ -482,7 +556,7 @@ bun run src/index.ts
 }
 ```
 
-#### 17. 发起支付
+#### 19. 发起支付
 
 **POST** `/api/v1/recharge/pay`
 
@@ -501,15 +575,15 @@ bun run src/index.ts
 }
 ```
 
-#### 18. 查询订单状态
+#### 20. 查询订单状态
 
 **GET** `/api/v1/recharge/query/:orderNo`
 
-#### 19. 充值记录列表
+#### 21. 充值记录列表
 
 **GET** `/api/v1/recharge/list`
 
-#### 20. 取消订单
+#### 22. 取消订单
 
 **POST** `/api/v1/recharge/cancel/:orderNo`
 
@@ -539,6 +613,8 @@ sudowork-server/
 ├── src/
 │   ├── index.ts                 # 主入口（启动服务、挂载路由）
 │   ├── redis.ts                 # Redis 连接
+│   ├── types/
+│   │   └── index.ts             # 类型定义（User, RechargeOrder 等）
 │   ├── db/
 │   │   ├── index.ts             # 数据库连接
 │   │   ├── schema.ts            # 表结构定义（含充值相关表）
@@ -548,11 +624,17 @@ sudowork-server/
 │   │   ├── auth.ts              # JWT 认证中间件
 │   │   └── rateLimiter.ts       # 速率限制中间件
 │   ├── routes/
-│   │   ├── admin.ts             # 管理员路由挂载
+│   │   ├── admin.ts             # 管理员路由聚合器
+│   │   ├── admin/               # 管理员路由模块（按功能拆分）
+│   │   │   ├── index.ts         # 路由挂载
+│   │   │   ├── stats.ts         # 仪表盘统计
+│   │   │   ├── users.ts         # 用户管理
+│   │   │   ├── points.ts        # 积分管理（调整、充值、同步）
+│   │   │   ├── recharge.ts      # 充值订单管理
+│   │   │   └── sync.ts          # 订单同步、重试
 │   │   ├── admin-auth.ts        # 管理员登录/改密
 │   │   ├── admin-enterprises.ts # 企业管理接口
 │   │   ├── admin-invitation-codes.ts # 邀请码管理
-│   │   ├── admin-users.ts       # 用户管理接口（含后台充值、额度同步）
 │   │   ├── admin-logs.ts        # 操作日志接口
 │   │   ├── auth.ts              # 用户认证接口
 │   │   ├── user.ts              # 用户中心接口
@@ -564,6 +646,8 @@ sudowork-server/
 │   │   ├── FuiouPayService.ts   # 富友支付服务
 │   │   └── RechargeService.ts   # 充值业务逻辑
 │   └── utils/
+│       ├── constants.ts         # 状态常量（ORDER_STATUS, USER_STATUS 等）
+│       ├── logger.ts            # 操作日志工具
 │       ├── password.ts          # 密码加密工具
 │       ├── validation.ts        # 输入验证工具
 │       ├── invitation.ts        # 邀请码生成工具
@@ -585,11 +669,12 @@ sudowork-server/
 
 | 模块 | 职责 | 文件 |
 |------|------|------|
+| **types/** | TypeScript 类型定义 | `index.ts` |
 | **db/** | 数据库连接、表结构、迁移、初始化 | `index.ts`, `schema.ts`, `migrations.ts`, `init.ts` |
-| **routes/** | API 路由处理，按功能域拆分 | `admin-*.ts`, `auth.ts`, `user.ts`, `recharge.ts`, `misc.ts` |
+| **routes/** | API 路由处理，按功能域拆分 | `admin/`, `admin-*.ts`, `auth.ts`, `user.ts`, `recharge.ts` |
 | **services/** | 外部服务封装（Sudorouter、SMS、FuiouPay） | `SudorouterService.ts`, `SmsService.ts`, `FuiouPayService.ts`, `RechargeService.ts` |
 | **middleware/** | 认证、授权、限流中间件 | `auth.ts`, `rateLimiter.ts` |
-| **utils/** | 通用工具函数 | `password.ts`, `validation.ts`, `invitation.ts`, `crypto.ts` |
+| **utils/** | 通用工具函数和常量 | `constants.ts`, `logger.ts`, `password.ts`, `validation.ts`, `invitation.ts`, `crypto.ts` |
 
 #### 用户表 (users)
 
