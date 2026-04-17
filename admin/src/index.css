@@ -50,10 +50,30 @@
   }
 }
 
+html {
+  /* 始终为滚动条保留空间 */
+  scrollbar-gutter: stable;
+}
+
+body {
+  margin: 0;
+  /* 阻止 Ant Design 在打开弹窗时自动添加 padding-right 补偿。
+     在固定宽度的居中布局中，这个补偿会破坏 margin 计算导致抖动。 */
+  padding-right: 0 !important;
+  overflow-x: hidden;
+}
+
 #root {
   width: 1126px;
   max-width: 100%;
-  margin: 0 auto;
+  /* 
+     核心修复：使用 100vw (视口宽度) 来计算左边距。
+     100vw 包含滚动条宽度，无论滚动条是否显示，其值在当前窗口下是恒定的。
+     这确保了当弹窗打开（滚动条消失）时，#root 的渲染位置不会发生任何偏移。
+  */
+  margin-left: calc((100vw - 1126px) / 2);
+  margin-right: auto;
+  
   text-align: center;
   border-inline: 1px solid var(--border);
   min-height: 100svh;
@@ -62,8 +82,12 @@
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
+/* 响应式回退：当屏幕宽度小于固定宽度时，恢复标准居中模式 */
+@media (max-width: 1126px) {
+  #root {
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 
 h1,

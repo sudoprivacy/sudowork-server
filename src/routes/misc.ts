@@ -5,6 +5,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { getAuthUser } from "../middleware/auth.js";
+import { getConfigItemsForEnterprise } from "../services/ConfigItemService.js";
 
 const miscRoutes = new Hono();
 
@@ -98,6 +99,21 @@ miscRoutes.post("/usage/report", async (c) => {
     deducted: points,
     newBalance: updatedUser?.balance || 0,
   });
+});
+
+// GET /api/v1/config/items - Get config items for the authenticated user's enterprise
+miscRoutes.get("/config/items", async (c) => {
+  const payload = (await getAuthUser(c)) as any;
+  if (!payload || !payload.id) {
+    return c.json({ success: false, msg: "未授权" }, 401);
+  }
+
+  if (!payload.enterprise_id) {
+    return c.json({ success: true, data: [] });
+  }
+
+  const items = await getConfigItemsForEnterprise(payload.enterprise_id);
+  return c.json({ success: true, data: items });
 });
 
 export { miscRoutes };

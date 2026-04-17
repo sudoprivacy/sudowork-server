@@ -1,3 +1,4 @@
+import React from "react";
 import {
   BrowserRouter,
   Routes,
@@ -26,6 +27,7 @@ import InvitationCodeList from "./pages/InvitationCodeList";
 import OperationLogs from "./pages/OperationLogs";
 import RechargeList from "./pages/RechargeList";
 import RechargeRecords from "./pages/RechargeRecords";
+import ConfigItemList from "./pages/ConfigItemList";
 import "antd/dist/reset.css";
 import "./components/Layout.css";
 
@@ -60,7 +62,15 @@ const MainLayout = () => {
 
   const menuItems = [
     { key: "/", icon: <DashboardOutlined />, label: "仪表盘" },
-    { key: "/enterprises", icon: <AppstoreOutlined />, label: "企业管理" },
+    {
+      key: "enterprise-mgmt",
+      icon: <AppstoreOutlined />,
+      label: "企业管理",
+      children: [
+        { key: "/enterprises", label: "企业列表" },
+        { key: "/config-items", label: "配置项列表" },
+      ],
+    },
     { key: "/users", icon: <UserOutlined />, label: "用户管理" },
     { key: "/orders", icon: <UnorderedListOutlined />, label: "订单管理" },
     { key: "/recharge-records", icon: <PayCircleOutlined />, label: "充值记录" },
@@ -86,6 +96,7 @@ const MainLayout = () => {
           theme="dark"
           mode="inline"
           selectedKeys={[location.pathname]}
+          defaultOpenKeys={["enterprise-mgmt"]}
           onClick={({ key }) => navigate(key)}
           items={menuItems}
         />
@@ -95,11 +106,25 @@ const MainLayout = () => {
         <Header className="admin-header">
           <Breadcrumb className="admin-breadcrumb">
             <Breadcrumb.Item>首页</Breadcrumb.Item>
-            {location.pathname !== "/" && (
-              <Breadcrumb.Item>
-                {menuItems.find((item) => item.key === location.pathname)?.label || "页面"}
-              </Breadcrumb.Item>
-            )}
+            {location.pathname !== "/" && (() => {
+              for (const item of menuItems) {
+                if ('children' in item && item.children) {
+                  for (const child of item.children) {
+                    if (child.key === location.pathname) {
+                      return (
+                        <React.Fragment key={item.key}>
+                          <Breadcrumb.Item>{item.label}</Breadcrumb.Item>
+                          <Breadcrumb.Item>{child.label}</Breadcrumb.Item>
+                        </React.Fragment>
+                      );
+                    }
+                  }
+                } else if (item.key === location.pathname) {
+                  return <Breadcrumb.Item key={item.key}>{item.label}</Breadcrumb.Item>;
+                }
+              }
+              return <Breadcrumb.Item>页面</Breadcrumb.Item>;
+            })()}
           </Breadcrumb>
 
           <Dropdown menu={{ items: userMenuItems, onClick: ({ key }) => key === "logout" && handleLogout() }} placement="bottomRight">
@@ -135,6 +160,7 @@ const App = () => {
         >
           <Route index element={<Dashboard />} />
           <Route path="enterprises" element={<EnterpriseList />} />
+          <Route path="config-items" element={<ConfigItemList />} />
           <Route path="users" element={<UserList />} />
           <Route path="orders" element={<RechargeList />} />
           <Route path="recharge-records" element={<RechargeRecords />} />

@@ -63,3 +63,17 @@ export const LEDGER_TYPES = {
 } as const;
 
 export type LedgerType = typeof LEDGER_TYPES[keyof typeof LEDGER_TYPES];
+
+// ==================== Config Item Status ====================
+
+export const CONFIG_ITEM_STATUS = {
+  DISABLED: 0,    // 禁用
+  ENABLED: 1,     // 正常
+} as const;
+
+export type ConfigItemStatus = typeof CONFIG_ITEM_STATUS[keyof typeof CONFIG_ITEM_STATUS];
+
+export const CONFIG_ITEM_STATUS_TEXT: Record<ConfigItemStatus, string> = {
+  [CONFIG_ITEM_STATUS.DISABLED]: '禁用',
+  [CONFIG_ITEM_STATUS.ENABLED]: '正常',
+};

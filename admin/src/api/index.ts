@@ -186,4 +186,44 @@ export const adminApi = {
   // Get user recharge records
   getUserRecharges: (userId: number, params?: { page?: number; page_size?: number }) =>
     api.get(`/v1/admin/users/${userId}/recharges`, { params }),
+
+  // Config Items APIs
+  getConfigItems: (params?: {
+    enterprise_name?: string;
+    name?: string;
+    status?: number;
+    page?: number;
+    page_size?: number;
+  }) => api.get("/v1/admin/config-items", { params }),
+
+  createConfigItem: (data: { name: string; description?: string }) =>
+    api.post("/v1/admin/config-items", data),
+
+  getConfigItemDetail: (id: number) =>
+    api.get(`/v1/admin/config-items/${id}`),
+
+  updateConfigItem: (id: number, data: { name?: string; description?: string }) =>
+    api.put(`/v1/admin/config-items/${id}`, data),
+
+  updateConfigItemStatus: (id: number, status: number) =>
+    api.put(`/v1/admin/config-items/${id}/status`, { status }),
+
+  getConfigEntries: (id: number) =>
+    api.get(`/v1/admin/config-items/${id}/entries`),
+
+  saveConfigEntries: (id: number, entries: { config_key: string; config_desc?: string }[]) =>
+    api.put(`/v1/admin/config-items/${id}/entries`, { entries }),
+
+  getConfigEnterprises: (id: number, params?: {
+    enterprise_name?: string;
+    enterprise_id?: number;
+    page?: number;
+    page_size?: number;
+  }) => api.get(`/v1/admin/config-items/${id}/enterprises`, { params }),
+
+  addConfigEnterprise: (configItemId: number, enterpriseId: number) =>
+    api.post(`/v1/admin/config-items/${configItemId}/enterprises/${enterpriseId}`),
+
+  removeConfigEnterprise: (configItemId: number, enterpriseId: number) =>
+    api.delete(`/v1/admin/config-items/${configItemId}/enterprises/${enterpriseId}`),
 };

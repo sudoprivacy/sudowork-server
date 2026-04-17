@@ -9,6 +9,7 @@ import { usersRoutes } from './users.js';
 import { pointsRoutes } from './points.js';
 import { rechargeRoutes } from './recharge.js';
 import { syncRoutes } from './sync.js';
+import { configItemsRoutes } from './config-items.js';
 
 const adminRoutes = new Hono();
 
@@ -18,5 +19,6 @@ adminRoutes.route('/', usersRoutes);
 adminRoutes.route('/', pointsRoutes);
 adminRoutes.route('/', rechargeRoutes);
 adminRoutes.route('/', syncRoutes);
+adminRoutes.route('/', configItemsRoutes);
 
 export { adminRoutes };

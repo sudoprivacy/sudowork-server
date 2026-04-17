@@ -2,7 +2,7 @@
  * Type definitions for sudowork-server
  */
 
-import type { OrderStatus, UserStatus, UserRole, LedgerType } from '../utils/constants.js';
+import type { OrderStatus, UserStatus, UserRole, LedgerType, ConfigItemStatus } from '../utils/constants.js';
 
 // ==================== API Response ====================
 
@@ -114,4 +114,34 @@ export interface DashboardStats {
     bonus: number;
     consumed: number;
   };
+}
+
+// ==================== Config Item Types ====================
+
+export interface ConfigItem {
+  id: number;
+  name: string;
+  description: string | null;
+  status: ConfigItemStatus;
+  created_by_id: number | null;
+  created_by_name: string | null;
+  updated_by_id: number | null;
+  updated_by_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConfigEntry {
+  id: number;
+  config_item_id: number;
+  config_key: string;
+  config_desc: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConfigEnterpriseRel {
+  id: number;
+  config_item_id: number;
+  enterprise_id: number;
 }
