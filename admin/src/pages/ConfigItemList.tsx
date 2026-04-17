@@ -382,6 +382,12 @@ const ConfigItemList: React.FC = () => {
 
   const columns = [
     {
+      title: "ID",
+      dataIndex: "id",
+      key: "id",
+      width: 80,
+    },
+    {
       title: "配置项名称",
       dataIndex: "name",
       key: "name",
@@ -592,7 +598,7 @@ const ConfigItemList: React.FC = () => {
 
       {/* ==================== Modal 1: Create / Edit ==================== */}
       <Modal
-        title={editingItem ? "修改配置项" : "新增配置项"}
+        title={editingItem ? `${editingItem.name} - 修改配置项` : "新增配置项"}
         open={formModalVisible}
         onOk={() => form.submit()}
         onCancel={() => {
@@ -625,7 +631,7 @@ const ConfigItemList: React.FC = () => {
 
       {/* ==================== Modal 2: Detail ==================== */}
       <Modal
-        title="配置项详情"
+        title={detailData ? `${detailData.name} - 配置项详情` : "配置项详情"}
         open={detailVisible}
         onCancel={() => {
           setDetailVisible(false);
@@ -637,6 +643,7 @@ const ConfigItemList: React.FC = () => {
         {detailData && (
           <>
             <Descriptions bordered column={2} size="small" loading={detailLoading}>
+              <Descriptions.Item label="ID">{detailData.id}</Descriptions.Item>
               <Descriptions.Item label="配置项名称">{detailData.name}</Descriptions.Item>
               <Descriptions.Item label="状态">
                 {detailData.status === 1 ? <Tag color="green">正常</Tag> : <Tag color="red">禁用</Tag>}
@@ -682,7 +689,7 @@ const ConfigItemList: React.FC = () => {
 
       {/* ==================== Modal 3: Config Entries ==================== */}
       <Modal
-        title={`${entriesItem?.name || ""}配置列表`}
+        title={`${entriesItem?.name || ""} - 配置列表`}
         open={entriesModalVisible}
         onCancel={() => {
           setEntriesModalVisible(false);
@@ -714,7 +721,7 @@ const ConfigItemList: React.FC = () => {
 
       {/* ==================== Modal 4: Enterprise Association ==================== */}
       <Modal
-        title={`${enterpriseItem?.name || ""}关联企业`}
+        title={`${enterpriseItem?.name || ""} - 关联企业`}
         open={enterpriseModalVisible}
         onCancel={() => {
           setEnterpriseModalVisible(false);
