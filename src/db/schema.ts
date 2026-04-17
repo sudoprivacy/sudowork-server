@@ -242,4 +242,57 @@ export function initSchema(): void {
   db.run(`CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_user_id ON admin_recharge_records(user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_admin_id ON admin_recharge_records(admin_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_created_at ON admin_recharge_records(created_at)`);
+
+  // ============================================
+  // Config Items System Tables (配置项管理系统)
+  // ============================================
+
+  // Config items table (配置项表)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS config_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      status INTEGER DEFAULT 1,
+      created_by_id INTEGER,
+      created_by_name TEXT,
+      updated_by_id INTEGER,
+      updated_by_name TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Config entries table (配置项键值表)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS config_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      config_item_id INTEGER NOT NULL,
+      config_key TEXT NOT NULL,
+      config_desc TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (config_item_id) REFERENCES config_items(id)
+    );
+  `);
+
+  // Config enterprise relation table (配置项-企业关联表)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS config_enterprise_rel (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      config_item_id INTEGER NOT NULL,
+      enterprise_id INTEGER NOT NULL,
+      FOREIGN KEY (config_item_id) REFERENCES config_items(id),
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id)
+    );
+  `);
+
+  // Create indexes for config items tables
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_config_items_name ON config_items(name)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_config_items_status ON config_items(status)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_config_items_updated_at ON config_items(updated_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_config_entries_config_item_id ON config_entries(config_item_id)`);
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_config_entries_item_key ON config_entries(config_item_id, config_key)`);
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_config_enterprise_rel_item_enterprise ON config_enterprise_rel(config_item_id, enterprise_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_config_enterprise_rel_enterprise_id ON config_enterprise_rel(enterprise_id)`);
 }
