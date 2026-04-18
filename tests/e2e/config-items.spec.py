@@ -2071,6 +2071,179 @@ def test_29_icon_in_all_ui_positions(page: Page):
 
     print('  PASS')
 
+def test_30_square_icon_validation(page: Page):
+    """Verify server-side square aspect ratio validation for icon uploads"""
+    print('\n=== Test 30: Square Icon Validation ===')
+    import struct
+    import zlib
+
+    def create_minimal_png(width: int, height: int) -> bytes:
+        """Create a minimal valid PNG with given dimensions"""
+        def make_chunk(chunk_type: bytes, data: bytes) -> bytes:
+            chunk = chunk_type + data
+            return struct.pack('>I', len(data)) + chunk + struct.pack('>I', zlib.crc32(chunk) & 0xFFFFFFFF)
+
+        # IHDR: width(4) + height(4) + bit_depth(1) + color_type(1) + compression(1) + filter(1) + interlace(1)
+        ihdr_data = struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)
+        # IDAT: raw pixel data (single color fill)
+        raw_data = b''
+        for y in range(height):
+            raw_data += b'\x00'  # filter byte
+            for x in range(width):
+                raw_data += b'\xff\x00\x00'  # RGB red
+        compressed = zlib.compress(raw_data)
+        return b'\x89PNG\r\n\x1a\n' + make_chunk(b'IHDR', ihdr_data) + make_chunk(b'IDAT', compressed) + make_chunk(b'IEND', b'')
+
+    # 30a: Upload non-square PNG (200x100) - should be rejected
+    non_square_png = create_minimal_png(200, 100)
+    result = upload_icon_via_api(page, non_square_png, 'non_square.png')
+    assert result.get('success') == False, 'Non-square PNG should be rejected'
+    assert '正方形' in result.get('msg', ''), f'Error message should mention square, got: {result.get("msg")}'
+    print(f'  30a: Non-square PNG rejected - OK')
+
+    # 30b: Upload square PNG (100x100) - should succeed
+    square_png = create_minimal_png(100, 100)
+    result = upload_icon_via_api(page, square_png, 'square.png')
+    assert result.get('success') == True, f'Square PNG should succeed, got: {result.get("msg")}'
+    print(f'  30b: Square PNG accepted - OK')
+
+    # 30c: Upload non-square SVG (width=200 height=100) - should be rejected
+    non_square_svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="blue"/></svg>'
+    result = upload_icon_via_api(page, non_square_svg, 'non_square.svg')
+    assert result.get('success') == False, 'Non-square SVG should be rejected'
+    assert '正方形' in result.get('msg', ''), f'Error message should mention square, got: {result.get("msg")}'
+    print(f'  30c: Non-square SVG rejected - OK')
+
+    # 30d: Upload square SVG with viewBox only - should succeed
+    square_svg_viewbox = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="green"/></svg>'
+    result = upload_icon_via_api(page, square_svg_viewbox, 'square_viewbox.svg')
+    assert result.get('success') == True, f'Square SVG with viewBox should succeed, got: {result.get("msg")}'
+    print(f'  30d: Square SVG (viewBox only) accepted - OK')
+
+    print('  PASS')
+
+def test_31_icon_preview_click(page: Page):
+    """Verify clicking icons opens the Ant Design ImagePreview overlay"""
+    print('\n=== Test 31: Icon Preview Click ===')
+    navigate_to_config_items(page)
+
+    # Find a config item that has an icon
+    token = page.evaluate('() => localStorage.getItem("admin_token")')
+    item = page.evaluate('''async (params) => {
+        const resp = await fetch('/api/v1/admin/config-items?status=1&page=1&page_size=100', {
+            headers: { 'Authorization': 'Bearer ' + params.token }
+        });
+        const data = await resp.json();
+        return data.data.items.find(i => i.icon) || null;
+    }''', {'token': token})
+
+    if not item:
+        print('  SKIP: No item with icon found')
+        return
+
+    item_name = item['name']
+    print(f'  Target: {item_name}')
+
+    # Search for the item
+    card = get_search_card(page)
+    search_inputs = card.locator('input:not([type="hidden"])')
+    search_inputs.nth(1).fill(item_name)
+    page.wait_for_timeout(300)
+    click_search_query(page)
+    page.wait_for_timeout(1500)
+    page.wait_for_load_state('networkidle')
+
+    rows = get_table_rows(page)
+    assert rows > 0, 'Item should be found'
+
+    # 31a: Click icon in list table - should open ImagePreview
+    first_row = page.locator('.ant-table-tbody tr.ant-table-row').first
+    icon_img = first_row.locator('td').nth(1).locator('.ant-image')
+    assert icon_img.count() > 0, 'Icon should be visible in list'
+    icon_img.first.click()
+    page.wait_for_timeout(1000)
+
+    # Ant Design ImagePreview renders as .ant-image-preview
+    preview = page.locator('.ant-image-preview')
+    assert preview.count() > 0, 'ImagePreview overlay should appear after clicking list icon'
+    print(f'  31a: List icon preview opened - OK')
+    screenshot(page, '31a_list_icon_preview')
+
+    # Close preview
+    preview_close = page.locator('.ant-image-preview-close')
+    if preview_close.count() > 0:
+        preview_close.click()
+        page.wait_for_timeout(500)
+    else:
+        # Click mask to close
+        page.locator('.ant-image-preview-mask').click()
+        page.wait_for_timeout(500)
+
+    # 31b: Open detail modal and click icon
+    btns = get_row_action_btns(page, 0)
+    btns.nth(LINK_DETAIL).click()
+    page.wait_for_timeout(1500)
+
+    modal = page.locator('.ant-modal:visible')
+    assert modal.count() > 0, 'Detail modal should be open'
+    detail_img = modal.locator('.ant-descriptions .ant-image')
+    assert detail_img.count() > 0, 'Icon should be in detail modal'
+    detail_img.first.click()
+    page.wait_for_timeout(1000)
+
+    preview = page.locator('.ant-image-preview')
+    assert preview.count() > 0, 'ImagePreview should appear after clicking detail icon'
+    print(f'  31b: Detail icon preview opened - OK')
+    screenshot(page, '31b_detail_icon_preview')
+
+    # Close preview
+    preview_close = page.locator('.ant-image-preview-close')
+    if preview_close.count() > 0:
+        preview_close.click()
+        page.wait_for_timeout(500)
+    else:
+        page.locator('.ant-image-preview-mask').click()
+        page.wait_for_timeout(500)
+
+    close_modal(page)
+    page.wait_for_timeout(500)
+
+    # 31c: Open edit modal and click icon preview
+    btns = get_row_action_btns(page, 0)
+    btns.nth(LINK_EDIT).click()
+    page.wait_for_timeout(1500)
+
+    edit_modal = page.locator('.ant-modal:visible')
+    assert edit_modal.count() > 0, 'Edit modal should be open'
+    form_img = edit_modal.locator('.ant-form .ant-image')
+    assert form_img.count() > 0, 'Icon should be in edit form'
+    form_img.first.click()
+    page.wait_for_timeout(1000)
+
+    preview = page.locator('.ant-image-preview')
+    assert preview.count() > 0, 'ImagePreview should appear after clicking edit form icon'
+    print(f'  31c: Edit form icon preview opened - OK')
+    screenshot(page, '31c_edit_icon_preview')
+
+    # Close preview
+    preview_close = page.locator('.ant-image-preview-close')
+    if preview_close.count() > 0:
+        preview_close.click()
+        page.wait_for_timeout(500)
+    else:
+        page.locator('.ant-image-preview-mask').click()
+        page.wait_for_timeout(500)
+
+    close_modal(page)
+    page.wait_for_timeout(500)
+
+    # Cleanup search
+    click_search_reset(page)
+    page.wait_for_timeout(1500)
+    page.wait_for_load_state('networkidle')
+
+    print('  PASS')
+
 # ==================== Main ====================
 
 def run_all_tests():
@@ -2127,6 +2300,8 @@ def run_all_tests():
                 ('27_third_party_icon_url', test_27_third_party_api_icon_url),
                 ('28_all_image_formats', test_28_all_image_formats),
                 ('29_icon_all_ui_positions', test_29_icon_in_all_ui_positions),
+                ('30_square_validation', test_30_square_icon_validation),
+                ('31_icon_preview', test_31_icon_preview_click),
             ]
 
             for name, test_fn in tests:

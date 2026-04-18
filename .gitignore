@@ -46,3 +46,6 @@ session-*.md
 
 # Claude Code
 .claude/
+
+# Python
+__pycache__/

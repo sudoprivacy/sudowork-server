@@ -8,6 +8,7 @@ import { authMiddleware, adminMiddleware } from '../../middleware/auth.js';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import imageSize from 'image-size';
 
 const uploadRoutes = new Hono();
 
@@ -19,6 +20,27 @@ const ALLOWED_MIME_TYPES = ['image/svg+xml', 'image/png', 'image/jpeg'];
 
 // Ensure upload directory exists on startup
 await mkdir(CONFIG_ITEMS_UPLOAD_DIR, { recursive: true });
+
+// Parse SVG dimensions from raw SVG content
+function parseSvgDimensions(buffer: ArrayBuffer): { width: number; height: number } | null {
+  const text = new TextDecoder().decode(buffer);
+
+  // Try width/height attributes first
+  const widthMatch = text.match(/<svg[^>]*\swidth\s*=\s*"(\d+(?:\.\d+)?)"[^>]*>/);
+  const heightMatch = text.match(/<svg[^>]*\sheight\s*=\s*"(\d+(?:\.\d+)?)"[^>]*>/);
+
+  if (widthMatch && heightMatch) {
+    return { width: parseFloat(widthMatch[1]), height: parseFloat(heightMatch[1]) };
+  }
+
+  // Fallback to viewBox
+  const viewBoxMatch = text.match(/<svg[^>]*\sviewBox\s*=\s*"(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)"/);
+  if (viewBoxMatch) {
+    return { width: parseFloat(viewBoxMatch[3]), height: parseFloat(viewBoxMatch[4]) };
+  }
+
+  return null;
+}
 
 // POST /upload/config-item-icon - Upload a config item icon
 uploadRoutes.post('/upload/config-item-icon', authMiddleware, adminMiddleware, async (c) => {
@@ -51,8 +73,24 @@ uploadRoutes.post('/upload/config-item-icon', authMiddleware, adminMiddleware, a
   const filename = `${randomUUID()}${ext}`;
   const filePath = join(CONFIG_ITEMS_UPLOAD_DIR, filename);
 
-  // Write file to disk
+  // Read file buffer for validation and writing
   const buffer = await file.arrayBuffer();
+
+  // Validate square aspect ratio (1:1)
+  if (ext === '.svg') {
+    const dims = parseSvgDimensions(buffer);
+    if (dims && dims.width !== dims.height) {
+      return c.json({ success: false, msg: '图标必须是正方形图片（宽高比为 1:1）' }, 400);
+    }
+  } else {
+    // PNG/JPG - use image-size library
+    const dims = imageSize(Buffer.from(buffer));
+    if (dims.width !== dims.height) {
+      return c.json({ success: false, msg: '图标必须是正方形图片（宽高比为 1:1）' }, 400);
+    }
+  }
+
+  // Write file to disk
   await Bun.write(filePath, buffer);
 
   return c.json({

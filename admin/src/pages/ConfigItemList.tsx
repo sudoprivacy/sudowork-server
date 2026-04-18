@@ -182,6 +182,20 @@ const ConfigItemList: React.FC = () => {
       return Upload.LIST_IGNORE;
     }
 
+    // Client-side square validation (PNG/JPG only, SVG relies on server-side)
+    if (file.type !== 'image/svg+xml') {
+      const isSquare = await new Promise<boolean>((resolve) => {
+        const img = new window.Image();
+        img.onload = () => resolve(img.naturalWidth === img.naturalHeight);
+        img.onerror = () => resolve(false);
+        img.src = URL.createObjectURL(file);
+      });
+      if (!isSquare) {
+        message.error('图标必须是正方形图片（宽高比为 1:1）');
+        return Upload.LIST_IGNORE;
+      }
+    }
+
     setIconUploading(true);
     try {
       const res: any = await adminApi.uploadConfigItemIcon(file);
@@ -447,7 +461,7 @@ const ConfigItemList: React.FC = () => {
           width={32}
           height={32}
           style={{ objectFit: 'contain' }}
-          preview={false}
+          preview={{ mask: "查看原图" }}
         />
       ),
     },
@@ -693,7 +707,7 @@ const ConfigItemList: React.FC = () => {
                   width={40}
                   height={40}
                   style={{ objectFit: 'contain', borderRadius: 4 }}
-                  preview={false}
+                  preview={{ mask: "查看原图" }}
                 />
               )}
               {!iconFilename && (
@@ -751,6 +765,7 @@ const ConfigItemList: React.FC = () => {
                   width={64}
                   height={64}
                   style={{ objectFit: 'contain' }}
+                  preview={{ mask: "查看原图" }}
                 />
               </Descriptions.Item>
               <Descriptions.Item label="状态">
