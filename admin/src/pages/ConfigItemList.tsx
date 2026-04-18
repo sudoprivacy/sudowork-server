@@ -12,11 +12,22 @@ import {
   Tag,
   Typography,
   Descriptions,
+  Upload,
+  Image,
 } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { PlusOutlined, UploadOutlined } from "@ant-design/icons";
 import { adminApi } from "../api/index";
 
 const { Title } = Typography;
+
+const DEFAULT_ICON_URL = '/config-item-default.svg';
+
+function getIconUrl(icon: string | null): string {
+  if (icon) {
+    return `/uploads/config-items/${icon}`;
+  }
+  return DEFAULT_ICON_URL;
+}
 
 // ==================== Types ====================
 
@@ -24,6 +35,7 @@ interface ConfigItemRecord {
   id: number;
   name: string;
   description: string | null;
+  icon: string | null;
   status: number;
   enterprise_count: number;
   created_by_name: string | null;
@@ -49,6 +61,7 @@ interface DetailData {
   id: number;
   name: string;
   description: string | null;
+  icon: string | null;
   status: number;
   created_by_name: string | null;
   created_by_id: number | null;
@@ -76,6 +89,8 @@ const ConfigItemList: React.FC = () => {
   const [editingItem, setEditingItem] = useState<ConfigItemRecord | null>(null);
   const [form] = Form.useForm();
   const [formModalLoading, setFormModalLoading] = useState(false);
+  const [iconFilename, setIconFilename] = useState<string | null>(null);
+  const [iconUploading, setIconUploading] = useState(false);
 
   // Detail modal
   const [detailVisible, setDetailVisible] = useState(false);
@@ -142,6 +157,7 @@ const ConfigItemList: React.FC = () => {
   const openCreateModal = () => {
     setEditingItem(null);
     form.resetFields();
+    setIconFilename(null);
     setFormModalVisible(true);
   };
 
@@ -151,23 +167,54 @@ const ConfigItemList: React.FC = () => {
       name: record.name,
       description: record.description,
     });
+    setIconFilename(record.icon);
     setFormModalVisible(true);
+  };
+
+  const handleIconUpload = async (file: File) => {
+    const validTypes = ['image/svg+xml', 'image/png', 'image/jpeg'];
+    if (!validTypes.includes(file.type)) {
+      message.error('仅支持 SVG、PNG、JPG 格式的图片');
+      return Upload.LIST_IGNORE;
+    }
+    if (file.size > 500 * 1024) {
+      message.error('文件大小不能超过 500KB');
+      return Upload.LIST_IGNORE;
+    }
+
+    setIconUploading(true);
+    try {
+      const res: any = await adminApi.uploadConfigItemIcon(file);
+      if (res.success) {
+        setIconFilename(res.data.filename);
+        message.success('图标上传成功');
+      } else {
+        message.error(res.msg || '图标上传失败');
+      }
+    } catch (error: any) {
+      message.error(error.response?.data?.msg || '图标上传失败');
+    } finally {
+      setIconUploading(false);
+    }
+    return false;
   };
 
   const handleFormSubmit = async (values: any) => {
     setFormModalLoading(true);
     try {
+      const submitData = { ...values, icon: iconFilename };
       let res: any;
       if (editingItem) {
-        res = await adminApi.updateConfigItem(editingItem.id, values);
+        res = await adminApi.updateConfigItem(editingItem.id, submitData);
       } else {
-        res = await adminApi.createConfigItem(values);
+        res = await adminApi.createConfigItem(submitData);
       }
       if (res.success) {
         message.success(res.msg);
         setFormModalVisible(false);
         setEditingItem(null);
         form.resetFields();
+        setIconFilename(null);
         loadConfigItems();
       } else {
         message.error(res.msg || "操作失败");
@@ -388,6 +435,23 @@ const ConfigItemList: React.FC = () => {
       width: 80,
     },
     {
+      title: "图标",
+      dataIndex: "icon",
+      key: "icon",
+      width: 60,
+      align: "center" as const,
+      render: (icon: string | null) => (
+        <Image
+          src={getIconUrl(icon)}
+          alt="图标"
+          width={32}
+          height={32}
+          style={{ objectFit: 'contain' }}
+          preview={false}
+        />
+      ),
+    },
+    {
       title: "配置项名称",
       dataIndex: "name",
       key: "name",
@@ -605,10 +669,45 @@ const ConfigItemList: React.FC = () => {
           setFormModalVisible(false);
           setEditingItem(null);
           form.resetFields();
+          setIconFilename(null);
         }}
         confirmLoading={formModalLoading}
       >
         <Form form={form} layout="vertical" onFinish={handleFormSubmit}>
+          <Form.Item label="配置项图标">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <Upload
+                accept=".svg,.png,.jpg,.jpeg"
+                showUploadList={false}
+                beforeUpload={handleIconUpload}
+                disabled={iconUploading}
+              >
+                <Button icon={<UploadOutlined />} loading={iconUploading}>
+                  {iconFilename ? '更换图标' : '上传图标'}
+                </Button>
+              </Upload>
+              {iconFilename && (
+                <Image
+                  src={getIconUrl(iconFilename)}
+                  alt="配置项图标"
+                  width={40}
+                  height={40}
+                  style={{ objectFit: 'contain', borderRadius: 4 }}
+                  preview={false}
+                />
+              )}
+              {!iconFilename && (
+                <Image
+                  src={DEFAULT_ICON_URL}
+                  alt="默认图标"
+                  width={40}
+                  height={40}
+                  style={{ objectFit: 'contain', borderRadius: 4, opacity: 0.5 }}
+                  preview={false}
+                />
+              )}
+            </div>
+          </Form.Item>
           <Form.Item
             label="配置项名称"
             name="name"
@@ -645,6 +744,15 @@ const ConfigItemList: React.FC = () => {
             <Descriptions bordered column={2} size="small" loading={detailLoading}>
               <Descriptions.Item label="ID">{detailData.id}</Descriptions.Item>
               <Descriptions.Item label="配置项名称">{detailData.name}</Descriptions.Item>
+              <Descriptions.Item label="配置项图标">
+                <Image
+                  src={getIconUrl(detailData.icon)}
+                  alt="配置项图标"
+                  width={64}
+                  height={64}
+                  style={{ objectFit: 'contain' }}
+                />
+              </Descriptions.Item>
               <Descriptions.Item label="状态">
                 {detailData.status === 1 ? <Tag color="green">正常</Tag> : <Tag color="red">禁用</Tag>}
               </Descriptions.Item>

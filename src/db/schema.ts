@@ -253,6 +253,7 @@ export function initSchema(): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       description TEXT,
+      icon TEXT,
       status INTEGER DEFAULT 1,
       created_by_id INTEGER,
       created_by_name TEXT,

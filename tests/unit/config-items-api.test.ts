@@ -73,15 +73,17 @@ async function makeExpiredToken(): Promise<string> {
 }
 
 const sampleDbRows = [
-  { id: 1, name: "model_config", entry_id: 10, config_key: "max_tokens", config_desc: "最大token数" },
-  { id: 1, name: "model_config", entry_id: 11, config_key: "temperature", config_desc: "温度参数" },
-  { id: 2, name: "prompt_config", entry_id: 20, config_key: "system_prompt", config_desc: "系统提示词" },
+  { id: 1, name: "model_config", icon: "abc123.svg", entry_id: 10, config_key: "max_tokens", config_desc: "最大token数" },
+  { id: 1, name: "model_config", icon: "abc123.svg", entry_id: 11, config_key: "temperature", config_desc: "温度参数" },
+  { id: 2, name: "prompt_config", icon: null, entry_id: 20, config_key: "system_prompt", config_desc: "系统提示词" },
 ];
 
 const expectedGrouped = [
   {
     id: 1,
     name: "model_config",
+    icon: "abc123.svg",
+    icon_url: "/uploads/config-items/abc123.svg",
     entries: [
       { id: 10, config_key: "max_tokens", config_desc: "最大token数" },
       { id: 11, config_key: "temperature", config_desc: "温度参数" },
@@ -90,6 +92,8 @@ const expectedGrouped = [
   {
     id: 2,
     name: "prompt_config",
+    icon: null,
+    icon_url: "/config-item-default.svg",
     entries: [{ id: 20, config_key: "system_prompt", config_desc: "系统提示词" }],
   },
 ];

@@ -10,6 +10,7 @@ import { pointsRoutes } from './points.js';
 import { rechargeRoutes } from './recharge.js';
 import { syncRoutes } from './sync.js';
 import { configItemsRoutes } from './config-items.js';
+import { uploadRoutes } from './upload.js';
 
 const adminRoutes = new Hono();
 
@@ -20,5 +21,6 @@ adminRoutes.route('/', pointsRoutes);
 adminRoutes.route('/', rechargeRoutes);
 adminRoutes.route('/', syncRoutes);
 adminRoutes.route('/', configItemsRoutes);
+adminRoutes.route('/', uploadRoutes);
 
 export { adminRoutes };

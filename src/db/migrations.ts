@@ -15,6 +15,7 @@ export function runMigrations(): void {
   addColumnIfNotExists("users", "used_quota", "INTEGER DEFAULT 0");
   addColumnIfNotExists("operation_logs", "request_data", "TEXT");
   addColumnIfNotExists("operation_logs", "response_data", "TEXT");
+  addColumnIfNotExists("config_items", "icon", "TEXT");
 }
 
 /**
