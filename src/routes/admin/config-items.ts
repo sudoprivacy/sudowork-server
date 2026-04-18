@@ -285,6 +285,12 @@ configItemsRoutes.put('/config-items/:id/entries', authMiddleware, adminMiddlewa
       return c.json({ success: false, msg: `配置key「${entry.config_key}」重复` }, 400);
     }
     seenKeys.add(entry.config_key);
+    if (!entry.name || !entry.name.trim()) {
+      return c.json({ success: false, msg: `第 ${i + 1} 行的名称不能为空` }, 400);
+    }
+    if (entry.name.trim().length > 128) {
+      return c.json({ success: false, msg: `第 ${i + 1} 行的名称不超过128个字符` }, 400);
+    }
     if (entry.config_desc && entry.config_desc.length > 500) {
       return c.json({ success: false, msg: `第 ${i + 1} 行的配置说明不超过500个字符` }, 400);
     }
@@ -300,12 +306,12 @@ configItemsRoutes.put('/config-items/:id/entries', authMiddleware, adminMiddlewa
 
     // Insert new entries
     const insertStmt = db.prepare(
-      `INSERT INTO config_entries (config_item_id, config_key, config_desc, created_at, updated_at)
-       VALUES (?, ?, ?, datetime('now'), datetime('now'))`
+      `INSERT INTO config_entries (config_item_id, config_key, name, config_desc, created_at, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
     );
 
     for (const entry of entries) {
-      insertStmt.run(id, entry.config_key.trim(), entry.config_desc?.trim() || null);
+      insertStmt.run(id, entry.config_key.trim(), entry.name.trim(), entry.config_desc?.trim() || null);
     }
 
     // Update config_item's updated_at

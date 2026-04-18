@@ -47,6 +47,7 @@ interface ConfigItemRecord {
 interface ConfigEntry {
   id: number;
   config_key: string;
+  name: string;
   config_desc: string | null;
 }
 
@@ -302,7 +303,7 @@ const ConfigItemList: React.FC = () => {
   };
 
   const handleAddEntry = () => {
-    setEntriesData([...entriesData, { id: Date.now(), config_key: "", config_desc: null }]);
+    setEntriesData([...entriesData, { id: Date.now(), config_key: "", name: "", config_desc: null }]);
   };
 
   const handleDeleteEntry = (index: number) => {
@@ -312,6 +313,12 @@ const ConfigItemList: React.FC = () => {
   const handleEntryKeyChange = (index: number, value: string) => {
     const newData = [...entriesData];
     newData[index] = { ...newData[index], config_key: value };
+    setEntriesData(newData);
+  };
+
+  const handleEntryNameChange = (index: number, value: string) => {
+    const newData = [...entriesData];
+    newData[index] = { ...newData[index], name: value };
     setEntriesData(newData);
   };
 
@@ -343,6 +350,17 @@ const ConfigItemList: React.FC = () => {
     if (duplicates.length > 0) {
       message.error(`配置key「${duplicates[0]}」重复`);
       return;
+    }
+    for (let i = 0; i < entriesData.length; i++) {
+      const entry = entriesData[i];
+      if (!entry.name || !entry.name.trim()) {
+        message.error(`第 ${i + 1} 行的名称不能为空`);
+        return;
+      }
+      if (entry.name.length > 128) {
+        message.error(`第 ${i + 1} 行的名称不超过128个字符`);
+        return;
+      }
     }
 
     setEntriesSaving(true);
@@ -576,7 +594,7 @@ const ConfigItemList: React.FC = () => {
 
   const entryColumns = [
     {
-      title: "配置key",
+      title: <span>配置key<span style={{ color: 'red' }}>*</span></span>,
       dataIndex: "config_key",
       key: "config_key",
       render: (val: string, _: any, index: number) => (
@@ -585,6 +603,19 @@ const ConfigItemList: React.FC = () => {
           placeholder="仅允许英文字母、数字、-和_"
           maxLength={128}
           onChange={(e) => handleEntryKeyChange(index, e.target.value)}
+        />
+      ),
+    },
+    {
+      title: <span>名称<span style={{ color: 'red' }}>*</span></span>,
+      dataIndex: "name",
+      key: "name",
+      render: (val: string, _: any, index: number) => (
+        <Input
+          value={val || ""}
+          placeholder="请输入名称"
+          maxLength={128}
+          onChange={(e) => handleEntryNameChange(index, e.target.value)}
         />
       ),
     },
@@ -797,6 +828,7 @@ const ConfigItemList: React.FC = () => {
               <Table
                 columns={[
                   { title: "配置key", dataIndex: "config_key", key: "config_key" },
+                  { title: "名称", dataIndex: "name", key: "name", render: (val: string) => val || "-" },
                   { title: "配置说明", dataIndex: "config_desc", key: "config_desc", render: (val: string | null) => val || "-" },
                 ]}
                 dataSource={detailData.entries || []}

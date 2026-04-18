@@ -211,7 +211,7 @@ export const adminApi = {
   getConfigEntries: (id: number) =>
     api.get(`/v1/admin/config-items/${id}/entries`),
 
-  saveConfigEntries: (id: number, entries: { config_key: string; config_desc?: string }[]) =>
+  saveConfigEntries: (id: number, entries: { config_key: string; name: string; config_desc?: string }[]) =>
     api.put(`/v1/admin/config-items/${id}/entries`, { entries }),
 
   getConfigEnterprises: (id: number, params?: {

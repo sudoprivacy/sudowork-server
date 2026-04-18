@@ -4,6 +4,7 @@ import { redis } from "../redis.js";
 export interface ConfigEntry {
   id: number;
   config_key: string;
+  name: string;
   config_desc: string | null;
 }
 
@@ -51,6 +52,7 @@ export async function getConfigItemsForEnterprise(
         ci.icon,
         ce.id AS entry_id,
         ce.config_key,
+        ce.name AS entry_name,
         ce.config_desc
       FROM config_enterprise_rel cer
       JOIN config_items ci ON ci.id = cer.config_item_id
@@ -77,6 +79,7 @@ export async function getConfigItemsForEnterprise(
     itemMap.get(row.id)!.entries.push({
       id: row.entry_id,
       config_key: row.config_key,
+      name: row.entry_name,
       config_desc: row.config_desc,
     });
   }

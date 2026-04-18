@@ -712,7 +712,7 @@ def test_09_toggle_status(page: Page):
                 const resp = await fetch(`/api/v1/admin/config-items/${params.id}/entries`, {
                     method: 'PUT',
                     headers: { 'Authorization': 'Bearer ' + params.token, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ entries: [{ config_key: 'hacked', config_desc: 'hacked' }] })
+                    body: JSON.stringify({ entries: [{ name: 'hacked_name', config_key: 'hacked', config_desc: 'hacked' }] })
                 });
                 return await resp.json();
             }''', {'id': disabled_item_id, 'token': token})
@@ -890,8 +890,8 @@ def test_11_config_entries_add_save_persist(page: Page):
             'token': token,
             'id': api_result,
             'entries': [
-                {'config_key': key1, 'config_desc': desc1},
-                {'config_key': key2, 'config_desc': desc2},
+                {'name': f'name_{key1}', 'config_key': key1, 'config_desc': desc1},
+                {'name': f'name_{key2}', 'config_key': key2, 'config_desc': desc2},
             ]
         })
         print(f'  API save result: {save_result}')
@@ -903,9 +903,11 @@ def test_11_config_entries_add_save_persist(page: Page):
         page.wait_for_timeout(500)
         all_rows = page.locator('.ant-modal:visible .ant-table-tbody tr.ant-table-row')
         last_row = all_rows.last
-        last_row.locator('input').first.fill(key1)
+        last_row.locator('input').nth(0).fill(f'name_{key1}')
         page.wait_for_timeout(500)
-        last_row.locator('input').last.fill(desc1)
+        last_row.locator('input').nth(1).fill(key1)
+        page.wait_for_timeout(500)
+        last_row.locator('input').nth(2).fill(desc1)
         page.wait_for_timeout(500)
         page.locator('.ant-modal-footer .ant-btn-primary').last.click()
         page.wait_for_timeout(2000)
@@ -994,11 +996,13 @@ def test_12_config_entries_delete_and_verify(page: Page):
         page.locator('.ant-modal:visible button.ant-btn-dashed').click()
         page.wait_for_timeout(500)
         entry_inputs = page.locator('.ant-modal:visible .ant-table input')
-        if entry_inputs.count() >= 4:
-            entry_inputs.nth(0).fill(f'del_target_{UNIQUE_SUFFIX}')
-            entry_inputs.nth(1).fill('将被删除')
-            entry_inputs.nth(2).fill(f'del_keep_{UNIQUE_SUFFIX}')
-            entry_inputs.nth(3).fill('将被保留')
+        if entry_inputs.count() >= 6:
+            entry_inputs.nth(0).fill(f'name_del_target')
+            entry_inputs.nth(1).fill(f'del_target_{UNIQUE_SUFFIX}')
+            entry_inputs.nth(2).fill('将被删除')
+            entry_inputs.nth(3).fill(f'name_del_keep')
+            entry_inputs.nth(4).fill(f'del_keep_{UNIQUE_SUFFIX}')
+            entry_inputs.nth(5).fill('将被保留')
         table_rows = page.locator('.ant-modal:visible .ant-table-tbody tr.ant-table-row')
         initial_count = table_rows.count()
 
@@ -1111,18 +1115,19 @@ def test_14_config_entries_validation(page: Page):
     page.locator('.ant-modal:visible button.ant-btn-dashed').click()
     page.wait_for_timeout(500)
 
-    # 14a: Empty key - modal should NOT close
+    # 14a: Empty name - modal should NOT close (name is required)
     page.locator('.ant-modal-footer .ant-btn-primary').last.click()
     page.wait_for_timeout(500)
     error_msg = page.locator('.ant-message-error')
-    assert error_msg.count() > 0, 'Empty key error not shown'
+    assert error_msg.count() > 0, 'Empty name error not shown'
     # Modal should still be open
-    assert page.locator('.ant-modal:visible').count() > 0, 'Modal should stay open after empty key error'
-    print('  14a: Empty key - error shown, modal stays open - OK')
+    assert page.locator('.ant-modal:visible').count() > 0, 'Modal should stay open after empty name error'
+    print('  14a: Empty name - error shown, modal stays open - OK')
 
-    # 14b: Invalid characters
+    # 14b: Invalid characters in config_key
     entry_inputs = page.locator('.ant-modal:visible .ant-table input')
-    if entry_inputs.count() >= 2:
+    if entry_inputs.count() >= 3:
+        entry_inputs.nth(0).fill(f'name_invalid_char_test')
         entry_inputs.nth(entry_inputs.count() - 2).fill('key@123')
         page.locator('.ant-modal-footer .ant-btn-primary').last.click()
         page.wait_for_timeout(500)
@@ -1133,12 +1138,15 @@ def test_14_config_entries_validation(page: Page):
 
     # 14c: Duplicate key
     entry_inputs = page.locator('.ant-modal:visible .ant-table input')
-    if entry_inputs.count() >= 2:
+    if entry_inputs.count() >= 3:
+        entry_inputs.nth(entry_inputs.count() - 3).fill(f'name_dup_test_1')
         entry_inputs.nth(entry_inputs.count() - 2).fill('dup_test')
         page.locator('.ant-modal:visible button.ant-btn-dashed').click()
         page.wait_for_timeout(500)
         entry_inputs2 = page.locator('.ant-modal:visible .ant-table input')
-        entry_inputs2.nth(entry_inputs2.count() - 2).fill('dup_test')
+        if entry_inputs2.count() >= 6:
+            entry_inputs2.nth(entry_inputs2.count() - 5).fill(f'name_dup_test_2')
+            entry_inputs2.nth(entry_inputs2.count() - 2).fill('dup_test')
         page.locator('.ant-modal-footer .ant-btn-primary').last.click()
         page.wait_for_timeout(500)
         error_msg3 = page.locator('.ant-message-error')

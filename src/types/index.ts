@@ -135,6 +135,7 @@ export interface ConfigEntry {
   id: number;
   config_item_id: number;
   config_key: string;
+  name: string;
   config_desc: string | null;
   created_at: string;
   updated_at: string;

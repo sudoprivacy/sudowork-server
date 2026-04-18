@@ -270,6 +270,7 @@ export function initSchema(): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       config_item_id INTEGER NOT NULL,
       config_key TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
       config_desc TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
