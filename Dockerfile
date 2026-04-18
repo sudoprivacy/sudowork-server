@@ -59,8 +59,11 @@ COPY tsconfig.json ./
 # Copy built frontend from Stage 1 (vite outputs to ../admin-dist)
 COPY --from=frontend-builder /app/admin-dist ./admin-dist
 
-# Create data directory with proper permissions
-RUN mkdir -p /app/data && chmod 777 /app/data
+# Copy public assets (default icons etc.)
+COPY public ./public
+
+# Create data and upload directories with proper permissions
+RUN mkdir -p /app/data/uploads/config-items && chmod -R 777 /app/data
 
 # Expose port
 EXPOSE 3000

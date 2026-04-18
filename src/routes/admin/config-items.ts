@@ -59,7 +59,7 @@ configItemsRoutes.get('/config-items', authMiddleware, adminMiddleware, async (c
 // ==================== POST /config-items - Create ====================
 
 configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (c) => {
-  const { name, description } = await c.req.json();
+  const { name, description, icon } = await c.req.json();
 
   if (!name || !name.trim()) {
     return c.json({ success: false, msg: '配置项名称不能为空' }, 400);
@@ -79,9 +79,9 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
   const adminUser = (await getAuthUser(c)) as any;
 
   const result = db.run(
-    `INSERT INTO config_items (name, description, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
-     VALUES (?, ?, 1, ?, ?, ?, ?)`,
-    [name.trim(), description || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
+    `INSERT INTO config_items (name, description, icon, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
+     VALUES (?, ?, ?, 1, ?, ?, ?, ?)`,
+    [name.trim(), description || null, icon || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
   );
 
   const newId = Number(result.lastInsertRowid);
@@ -94,7 +94,7 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
     resourceId: newId,
     method: 'POST',
     path: '/api/v1/admin/config-items',
-    requestData: { name, description },
+    requestData: { name, description, icon },
     responseData: { id: newId, name },
   });
 
@@ -127,7 +127,7 @@ configItemsRoutes.get('/config-items/:id', authMiddleware, adminMiddleware, asyn
 
 configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, async (c) => {
   const id = c.req.param('id');
-  const { name, description } = await c.req.json();
+  const { name, description, icon } = await c.req.json();
 
   const item = db.prepare('SELECT * FROM config_items WHERE id = ?').get(id) as any;
   if (!item) {
@@ -157,9 +157,9 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
   const adminUser = (await getAuthUser(c)) as any;
 
   db.run(
-    `UPDATE config_items SET name = COALESCE(?, name), description = ?, updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
+    `UPDATE config_items SET name = COALESCE(?, name), description = COALESCE(?, description), icon = COALESCE(?, icon), updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
      WHERE id = ?`,
-    [name?.trim() || null, description ?? null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
+    [name?.trim() || null, description ?? null, icon ?? null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
   );
 
   logOperation({
@@ -170,7 +170,7 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
     resourceId: Number(id),
     method: 'PUT',
     path: `/api/v1/admin/config-items/${id}`,
-    requestData: { name, description },
+    requestData: { name, description, icon },
   });
 
   return c.json({ success: true, msg: '配置项更新成功' });
@@ -285,6 +285,12 @@ configItemsRoutes.put('/config-items/:id/entries', authMiddleware, adminMiddlewa
       return c.json({ success: false, msg: `配置key「${entry.config_key}」重复` }, 400);
     }
     seenKeys.add(entry.config_key);
+    if (!entry.name || !entry.name.trim()) {
+      return c.json({ success: false, msg: `第 ${i + 1} 行的名称不能为空` }, 400);
+    }
+    if (entry.name.trim().length > 128) {
+      return c.json({ success: false, msg: `第 ${i + 1} 行的名称不超过128个字符` }, 400);
+    }
     if (entry.config_desc && entry.config_desc.length > 500) {
       return c.json({ success: false, msg: `第 ${i + 1} 行的配置说明不超过500个字符` }, 400);
     }
@@ -300,12 +306,12 @@ configItemsRoutes.put('/config-items/:id/entries', authMiddleware, adminMiddlewa
 
     // Insert new entries
     const insertStmt = db.prepare(
-      `INSERT INTO config_entries (config_item_id, config_key, config_desc, created_at, updated_at)
-       VALUES (?, ?, ?, datetime('now'), datetime('now'))`
+      `INSERT INTO config_entries (config_item_id, config_key, name, config_desc, created_at, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
     );
 
     for (const entry of entries) {
-      insertStmt.run(id, entry.config_key.trim(), entry.config_desc?.trim() || null);
+      insertStmt.run(id, entry.config_key.trim(), entry.name.trim(), entry.config_desc?.trim() || null);
     }
 
     // Update config_item's updated_at

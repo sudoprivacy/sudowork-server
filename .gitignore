@@ -38,8 +38,14 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 *.db
 *.db-journal
 
+# Data directory (database, uploads)
+data/
+
 # Session files
 session-*.md
 
 # Claude Code
 .claude/
+
+# Python
+__pycache__/

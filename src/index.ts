@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { serveStatic } from "hono/bun";
+import { join } from "node:path";
 
 // Database
 import { initSchema } from "./db/schema.js";
@@ -35,6 +36,13 @@ app.use("*", cors());
 app.use("/assets/*", serveStatic({ root: "./admin-dist" }));
 app.use("/favicon.svg", serveStatic({ root: "./admin-dist" }));
 app.use("/icons.svg", serveStatic({ root: "./admin-dist" }));
+
+// Serve uploaded config item icons
+const UPLOAD_DIR_STATIC = process.env.UPLOAD_DIR || './data/uploads';
+app.use("/uploads/*", serveStatic({ root: join(UPLOAD_DIR_STATIC, '..') }));
+
+// Serve default config item icon
+app.use("/config-item-default.svg", serveStatic({ root: "./public" }));
 
 // Serve index.html for root path
 app.get("/", async (c) => {

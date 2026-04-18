@@ -196,13 +196,13 @@ export const adminApi = {
     page_size?: number;
   }) => api.get("/v1/admin/config-items", { params }),
 
-  createConfigItem: (data: { name: string; description?: string }) =>
+  createConfigItem: (data: { name: string; description?: string; icon?: string }) =>
     api.post("/v1/admin/config-items", data),
 
   getConfigItemDetail: (id: number) =>
     api.get(`/v1/admin/config-items/${id}`),
 
-  updateConfigItem: (id: number, data: { name?: string; description?: string }) =>
+  updateConfigItem: (id: number, data: { name?: string; description?: string; icon?: string }) =>
     api.put(`/v1/admin/config-items/${id}`, data),
 
   updateConfigItemStatus: (id: number, status: number) =>
@@ -211,7 +211,7 @@ export const adminApi = {
   getConfigEntries: (id: number) =>
     api.get(`/v1/admin/config-items/${id}/entries`),
 
-  saveConfigEntries: (id: number, entries: { config_key: string; config_desc?: string }[]) =>
+  saveConfigEntries: (id: number, entries: { config_key: string; name: string; config_desc?: string }[]) =>
     api.put(`/v1/admin/config-items/${id}/entries`, { entries }),
 
   getConfigEnterprises: (id: number, params?: {
@@ -226,4 +226,13 @@ export const adminApi = {
 
   removeConfigEnterprise: (configItemId: number, enterpriseId: number) =>
     api.delete(`/v1/admin/config-items/${configItemId}/enterprises/${enterpriseId}`),
+
+  // Upload config item icon
+  uploadConfigItemIcon: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post("/v1/admin/upload/config-item-icon", formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };

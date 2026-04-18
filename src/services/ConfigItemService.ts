@@ -4,17 +4,28 @@ import { redis } from "../redis.js";
 export interface ConfigEntry {
   id: number;
   config_key: string;
+  name: string;
   config_desc: string | null;
 }
 
 export interface ConfigItemWithEntries {
   id: number;
   name: string;
+  icon: string | null;
+  icon_url: string;
   entries: ConfigEntry[];
 }
 
 const CACHE_PREFIX = "config_items:";
 const CACHE_TTL_SECONDS = 300; // 5 minutes
+const DEFAULT_ICON_URL = "/config-item-default.svg";
+
+function getIconUrl(icon: string | null): string {
+  if (icon) {
+    return `/uploads/config-items/${icon}`;
+  }
+  return DEFAULT_ICON_URL;
+}
 
 export async function getConfigItemsForEnterprise(
   enterpriseId: number
@@ -38,8 +49,10 @@ export async function getConfigItemsForEnterprise(
       SELECT
         ci.id,
         ci.name,
+        ci.icon,
         ce.id AS entry_id,
         ce.config_key,
+        ce.name AS entry_name,
         ce.config_desc
       FROM config_enterprise_rel cer
       JOIN config_items ci ON ci.id = cer.config_item_id
@@ -58,12 +71,15 @@ export async function getConfigItemsForEnterprise(
       itemMap.set(row.id, {
         id: row.id,
         name: row.name,
+        icon: row.icon || null,
+        icon_url: getIconUrl(row.icon),
         entries: [],
       });
     }
     itemMap.get(row.id)!.entries.push({
       id: row.entry_id,
       config_key: row.config_key,
+      name: row.entry_name,
       config_desc: row.config_desc,
     });
   }
