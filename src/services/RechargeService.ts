@@ -165,7 +165,7 @@ class RechargeService {
       return { success: false, error: "订单不存在" };
     }
 
-    if (order.status !== ORDER_STATUS.PENDING) {
+    if (order.status !== ORDER_STATUS.PENDING && order.status !== ORDER_STATUS.PAYING) {
       return { success: false, error: "订单状态无效" };
     }
 
