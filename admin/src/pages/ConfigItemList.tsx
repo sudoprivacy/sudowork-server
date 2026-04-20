@@ -14,6 +14,7 @@ import {
   Descriptions,
   Upload,
   Image,
+  Checkbox,
 } from "antd";
 import { PlusOutlined, UploadOutlined } from "@ant-design/icons";
 import { adminApi } from "../api/index";
@@ -36,6 +37,7 @@ interface ConfigItemRecord {
   name: string;
   description: string | null;
   icon: string | null;
+  pinyin: string | null;
   status: number;
   enterprise_count: number;
   created_by_name: string | null;
@@ -49,6 +51,7 @@ interface ConfigEntry {
   config_key: string;
   name: string;
   config_desc: string | null;
+  required: number;
 }
 
 interface EnterpriseRecord {
@@ -63,6 +66,7 @@ interface DetailData {
   name: string;
   description: string | null;
   icon: string | null;
+  pinyin: string | null;
   status: number;
   created_by_name: string | null;
   created_by_id: number | null;
@@ -92,6 +96,7 @@ const ConfigItemList: React.FC = () => {
   const [formModalLoading, setFormModalLoading] = useState(false);
   const [iconFilename, setIconFilename] = useState<string | null>(null);
   const [iconUploading, setIconUploading] = useState(false);
+  const [pinyinEditable, setPinyinEditable] = useState(false);
 
   // Detail modal
   const [detailVisible, setDetailVisible] = useState(false);
@@ -159,6 +164,7 @@ const ConfigItemList: React.FC = () => {
     setEditingItem(null);
     form.resetFields();
     setIconFilename(null);
+    setPinyinEditable(false);
     setFormModalVisible(true);
   };
 
@@ -167,8 +173,10 @@ const ConfigItemList: React.FC = () => {
     form.setFieldsValue({
       name: record.name,
       description: record.description,
+      pinyin: record.pinyin || '',
     });
     setIconFilename(record.icon);
+    setPinyinEditable(false);
     setFormModalVisible(true);
   };
 
@@ -217,7 +225,17 @@ const ConfigItemList: React.FC = () => {
   const handleFormSubmit = async (values: any) => {
     setFormModalLoading(true);
     try {
-      const submitData = { ...values, icon: iconFilename };
+      const submitData: any = { ...values, icon: iconFilename };
+
+      // For edit mode, include pinyin only if the checkbox was checked
+      if (editingItem && pinyinEditable) {
+        submitData.pinyin = values.pinyin;
+      } else if (editingItem) {
+        delete submitData.pinyin;
+      } else {
+        delete submitData.pinyin;
+      }
+
       let res: any;
       if (editingItem) {
         res = await adminApi.updateConfigItem(editingItem.id, submitData);
@@ -230,6 +248,7 @@ const ConfigItemList: React.FC = () => {
         setEditingItem(null);
         form.resetFields();
         setIconFilename(null);
+        setPinyinEditable(false);
         loadConfigItems();
       } else {
         message.error(res.msg || "操作失败");
@@ -303,7 +322,7 @@ const ConfigItemList: React.FC = () => {
   };
 
   const handleAddEntry = () => {
-    setEntriesData([...entriesData, { id: Date.now(), config_key: "", name: "", config_desc: null }]);
+    setEntriesData([...entriesData, { id: Date.now(), config_key: "", name: "", config_desc: null, required: 1 }]);
   };
 
   const handleDeleteEntry = (index: number) => {
@@ -325,6 +344,12 @@ const ConfigItemList: React.FC = () => {
   const handleEntryDescChange = (index: number, value: string) => {
     const newData = [...entriesData];
     newData[index] = { ...newData[index], config_desc: value || null };
+    setEntriesData(newData);
+  };
+
+  const handleEntryRequiredChange = (index: number, checked: boolean) => {
+    const newData = [...entriesData];
+    newData[index] = { ...newData[index], required: checked ? 1 : 0 };
     setEntriesData(newData);
   };
 
@@ -620,6 +645,19 @@ const ConfigItemList: React.FC = () => {
       ),
     },
     {
+      title: "必填",
+      dataIndex: "required",
+      key: "required",
+      width: 70,
+      align: "center" as const,
+      render: (val: number, _: any, index: number) => (
+        <Checkbox
+          checked={val === 1}
+          onChange={(e) => handleEntryRequiredChange(index, e.target.checked)}
+        />
+      ),
+    },
+    {
       title: "配置说明",
       dataIndex: "config_desc",
       key: "config_desc",
@@ -709,12 +747,18 @@ const ConfigItemList: React.FC = () => {
       <Modal
         title={editingItem ? `${editingItem.name} - 修改配置项` : "新增配置项"}
         open={formModalVisible}
-        onOk={() => form.submit()}
+        onOk={() => {
+          form.submit();
+          // Return a promise that never resolves — modal stays open.
+          // handleFormSubmit will close it manually on success.
+          return new Promise(() => {});
+        }}
         onCancel={() => {
           setFormModalVisible(false);
           setEditingItem(null);
           form.resetFields();
           setIconFilename(null);
+          setPinyinEditable(false);
         }}
         confirmLoading={formModalLoading}
       >
@@ -770,6 +814,40 @@ const ConfigItemList: React.FC = () => {
           >
             <Input.TextArea placeholder="请输入配置项说明（可选）" maxLength={200} showCount rows={3} />
           </Form.Item>
+          {editingItem && (
+            <Form.Item label="拼音">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Checkbox
+                  id="edit-pinyin-checkbox"
+                  checked={pinyinEditable}
+                  onChange={(e) => {
+                    setPinyinEditable(e.target.checked);
+                    if (!e.target.checked) {
+                      form.setFieldValue('pinyin', editingItem.pinyin || '');
+                    }
+                  }}
+                >
+                  修改拼音
+                </Checkbox>
+                <Form.Item
+                  name="pinyin"
+                  noStyle
+                  rules={[
+                    { pattern: /^[a-z0-9_]+$/, message: '只允许小写英文字母、数字和_' },
+                    { max: 128, message: '拼音不超过128个字符' },
+                  ]}
+                >
+                  <Input
+                    id="edit-pinyin-input"
+                    placeholder="仅允许小写英文字母、数字和_"
+                    maxLength={128}
+                    disabled={!pinyinEditable}
+                    style={{ width: 240 }}
+                  />
+                </Form.Item>
+              </div>
+            </Form.Item>
+          )}
         </Form>
       </Modal>
 
@@ -786,9 +864,10 @@ const ConfigItemList: React.FC = () => {
       >
         {detailData && (
           <>
-            <Descriptions bordered column={2} size="small" loading={detailLoading}>
+            <Descriptions bordered column={2} size="small">
               <Descriptions.Item label="ID">{detailData.id}</Descriptions.Item>
               <Descriptions.Item label="配置项名称">{detailData.name}</Descriptions.Item>
+              <Descriptions.Item label="拼音">{detailData.pinyin || "-"}</Descriptions.Item>
               <Descriptions.Item label="配置项图标">
                 <Image
                   src={getIconUrl(detailData.icon)}
@@ -827,7 +906,9 @@ const ConfigItemList: React.FC = () => {
               <Title level={5} style={{ marginBottom: 12 }}>配置列表</Title>
               <Table
                 columns={[
-                  { title: "配置key", dataIndex: "config_key", key: "config_key" },
+                  { title: "配置key", dataIndex: "config_key", key: "config_key", render: (val: string, record: any) => (
+                    <span>{record.required === 1 ? <span style={{ color: 'red' }}>*</span> : null}{val}</span>
+                  )},
                   { title: "名称", dataIndex: "name", key: "name", render: (val: string) => val || "-" },
                   { title: "配置说明", dataIndex: "config_desc", key: "config_desc", render: (val: string | null) => val || "-" },
                 ]}
@@ -851,7 +932,12 @@ const ConfigItemList: React.FC = () => {
           setEntriesItem(null);
           setEntriesData([]);
         }}
-        onOk={handleSaveEntries}
+        onOk={() => {
+          handleSaveEntries();
+          // Return a promise that never resolves — modal stays open.
+          // handleSaveEntries will close it manually on success.
+          return new Promise(() => {});
+        }}
         confirmLoading={entriesSaving}
         width={700}
       >

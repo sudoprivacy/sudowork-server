@@ -28,6 +28,7 @@
     "jsonwebtoken": "^9.0.3",
     "node-forge": "^1.4.0",
     "node-rsa": "^1.1.1",
+    "pinyin": "^4.0.0",
     "tencentcloud-sdk-nodejs": "^4.1.200"
   }
 }
