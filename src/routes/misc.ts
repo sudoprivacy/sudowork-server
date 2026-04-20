@@ -6,6 +6,9 @@ import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { getAuthUser } from "../middleware/auth.js";
 import { getConfigItemsForEnterprise } from "../services/ConfigItemService.js";
+import { join } from "node:path";
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || "./data/uploads";
 
 const miscRoutes = new Hono();
 
@@ -115,5 +118,67 @@ miscRoutes.get("/config/items", async (c) => {
   const items = await getConfigItemsForEnterprise(payload.enterprise_id);
   return c.json({ success: true, data: items });
 });
+
+// GET /api/v1/tenant/config - Get tenant config by code (requires auth)
+miscRoutes.get("/tenant/config", async (c) => {
+  const payload = (await getAuthUser(c)) as any;
+  if (!payload || !payload.id) {
+    return c.json({ success: false, msg: "未授权" }, 401);
+  }
+
+  const code = c.req.query("code");
+
+  if (!code) {
+    return c.json({ success: false, msg: "租户码不能为空" }, 400);
+  }
+
+  const enterprise = db
+    .prepare("SELECT logo, app_name, top_name, about_name, app_company_name, login_desp FROM enterprises WHERE code = ?")
+    .get(code) as any;
+
+  if (!enterprise) {
+    return c.json({ success: false, msg: "租户不存在" }, 404);
+  }
+
+  // Convert logo to base64
+  let logoBase64 = null;
+  if (enterprise.logo) {
+    const logoPath = join(UPLOAD_DIR, "enterprises", enterprise.logo);
+    const file = Bun.file(logoPath);
+    if (await file.exists()) {
+      const buffer = await file.arrayBuffer();
+      const mimeType = getMimeType(enterprise.logo);
+      logoBase64 = `data:${mimeType};base64,${Buffer.from(buffer).toString("base64")}`;
+    }
+  }
+
+  return c.json({
+    success: true,
+    data: {
+      logo: logoBase64,
+      app_name: enterprise.app_name,
+      top_name: enterprise.top_name,
+      about_name: enterprise.about_name,
+      app_company_name: enterprise.app_company_name,
+      login_desp: enterprise.login_desp,
+    },
+  });
+});
+
+// Helper: get MIME type from file extension
+function getMimeType(filename: string): string {
+  const ext = filename.toLowerCase().split(".").pop();
+  switch (ext) {
+    case "svg":
+      return "image/svg+xml";
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    default:
+      return "image/png";
+  }
+}
 
 export { miscRoutes };

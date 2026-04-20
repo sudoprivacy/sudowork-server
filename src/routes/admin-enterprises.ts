@@ -15,7 +15,7 @@ adminEnterpriseRoutes.get(
   adminMiddleware,
   async (c) => {
     const enterprises = db
-      .prepare("SELECT * FROM enterprises ORDER BY id DESC")
+      .prepare("SELECT id, name, code, credit_pool, logo, app_name, top_name, about_name, app_company_name, login_desp FROM enterprises ORDER BY id DESC")
       .all();
 
     // Get user count for each enterprise
@@ -42,7 +42,7 @@ adminEnterpriseRoutes.post(
   authMiddleware,
   adminMiddleware,
   async (c) => {
-    const { name, code, credit_pool } = await c.req.json();
+    const { name, code, credit_pool, logo, app_name, top_name, about_name, app_company_name, login_desp } = await c.req.json();
 
     if (!name || !code) {
       return c.json(
@@ -70,8 +70,8 @@ adminEnterpriseRoutes.post(
     }
 
     db.run(
-      "INSERT INTO enterprises (name, code, credit_pool) VALUES (?, ?, ?)",
-      [name, code, credit_pool || 10000],
+      "INSERT INTO enterprises (name, code, credit_pool, logo, app_name, top_name, about_name, app_company_name, login_desp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [name, code, credit_pool || 10000, logo || null, app_name || null, top_name || null, about_name || null, app_company_name || null, login_desp || null],
     );
 
     return c.json({
@@ -88,7 +88,7 @@ adminEnterpriseRoutes.put(
   adminMiddleware,
   async (c) => {
     const id = c.req.param("id") as string;
-    const { name, credit_pool } = await c.req.json();
+    const { name, credit_pool, logo, app_name, top_name, about_name, app_company_name, login_desp } = await c.req.json();
 
     if (!name) {
       return c.json(
@@ -101,8 +101,8 @@ adminEnterpriseRoutes.put(
     }
 
     db.run(
-      "UPDATE enterprises SET name = ?, credit_pool = ? WHERE id = ?",
-      [name, credit_pool ?? 10000, id],
+      "UPDATE enterprises SET name = ?, credit_pool = ?, logo = ?, app_name = ?, top_name = ?, about_name = ?, app_company_name = ?, login_desp = ? WHERE id = ?",
+      [name, credit_pool ?? 10000, logo || null, app_name || null, top_name || null, about_name || null, app_company_name || null, login_desp || null, id],
     );
 
     return c.json({

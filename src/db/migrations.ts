@@ -17,6 +17,13 @@ export function runMigrations(): void {
   addColumnIfNotExists("operation_logs", "response_data", "TEXT");
   addColumnIfNotExists("config_items", "icon", "TEXT");
   addColumnIfNotExists("config_entries", "name", "TEXT NOT NULL DEFAULT ''");
+  // Enterprise new fields
+  addColumnIfNotExists("enterprises", "logo", "TEXT");
+  addColumnIfNotExists("enterprises", "app_name", "TEXT");
+  addColumnIfNotExists("enterprises", "top_name", "TEXT");
+  addColumnIfNotExists("enterprises", "about_name", "TEXT");
+  addColumnIfNotExists("enterprises", "app_company_name", "TEXT");
+  addColumnIfNotExists("enterprises", "login_desp", "TEXT");
 }
 
 /**

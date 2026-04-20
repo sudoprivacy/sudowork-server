@@ -10,8 +10,10 @@ import {
   Input,
   InputNumber,
   Typography,
+  Upload,
+  Image,
 } from "antd";
-import { PlusOutlined, DeleteOutlined, EditOutlined } from "@ant-design/icons";
+import { PlusOutlined, DeleteOutlined, EditOutlined, UploadOutlined, CloseCircleOutlined } from "@ant-design/icons";
 import { adminApi } from "../api";
 
 const { Title } = Typography;
@@ -21,6 +23,21 @@ interface Enterprise {
   name: string;
   code: string;
   userCount: number;
+  logo?: string | null;
+  app_name?: string | null;
+  top_name?: string | null;
+  about_name?: string | null;
+  app_company_name?: string | null;
+  login_desp?: string | null;
+}
+
+const DEFAULT_LOGO_URL = '/enterprise-default-logo.svg';
+
+function getLogoUrl(logo: string | null | undefined): string {
+  if (logo) {
+    return `/uploads/enterprises/${logo}`;
+  }
+  return DEFAULT_LOGO_URL;
 }
 
 const EnterpriseList: React.FC = () => {
@@ -29,6 +46,8 @@ const EnterpriseList: React.FC = () => {
   const [visible, setVisible] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form] = Form.useForm();
+  const [logoFilename, setLogoFilename] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
 
   useEffect(() => {
     loadEnterprises();
@@ -50,11 +69,13 @@ const EnterpriseList: React.FC = () => {
 
   const handleCreate = async (values: any) => {
     try {
-      const response = await adminApi.createEnterprise(values);
+      const submitData = { ...values, logo: logoFilename };
+      const response = await adminApi.createEnterprise(submitData);
       if ((response as any).success) {
         message.success("创建成功");
         setVisible(false);
         form.resetFields();
+        setLogoFilename(null);
         loadEnterprises();
       }
     } catch (error: any) {
@@ -65,12 +86,14 @@ const EnterpriseList: React.FC = () => {
   const handleUpdate = async (values: any) => {
     if (!editingId) return;
     try {
-      const response = await adminApi.updateEnterprise(editingId, values);
+      const submitData = { ...values, logo: logoFilename };
+      const response = await adminApi.updateEnterprise(editingId, submitData);
       if ((response as any).success) {
         message.success("更新成功");
         setVisible(false);
         setEditingId(null);
         form.resetFields();
+        setLogoFilename(null);
         loadEnterprises();
       }
     } catch (error: any) {
@@ -81,6 +104,7 @@ const EnterpriseList: React.FC = () => {
   const openCreateModal = () => {
     setEditingId(null);
     form.resetFields();
+    setLogoFilename(null);
     setVisible(true);
   };
 
@@ -89,8 +113,47 @@ const EnterpriseList: React.FC = () => {
     form.setFieldsValue({
       name: record.name,
       code: record.code,
+      app_name: record.app_name,
+      top_name: record.top_name,
+      about_name: record.about_name,
+      app_company_name: record.app_company_name,
+      login_desp: record.login_desp,
     });
+    setLogoFilename(record.logo);
     setVisible(true);
+  };
+
+  const handleLogoUpload = async (file: File) => {
+    const validTypes = ['image/svg+xml', 'image/png', 'image/jpeg'];
+    if (!validTypes.includes(file.type)) {
+      message.error('仅支持 SVG、PNG、JPG 格式的图片');
+      return Upload.LIST_IGNORE;
+    }
+    if (file.size > 500 * 1024) {
+      message.error('文件大小不能超过 500KB');
+      return Upload.LIST_IGNORE;
+    }
+
+    setLogoUploading(true);
+    try {
+      const res: any = await adminApi.uploadEnterpriseLogo(file);
+      if (res.success) {
+        setLogoFilename(res.data.filename);
+        message.success('Logo上传成功');
+      } else {
+        message.error(res.msg || 'Logo上传失败');
+      }
+    } catch (error: any) {
+      message.error(error.response?.data?.msg || 'Logo上传失败');
+    } finally {
+      setLogoUploading(false);
+    }
+    return false;
+  };
+
+  const handleDeleteLogo = () => {
+    setLogoFilename(null);
+    message.success('Logo已删除');
   };
 
   const handleDelete = (id: number) => {
@@ -180,6 +243,7 @@ const EnterpriseList: React.FC = () => {
           setVisible(false);
           setEditingId(null);
           form.resetFields();
+          setLogoFilename(null);
         }}
       >
         <Form
@@ -187,6 +251,49 @@ const EnterpriseList: React.FC = () => {
           layout="vertical"
           onFinish={editingId ? handleUpdate : handleCreate}
         >
+          <Form.Item label="企业Logo">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <Upload
+                accept=".svg,.png,.jpg,.jpeg"
+                showUploadList={false}
+                beforeUpload={handleLogoUpload}
+                disabled={logoUploading}
+              >
+                <Button icon={<UploadOutlined />} loading={logoUploading}>
+                  {logoFilename ? '更换Logo' : '上传Logo'}
+                </Button>
+              </Upload>
+              {logoFilename && (
+                <>
+                  <Image
+                    src={getLogoUrl(logoFilename)}
+                    alt="企业Logo"
+                    width={60}
+                    height={60}
+                    style={{ objectFit: 'contain', borderRadius: 4 }}
+                    preview={{ mask: "查看原图" }}
+                  />
+                  <Button
+                    type="text"
+                    danger
+                    icon={<CloseCircleOutlined />}
+                    onClick={handleDeleteLogo}
+                    title="删除Logo"
+                  />
+                </>
+              )}
+              {!logoFilename && (
+                <Image
+                  src={DEFAULT_LOGO_URL}
+                  alt="默认Logo"
+                  width={60}
+                  height={60}
+                  style={{ objectFit: 'contain', borderRadius: 4, opacity: 0.5 }}
+                  preview={false}
+                />
+              )}
+            </div>
+          </Form.Item>
           <Form.Item
             label="企业名称"
             name="name"
@@ -203,6 +310,36 @@ const EnterpriseList: React.FC = () => {
               placeholder="请输入企业码（唯一标识）"
               disabled={!!editingId}
             />
+          </Form.Item>
+          <Form.Item
+            label="App-Name"
+            name="app_name"
+          >
+            <Input placeholder="请输入App-Name" />
+          </Form.Item>
+          <Form.Item
+            label="Top-Name"
+            name="top_name"
+          >
+            <Input placeholder="请输入Top-Name" />
+          </Form.Item>
+          <Form.Item
+            label="About-Name"
+            name="about_name"
+          >
+            <Input placeholder="请输入About-Name" />
+          </Form.Item>
+          <Form.Item
+            label="APP主体名称"
+            name="app_company_name"
+          >
+            <Input placeholder="请输入APP主体名称" />
+          </Form.Item>
+          <Form.Item
+            label="登录页描述"
+            name="login_desp"
+          >
+            <Input placeholder="请输入登录页描述" />
           </Form.Item>
         </Form>
       </Modal>

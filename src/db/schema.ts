@@ -14,7 +14,13 @@ export function initSchema(): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
       code TEXT UNIQUE,
-      credit_pool REAL DEFAULT 10000
+      credit_pool REAL DEFAULT 10000,
+      logo TEXT,
+      app_name TEXT,
+      top_name TEXT,
+      about_name TEXT,
+      app_company_name TEXT,
+      login_desp TEXT
     );
   `);
 
