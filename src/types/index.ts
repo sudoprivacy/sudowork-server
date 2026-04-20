@@ -122,6 +122,7 @@ export interface ConfigItem {
   id: number;
   name: string;
   description: string | null;
+  pinyin: string | null;
   status: ConfigItemStatus;
   created_by_id: number | null;
   created_by_name: string | null;
@@ -137,6 +138,7 @@ export interface ConfigEntry {
   config_key: string;
   name: string;
   config_desc: string | null;
+  required: number;
   created_at: string;
   updated_at: string;
 }

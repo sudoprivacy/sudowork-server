@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import { db } from '../../db/index.js';
 import { authMiddleware, adminMiddleware, getAuthUser } from '../../middleware/auth.js';
 import { logOperation } from '../../utils/logger.js';
+import { generateUniquePinyin } from '../../utils/pinyin.js';
 
 const configItemsRoutes = new Hono();
 
@@ -76,12 +77,14 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
     return c.json({ success: false, msg: '配置项名称已存在' }, 400);
   }
 
+  const pinyinValue = generateUniquePinyin(name.trim());
+
   const adminUser = (await getAuthUser(c)) as any;
 
   const result = db.run(
-    `INSERT INTO config_items (name, description, icon, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
-     VALUES (?, ?, ?, 1, ?, ?, ?, ?)`,
-    [name.trim(), description || null, icon || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
+    `INSERT INTO config_items (name, description, icon, pinyin, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+    [name.trim(), description || null, icon || null, pinyinValue, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
   );
 
   const newId = Number(result.lastInsertRowid);
@@ -94,8 +97,8 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
     resourceId: newId,
     method: 'POST',
     path: '/api/v1/admin/config-items',
-    requestData: { name, description, icon },
-    responseData: { id: newId, name },
+    requestData: { name, description, icon, pinyin: pinyinValue },
+    responseData: { id: newId, name, pinyin: pinyinValue },
   });
 
   return c.json({ success: true, msg: '配置项创建成功', data: { id: newId } });
@@ -127,7 +130,7 @@ configItemsRoutes.get('/config-items/:id', authMiddleware, adminMiddleware, asyn
 
 configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, async (c) => {
   const id = c.req.param('id');
-  const { name, description, icon } = await c.req.json();
+  const { name, description, icon, pinyin } = await c.req.json();
 
   const item = db.prepare('SELECT * FROM config_items WHERE id = ?').get(id) as any;
   if (!item) {
@@ -154,12 +157,29 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
     return c.json({ success: false, msg: '配置项说明不超过200个字符' }, 400);
   }
 
+  // Validate pinyin if provided (admin checked the "edit pinyin" checkbox)
+  if (pinyin !== undefined && pinyin !== null && pinyin.trim()) {
+    const pinyinTrimmed = pinyin.trim();
+    if (pinyinTrimmed.length > 128) {
+      return c.json({ success: false, msg: '拼音不超过128个字符' }, 400);
+    }
+    if (!/^[a-z0-9_]+$/.test(pinyinTrimmed)) {
+      return c.json({ success: false, msg: '拼音只允许小写英文字母、数字和_' }, 400);
+    }
+    const existingPinyin = db.prepare('SELECT id FROM config_items WHERE pinyin = ? AND id != ?').get(pinyinTrimmed, id);
+    if (existingPinyin) {
+      return c.json({ success: false, msg: '拼音已存在，请使用其他拼音' }, 400);
+    }
+  }
+
   const adminUser = (await getAuthUser(c)) as any;
 
+  const pinyinValue = (pinyin !== undefined && pinyin !== null && pinyin.trim()) ? pinyin.trim() : null;
+
   db.run(
-    `UPDATE config_items SET name = COALESCE(?, name), description = COALESCE(?, description), icon = COALESCE(?, icon), updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
+    `UPDATE config_items SET name = COALESCE(?, name), description = COALESCE(?, description), icon = COALESCE(?, icon), pinyin = CASE WHEN ? IS NOT NULL THEN ? ELSE pinyin END, updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
      WHERE id = ?`,
-    [name?.trim() || null, description ?? null, icon ?? null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
+    [name?.trim() || null, description ?? null, icon ?? null, pinyinValue, pinyinValue, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
   );
 
   logOperation({
@@ -170,7 +190,7 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
     resourceId: Number(id),
     method: 'PUT',
     path: `/api/v1/admin/config-items/${id}`,
-    requestData: { name, description, icon },
+    requestData: { name, description, icon, pinyin },
   });
 
   return c.json({ success: true, msg: '配置项更新成功' });
@@ -306,12 +326,12 @@ configItemsRoutes.put('/config-items/:id/entries', authMiddleware, adminMiddlewa
 
     // Insert new entries
     const insertStmt = db.prepare(
-      `INSERT INTO config_entries (config_item_id, config_key, name, config_desc, created_at, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
+      `INSERT INTO config_entries (config_item_id, config_key, name, config_desc, required, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     );
 
     for (const entry of entries) {
-      insertStmt.run(id, entry.config_key.trim(), entry.name.trim(), entry.config_desc?.trim() || null);
+      insertStmt.run(id, entry.config_key.trim(), entry.name.trim(), entry.config_desc?.trim() || null, entry.required !== undefined ? entry.required : 1);
     }
 
     // Update config_item's updated_at

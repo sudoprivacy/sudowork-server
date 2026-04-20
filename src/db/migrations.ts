@@ -17,6 +17,8 @@ export function runMigrations(): void {
   addColumnIfNotExists("operation_logs", "response_data", "TEXT");
   addColumnIfNotExists("config_items", "icon", "TEXT");
   addColumnIfNotExists("config_entries", "name", "TEXT NOT NULL DEFAULT ''");
+  addColumnIfNotExists("config_entries", "required", "INTEGER DEFAULT 1");
+  addColumnIfNotExists("config_items", "pinyin", "TEXT");
   // Enterprise new fields
   addColumnIfNotExists("enterprises", "logo", "TEXT");
   addColumnIfNotExists("enterprises", "app_name", "TEXT");
@@ -24,6 +26,8 @@ export function runMigrations(): void {
   addColumnIfNotExists("enterprises", "about_name", "TEXT");
   addColumnIfNotExists("enterprises", "app_company_name", "TEXT");
   addColumnIfNotExists("enterprises", "login_desp", "TEXT");
+
+  createIndexIfNotExists("idx_config_items_pinyin", "config_items", "pinyin");
 }
 
 /**
@@ -37,5 +41,13 @@ function addColumnIfNotExists(table: string, column: string, type: string): void
     }
   } catch (e) {
     // Column might already exist, ignore error
+  }
+}
+
+function createIndexIfNotExists(indexName: string, table: string, column: string): void {
+  try {
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table}(${column})`);
+  } catch (e) {
+    // Index might already exist, ignore error
   }
 }

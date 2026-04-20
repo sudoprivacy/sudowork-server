@@ -260,6 +260,7 @@ export function initSchema(): void {
       name TEXT NOT NULL,
       description TEXT,
       icon TEXT,
+      pinyin TEXT,
       status INTEGER DEFAULT 1,
       created_by_id INTEGER,
       created_by_name TEXT,
@@ -278,6 +279,7 @@ export function initSchema(): void {
       config_key TEXT NOT NULL,
       name TEXT NOT NULL DEFAULT '',
       config_desc TEXT,
+      required INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (config_item_id) REFERENCES config_items(id)
