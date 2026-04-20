@@ -84,9 +84,13 @@ uploadRoutes.post('/upload/config-item-icon', authMiddleware, adminMiddleware, a
     }
   } else {
     // PNG/JPG - use image-size library
-    const dims = imageSize(Buffer.from(buffer));
-    if (dims.width !== dims.height) {
-      return c.json({ success: false, msg: '图标必须是正方形图片（宽高比为 1:1）' }, 400);
+    try {
+      const dims = imageSize(Buffer.from(buffer));
+      if (dims.width !== dims.height) {
+        return c.json({ success: false, msg: '图标必须是正方形图片（宽高比为 1:1）' }, 400);
+      }
+    } catch (e) {
+      return c.json({ success: false, msg: '无法解析图片尺寸，请确保上传有效的图片文件' }, 400);
     }
   }
 

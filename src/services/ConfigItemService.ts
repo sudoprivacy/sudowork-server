@@ -6,6 +6,7 @@ export interface ConfigEntry {
   config_key: string;
   name: string;
   config_desc: string | null;
+  required: number;
 }
 
 export interface ConfigItemWithEntries {
@@ -13,6 +14,7 @@ export interface ConfigItemWithEntries {
   name: string;
   icon: string | null;
   icon_url: string;
+  pinyin: string | null;
   entries: ConfigEntry[];
 }
 
@@ -50,10 +52,12 @@ export async function getConfigItemsForEnterprise(
         ci.id,
         ci.name,
         ci.icon,
+        ci.pinyin,
         ce.id AS entry_id,
         ce.config_key,
         ce.name AS entry_name,
-        ce.config_desc
+        ce.config_desc,
+        ce.required
       FROM config_enterprise_rel cer
       JOIN config_items ci ON ci.id = cer.config_item_id
       JOIN config_entries ce ON ce.config_item_id = ci.id
@@ -73,6 +77,7 @@ export async function getConfigItemsForEnterprise(
         name: row.name,
         icon: row.icon || null,
         icon_url: getIconUrl(row.icon),
+        pinyin: row.pinyin || null,
         entries: [],
       });
     }
@@ -81,6 +86,7 @@ export async function getConfigItemsForEnterprise(
       config_key: row.config_key,
       name: row.entry_name,
       config_desc: row.config_desc,
+      required: row.required !== undefined ? row.required : 1,
     });
   }
 
