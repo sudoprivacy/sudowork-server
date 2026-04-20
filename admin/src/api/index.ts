@@ -55,9 +55,24 @@ export const adminApi = {
     name: string;
     code: string;
     credit_pool?: number;
+    logo?: string;
+    app_name?: string;
+    top_name?: string;
+    about_name?: string;
+    app_company_name?: string;
+    login_desp?: string;
   }) => api.post("/v1/admin/enterprises", data),
 
-  updateEnterprise: (id: number, data: { name: string; credit_pool?: number }) =>
+  updateEnterprise: (id: number, data: {
+    name: string;
+    credit_pool?: number;
+    logo?: string;
+    app_name?: string;
+    top_name?: string;
+    about_name?: string;
+    app_company_name?: string;
+    login_desp?: string;
+  }) =>
     api.put(`/v1/admin/enterprises/${id}`, data),
 
   deleteEnterprise: (id: number) => api.delete(`/v1/admin/enterprises/${id}`),
@@ -232,6 +247,15 @@ export const adminApi = {
     const formData = new FormData();
     formData.append('file', file);
     return api.post("/v1/admin/upload/config-item-icon", formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  // Upload enterprise logo
+  uploadEnterpriseLogo: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post("/v1/admin/upload/enterprise-logo", formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },

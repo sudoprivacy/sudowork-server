@@ -44,6 +44,9 @@ app.use("/uploads/*", serveStatic({ root: join(UPLOAD_DIR_STATIC, '..') }));
 // Serve default config item icon
 app.use("/config-item-default.svg", serveStatic({ root: "./public" }));
 
+// Serve default enterprise logo
+app.use("/enterprise-default-logo.svg", serveStatic({ root: "./public" }));
+
 // Serve index.html for root path
 app.get("/", async (c) => {
   const file = Bun.file("./admin-dist/index.html");
