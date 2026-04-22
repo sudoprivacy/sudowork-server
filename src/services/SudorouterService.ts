@@ -77,6 +77,15 @@ interface ApiCallResult<T> {
   error?: string;
 }
 
+// 模型使用统计项（按日期和模型聚合）
+interface ModelUsageStatItem {
+  date: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
 // 带超时的 fetch
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number = 10000): Promise<Response> {
   const controller = new AbortController();
@@ -629,4 +638,4 @@ class SudorouterService {
 }
 
 export const sudorouterService = new SudorouterService();
-export type { SudorouterUser, SudorouterUserInfo, UsageLog, ApiCallResult };
+export type { SudorouterUser, SudorouterUserInfo, UsageLog, ApiCallResult, ModelUsageStatItem };
