@@ -437,43 +437,92 @@ class SudorouterService {
     }
   }
 
-  // 获取全量使用日志（不分页）用于统计分析
+  // 获取全量使用日志（分页并行获取）用于统计分析
   private async getAllUsageLogs(
     sudorouterUserId: number,
     timeFrom: number,
     timeTo: number
   ): Promise<UsageLog[] | null> {
-    try {
-      const params = new URLSearchParams({
-        user_id: sudorouterUserId.toString(),
-        time_from: timeFrom.toString(),
-        time_to: timeTo.toString(),
-        order_by: "created_at",
-        desc: "true",
-      });
+    const PAGE_SIZE = 100; // API 最大支持 100
 
-      const response = await fetchWithTimeout(
-        `${this.config.baseUrl}/api/log/?${params.toString()}`,
-        {
-          method: "GET",
-          headers: this.getHeaders(),
-        },
+    try {
+      // 首先获取第一页，确定总数
+      const buildUrl = (pageNum: number) => {
+        const params = new URLSearchParams({
+          user_id: sudorouterUserId.toString(),
+          time_from: timeFrom.toString(),
+          time_to: timeTo.toString(),
+          page_num: pageNum.toString(),
+          page_size: PAGE_SIZE.toString(),
+          order_by: "created_at",
+          desc: "true",
+        });
+        return `${this.config.baseUrl}/api/log/?${params.toString()}`;
+      };
+
+      const firstResponse = await fetchWithTimeout(
+        buildUrl(1),
+        { method: "GET", headers: this.getHeaders() },
         this.config.timeoutMs
       );
 
-      if (!response.ok) {
-        console.error(`[Sudorouter] 获取全量日志失败: HTTP ${response.status} ${response.statusText}`);
+      if (!firstResponse.ok) {
+        console.error(`[Sudorouter] 获取全量日志失败: HTTP ${firstResponse.status}`);
         return null;
       }
 
-      const data = (await response.json()) as { success: boolean; data?: { data?: UsageLog[] }; message?: string };
+      const firstData = (await firstResponse.json()) as {
+        success: boolean;
+        data?: { count?: number; data?: UsageLog[] };
+        message?: string;
+      };
 
-      if (data.success && data.data?.data) {
-        return data.data.data;
+      if (!firstData.success || !firstData.data?.data) {
+        console.error(`[Sudorouter] 获取全量日志失败:`, firstData.message);
+        return null;
       }
 
-      console.error(`[Sudorouter] 获取全量日志失败:`, data.message);
-      return null;
+      const totalCount = firstData.data.count || 0;
+      const allLogs: UsageLog[] = [...firstData.data.data];
+
+      // 如果第一页已包含所有数据，直接返回
+      if (allLogs.length >= totalCount) {
+        return allLogs;
+      }
+
+      // 并行获取剩余页
+      const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+      const remainingPages = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+
+      const pagePromises = remainingPages.map(async (pageNum) => {
+        try {
+          const response = await fetchWithTimeout(
+            buildUrl(pageNum),
+            { method: "GET", headers: this.getHeaders() },
+            this.config.timeoutMs
+          );
+
+          if (!response.ok) return null;
+
+          const data = (await response.json()) as {
+            success: boolean;
+            data?: { data?: UsageLog[] };
+          };
+
+          return data.success && data.data?.data ? data.data.data : null;
+        } catch {
+          return null;
+        }
+      });
+
+      const pageResults = await Promise.all(pagePromises);
+
+      for (const logs of pageResults) {
+        if (logs) allLogs.push(...logs);
+      }
+
+      console.log(`[Sudorouter] 获取全量日志完成: 共${totalCount}条，实际获取${allLogs.length}条`);
+      return allLogs;
     } catch (error: any) {
       const errorMsg = error.name === "AbortError"
         ? `请求超时 (${this.config.timeoutMs}ms)`
