@@ -7,6 +7,17 @@ import { db } from "../db/index.js";
 import { sudorouterService } from "../services/SudorouterService.js";
 import { getAuthUser } from "../middleware/auth.js";
 
+// 日期格式验证
+function isValidDate(dateStr: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && !isNaN(Date.parse(dateStr));
+}
+
+// 计算日期跨度
+function daysBetween(start: string, end: string): number {
+  const diff = new Date(end).getTime() - new Date(start).getTime();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
 const userRoutes = new Hono();
 
 // GET /api/v1/user/profile - Get user profile
@@ -448,6 +459,74 @@ userRoutes.get("/stats", async (c) => {
       },
     },
   });
+});
+
+// GET /api/v1/user/model-usage-stats - Get model usage statistics
+userRoutes.get("/model-usage-stats", async (c) => {
+  const payload = (await getAuthUser(c)) as any;
+  if (!payload || !payload.id)
+    return c.json({ success: false, msg: "未授权" }, 401);
+
+  const user = db
+    .prepare("SELECT * FROM users WHERE id = ?")
+    .get(Number(payload.id)) as any;
+
+  if (!user) return c.json({ success: false, msg: "用户不存在" }, 404);
+
+  // 获取并验证参数
+  const startDate = c.req.query("start_date");
+  const endDate = c.req.query("end_date");
+
+  if (!startDate || !endDate) {
+    return c.json({ success: false, msg: "缺少日期参数" }, 400);
+  }
+
+  if (!isValidDate(startDate) || !isValidDate(endDate)) {
+    return c.json({ success: false, msg: "日期格式无效" }, 400);
+  }
+
+  if (new Date(startDate) > new Date(endDate)) {
+    return c.json({ success: false, msg: "开始日期不能晚于结束日期" }, 400);
+  }
+
+  if (daysBetween(startDate, endDate) > 30) {
+    return c.json({ success: false, msg: "时间范围不能超过30天" }, 400);
+  }
+
+  // 检查用户是否绑定 sudorouter
+  if (!user.sudorouter_user_id || !sudorouterService.isConfigured()) {
+    return c.json({ success: false, msg: "用户未绑定服务" }, 400);
+  }
+
+  // 调用服务层获取统计数据
+  const stats = await sudorouterService.getModelUsageStats(
+    user.sudorouter_user_id,
+    startDate,
+    endDate,
+  );
+
+  // 记录 Sudorouter API 调用日志
+  db.run(
+    `INSERT INTO operation_logs (user_id, user_phone, action, resource, resource_id, method, path, request_data, response_data)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      user.id,
+      user.phone,
+      "SUDOROUTER_GET_MODEL_USAGE_STATS",
+      "sudorouter_api",
+      user.sudorouter_user_id,
+      "GET",
+      "/api/v1/user/model-usage-stats",
+      JSON.stringify({ start_date: startDate, end_date: endDate }),
+      JSON.stringify({ success: !!stats, count: stats?.length || 0 }),
+    ],
+  );
+
+  if (!stats) {
+    return c.json({ success: false, msg: "获取统计数据失败" }, 500);
+  }
+
+  return c.json({ success: true, data: stats });
 });
 
 // POST /api/v1/user/update-profile - Update user profile

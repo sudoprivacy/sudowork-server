@@ -437,6 +437,154 @@ class SudorouterService {
     }
   }
 
+  // 获取全量使用日志（不分页）用于统计分析
+  private async getAllUsageLogs(
+    sudorouterUserId: number,
+    timeFrom: number,
+    timeTo: number
+  ): Promise<UsageLog[] | null> {
+    try {
+      const params = new URLSearchParams({
+        user_id: sudorouterUserId.toString(),
+        time_from: timeFrom.toString(),
+        time_to: timeTo.toString(),
+        order_by: "created_at",
+        desc: "true",
+      });
+
+      const response = await fetchWithTimeout(
+        `${this.config.baseUrl}/api/log/?${params.toString()}`,
+        {
+          method: "GET",
+          headers: this.getHeaders(),
+        },
+        this.config.timeoutMs
+      );
+
+      if (!response.ok) {
+        console.error(`[Sudorouter] 获取全量日志失败: HTTP ${response.status} ${response.statusText}`);
+        return null;
+      }
+
+      const data = (await response.json()) as { success: boolean; data?: { data?: UsageLog[] }; message?: string };
+
+      if (data.success && data.data?.data) {
+        return data.data.data;
+      }
+
+      console.error(`[Sudorouter] 获取全量日志失败:`, data.message);
+      return null;
+    } catch (error: any) {
+      const errorMsg = error.name === "AbortError"
+        ? `请求超时 (${this.config.timeoutMs}ms)`
+        : `网络错误: ${error.message || String(error)}`;
+      console.error(`[Sudorouter] 获取全量日志异常:`, errorMsg);
+      return null;
+    }
+  }
+
+  // 获取模型用量统计（按日期+模型聚合，Top 5 + other）
+  async getModelUsageStats(
+    sudorouterUserId: number,
+    startDate: string,
+    endDate: string
+  ): Promise<ModelUsageStatItem[] | null> {
+    // 1. 将 ISO 日期转换为 Unix 时间戳
+    const timeFrom = Math.floor(new Date(startDate + "T00:00:00").getTime() / 1000);
+    const timeTo = Math.floor(new Date(endDate + "T23:59:59").getTime() / 1000);
+
+    // 2. 获取全量日志
+    const logs = await this.getAllUsageLogs(sudorouterUserId, timeFrom, timeTo);
+    if (!logs) {
+      return null;
+    }
+
+    // 3. 过滤有效记录（排除 manage 类型和无模型名的记录）
+    const validLogs = logs.filter(
+      (log) => log.type !== 1 && log.model_name
+    );
+
+    if (validLogs.length === 0) {
+      return [];
+    }
+
+    // 4. 按 (date, model) 双重分组聚合
+    const grouped: Record<string, Record<string, { prompt: number; completion: number; total: number }>> = {};
+    for (const log of validLogs) {
+      const date = this.formatDateFromTimestamp(log.created_at);
+      // After filter, model_name is guaranteed to be truthy
+      const model = log.model_name!;
+
+      if (!grouped[date]) grouped[date] = {};
+      if (!grouped[date][model]) grouped[date][model] = { prompt: 0, completion: 0, total: 0 };
+
+      grouped[date][model].prompt += log.prompt_tokens || 0;
+      grouped[date][model].completion += log.completion_tokens || 0;
+      grouped[date][model].total += (log.prompt_tokens || 0) + (log.completion_tokens || 0);
+    }
+
+    // 5. 计算每个模型的总用量
+    const modelTotals: Record<string, number> = {};
+    for (const date in grouped) {
+      for (const model in grouped[date]) {
+        modelTotals[model] = (modelTotals[model] || 0) + grouped[date][model]!.total;
+      }
+    }
+
+    // 6. 取 Top 5 模型
+    const top5Models = Object.entries(modelTotals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([model]) => model);
+
+    // 7. 生成结果（合并 other）
+    const result: ModelUsageStatItem[] = [];
+    for (const date of Object.keys(grouped).sort()) {
+      // 收集该日期下所有模型的聚合数据
+      const dateModels = grouped[date];
+      const otherData = { prompt: 0, completion: 0, total: 0 };
+
+      for (const model in dateModels) {
+        const data = dateModels[model]!;
+        if (top5Models.includes(model)) {
+          result.push({
+            date,
+            model,
+            prompt_tokens: data.prompt,
+            completion_tokens: data.completion,
+            total_tokens: data.total,
+          });
+        } else {
+          otherData.prompt += data.prompt;
+          otherData.completion += data.completion;
+          otherData.total += data.total;
+        }
+      }
+
+      // 如果有 other 数据，添加一条
+      if (otherData.total > 0) {
+        result.push({
+          date,
+          model: "other",
+          prompt_tokens: otherData.prompt,
+          completion_tokens: otherData.completion,
+          total_tokens: otherData.total,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  // 辅助方法：将时间戳转换为 ISO 日期字符串
+  private formatDateFromTimestamp(timestamp: number): string {
+    const date = new Date(timestamp * 1000);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
   // 管理用户状态（启用/禁用）
   async manageUser(
     sudorouterUserId: number,
