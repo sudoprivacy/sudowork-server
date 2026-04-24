@@ -43,6 +43,13 @@ export const adminApi = {
   login: (data: { phone: string; password: string }) =>
     api.post("/v1/admin/login", data),
 
+  // User Auth APIs (SMS login)
+  sendCode: (phone: string) =>
+    api.post("/v1/auth/send-code", { phone }),
+
+  userLogin: (data: { phone: string; code: string }) =>
+    api.post("/v1/auth/login", data),
+
   changePassword: (data: { oldPassword: string; newPassword: string }) =>
     api.post("/v1/admin/change-password", data),
 
@@ -259,4 +266,34 @@ export const adminApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+
+  // Skills APIs
+  getSkillsByCursor: (params?: {
+    cursor?: string;
+    limit?: number;
+    query?: string;
+    categories?: string;
+    tenant_id?: string;
+  }) => api.get("/skills/cursor", { params }),
+
+  approveSkill: (skillId: string) =>
+    api.post(`/skills/${skillId}/approve`),
+
+  deleteSkill: (skillId: string) =>
+    api.delete(`/skills/${skillId}`),
+
+  // Assistants APIs
+  getAssistantsByCursor: (params?: {
+    cursor?: string;
+    limit?: number;
+    query?: string;
+    category?: string;
+    tenant_id?: string;
+  }) => api.get("/assistants/cursor", { params }),
+
+  approveAssistant: (assistantId: string) =>
+    api.post(`/assistants/${assistantId}/approve`),
+
+  deleteAssistant: (assistantId: string) =>
+    api.delete(`/assistants/${assistantId}`),
 };
