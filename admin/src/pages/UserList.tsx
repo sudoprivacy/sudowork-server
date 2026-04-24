@@ -65,6 +65,17 @@ const UserList: React.FC = () => {
   const [rechargeForm] = Form.useForm();
   const [rechargeAmount, setRechargeAmount] = useState<number>(0);
 
+  // Get current user role
+  const userStr = localStorage.getItem("admin_user");
+  let currentUser: any = {};
+  try {
+    currentUser = userStr ? JSON.parse(userStr) : {};
+  } catch {
+    currentUser = {};
+  }
+  const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
+  const isEnterpriseAdmin = currentUser.role === "ENTERPRISE_ADMIN";
+
   useEffect(() => {
     loadUsers();
     loadEnterprises();
@@ -148,7 +159,24 @@ const UserList: React.FC = () => {
   const handleUpdate = async (values: any) => {
     if (!editingId) return;
     try {
-      const response = await adminApi.updateUser(editingId, values);
+      // Check if role changed
+      const currentUser = users.find(u => u.id === editingId);
+      if (currentUser && values.role && values.role !== currentUser.role) {
+        try {
+          const roleResponse = await adminApi.setUserRole(editingId, values.role);
+          if (!(roleResponse as any).success) {
+            message.error((roleResponse as any).msg || "角色更新失败");
+            return;
+          }
+        } catch (error: any) {
+          message.error(error.response?.data?.msg || "角色更新失败");
+          return;
+        }
+      }
+
+      // Update other user info
+      const { role, ...updateData } = values;
+      const response = await adminApi.updateUser(editingId, updateData);
       if ((response as any).success) {
         message.success("更新成功");
         setVisible(false);
@@ -175,6 +203,7 @@ const UserList: React.FC = () => {
       nickname: record.nickname,
       enterprise_id: record.enterprise_id,
       status: record.status,
+      role: record.role,
     });
     setVisible(true);
   };
@@ -331,7 +360,7 @@ const UserList: React.FC = () => {
       title: "API Key",
       dataIndex: "sudorouter_key",
       key: "sudorouter_key",
-      width: 180,
+      width: 120,
       ellipsis: true,
       render: (val: string) => val ? (
         <code
@@ -343,14 +372,14 @@ const UserList: React.FC = () => {
           }}
           title="点击复制完整 Key"
         >
-          sk-{val.substring(0, 20)}...
+          sk-{val.substring(0, 15)}...
         </code>
       ) : "-",
     },
     {
       title: "积分",
       key: "points",
-      width: 120,
+      width: 80,
       render: (_: any, record: User) => {
         const remainingPoints = Math.round((record.quota || 0) * 0.002);
         const isSyncing = syncingUserId === record.id;
@@ -387,20 +416,57 @@ const UserList: React.FC = () => {
       },
     },
     {
+      title: "角色",
+      dataIndex: "role",
+      key: "role",
+      width: 120,
+      render: (val: string, record: User) => {
+        // SUPER_ADMIN cannot be changed
+        if (val === "SUPER_ADMIN") {
+          return <Tag color="red">超级管理员</Tag>;
+        }
+        return (
+          <Select
+            value={val}
+            size="small"
+            style={{ width: 100 }}
+            onChange={async (newRole) => {
+              try {
+                const response = await adminApi.setUserRole(record.id, newRole);
+                if ((response as any).success) {
+                  message.success("角色更新成功");
+                  loadUsers();
+                } else {
+                  message.error((response as any).msg || "更新失败");
+                }
+              } catch (error: any) {
+                message.error(error.response?.data?.msg || "更新失败");
+              }
+            }}
+          >
+            <Select.Option value="USER">普通用户</Select.Option>
+            <Select.Option value="ENTERPRISE_ADMIN">企业管理员</Select.Option>
+          </Select>
+        );
+      },
+    },
+    {
       title: "操作",
       key: "action",
       width: 220,
       render: (_: any, record: User) => (
         <Space size="small">
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => openEditModal(record)}
-          >
-            编辑
-          </Button>
-          {record.status === 1 && (
+          {isSuperAdmin && (
+            <Button
+              type="link"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => openEditModal(record)}
+            >
+              编辑
+            </Button>
+          )}
+          {record.status === 1 && isSuperAdmin && (
             <Button
               type="link"
               size="small"
@@ -430,14 +496,16 @@ const UserList: React.FC = () => {
               禁用
             </Button>
           ) : null}
-          <Button
-            type="link"
-            size="small"
-            danger
-            onClick={() => handleDelete(record)}
-          >
-            删除
-          </Button>
+          {isSuperAdmin && (
+            <Button
+              type="link"
+              size="small"
+              danger
+              onClick={() => handleDelete(record)}
+            >
+              删除
+            </Button>
+          )}
         </Space>
       ),
     },
@@ -445,16 +513,18 @@ const UserList: React.FC = () => {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 24 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
         <Title level={2} style={{ margin: 0 }}>
           用户管理
         </Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-          新建用户
-        </Button>
+        {isSuperAdmin && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+            新建用户
+          </Button>
+        )}
       </div>
 
-      <Card style={{ marginBottom: 24 }}>
+      <Card style={{ marginBottom: 12 }} styles={{ body: { padding: 12 } }}>
         <Form form={filterForm} layout="inline">
           <Form.Item name="keyword">
             <Input placeholder="手机号/昵称" allowClear style={{ width: 160 }} />
@@ -486,7 +556,7 @@ const UserList: React.FC = () => {
         </Form>
       </Card>
 
-      <Card>
+      <Card styles={{ body: { padding: 0 } }}>
         <Table
           columns={columns}
           dataSource={users}
@@ -566,6 +636,14 @@ const UserList: React.FC = () => {
                 <Select.Option value={0}>待审批</Select.Option>
                 <Select.Option value={1}>已批准</Select.Option>
                 <Select.Option value={2}>已拒绝</Select.Option>
+              </Select>
+            </Form.Item>
+          )}
+          {editingId && (
+            <Form.Item label="角色" name="role">
+              <Select placeholder="选择用户角色">
+                <Select.Option value="USER">普通用户</Select.Option>
+                <Select.Option value="ENTERPRISE_ADMIN">企业管理员</Select.Option>
               </Select>
             </Form.Item>
           )}

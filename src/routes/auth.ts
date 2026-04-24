@@ -99,16 +99,22 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
     );
   }
 
-  // 验证短信验证码
-  const verifyResult = await smsService.verifyCode(phone, code);
-  if (!verifyResult.success) {
-    return c.json(
-      {
-        success: false,
-        msg: verifyResult.message,
-      },
-      400,
-    );
+  // 调试模式：跳过验证码验证
+  const DEBUG_SKIP_VERIFY_CODE = process.env.DEBUG_SKIP_VERIFY_CODE === "true";
+  if (!DEBUG_SKIP_VERIFY_CODE) {
+    // 验证短信验证码
+    const verifyResult = await smsService.verifyCode(phone, code);
+    if (!verifyResult.success) {
+      return c.json(
+        {
+          success: false,
+          msg: verifyResult.message,
+        },
+        400,
+      );
+    }
+  } else {
+    console.log(`[DEBUG] 跳过验证码验证: phone=${phone}, code=${code}`);
   }
 
   // 查询用户是否存在

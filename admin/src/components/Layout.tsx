@@ -19,7 +19,7 @@ const Layout: React.FC = () => {
   let user: any = {};
   try {
     const parsed = userStr ? JSON.parse(userStr) : null;
-    user = parsed && typeof parsed === 'object' ? parsed : {};
+    user = parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     user = {};
   }

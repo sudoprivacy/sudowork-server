@@ -51,7 +51,7 @@ export class SmsService {
       region: this.smsConfig.tencent.region,
     });
 
-    console.log("腾讯云短信服务初始化成功");
+    console.log("腾讯云短信服务初始化成功, secretId:", this.smsConfig.tencent.secretId?.substring(0, 8) + "...");
   }
 
   private generateCode(): string {
@@ -143,7 +143,9 @@ export class SmsService {
           ],
         };
 
+        console.log("[SMS] 腾讯云发送参数:", JSON.stringify(params, null, 2));
         const res = await this.tencentSms.SendSms(params);
+        console.log("[SMS] 腾讯云响应:", JSON.stringify(res, null, 2));
 
         if (res.SendStatusSet[0]?.Code !== "Ok") {
           await redis.del(codeKey);
@@ -163,8 +165,8 @@ export class SmsService {
         };
       }
     } else {
-      // Mock 模式：仅记录发送成功，不打印验证码
-      console.log(`[SMS] Mock 模式：验证码已发送至 ${phone}，有效期 ${this.smsConfig.code.expireMinutes} 分钟`);
+      // Mock 模式：打印验证码方便测试
+      console.log(`[SMS] Mock 模式：验证码已发送至 ${phone}，验证码：${code}，有效期 ${this.smsConfig.code.expireMinutes} 分钟`);
     }
 
     return {

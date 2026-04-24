@@ -157,9 +157,21 @@ pointsRoutes.post('/users/:id/points', authMiddleware, adminMiddleware, async (c
   }
 });
 
-// POST /users/:id/recharge - Admin recharge
+// POST /users/:id/recharge - Admin recharge (SUPER_ADMIN only)
 pointsRoutes.post('/users/:id/recharge', authMiddleware, adminMiddleware, async (c) => {
   const adminUser = (await getAuthUser(c)) as User;
+
+  // Only SUPER_ADMIN can recharge users
+  if (adminUser.role !== 'SUPER_ADMIN') {
+    return c.json(
+      {
+        success: false,
+        msg: '只有超级管理员可以为用户充值',
+      },
+      403,
+    );
+  }
+
   const id = c.req.param('id');
   const { points, reason, payment_reference } = await c.req.json();
 

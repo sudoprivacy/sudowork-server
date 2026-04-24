@@ -64,30 +64,15 @@ body {
 }
 
 #root {
-  width: 1126px;
+  width: 100%;
   max-width: 100%;
-  /* 
-     核心修复：使用 100vw (视口宽度) 来计算左边距。
-     100vw 包含滚动条宽度，无论滚动条是否显示，其值在当前窗口下是恒定的。
-     这确保了当弹窗打开（滚动条消失）时，#root 的渲染位置不会发生任何偏移。
-  */
-  margin-left: calc((100vw - 1126px) / 2);
+  margin-left: auto;
   margin-right: auto;
-  
-  text-align: center;
-  border-inline: 1px solid var(--border);
+  text-align: left;
   min-height: 100svh;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-}
-
-/* 响应式回退：当屏幕宽度小于固定宽度时，恢复标准居中模式 */
-@media (max-width: 1126px) {
-  #root {
-    margin-left: auto;
-    margin-right: auto;
-  }
 }
 
 h1,

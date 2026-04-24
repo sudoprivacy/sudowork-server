@@ -19,6 +19,7 @@ import { authRoutes } from "./routes/auth.js";
 import { userRoutes } from "./routes/user.js";
 import { miscRoutes } from "./routes/misc.js";
 import { rechargeRoutes } from "./routes/recharge.js";
+import { proxyRoutes } from "./routes/external-proxy.js";
 
 // Initialize database
 initSchema();
@@ -56,6 +57,8 @@ app.get("/", async (c) => {
 });
 
 // Mount API routes
+// External proxy routes first
+app.route("/api", proxyRoutes);
 app.route("/api/v1/admin", adminRoutes);
 app.route("/api/v1/auth", authRoutes);
 app.route("/api/v1/user", userRoutes);

@@ -57,9 +57,21 @@ usersRoutes.get('/users', authMiddleware, adminMiddleware, async (c) => {
   });
 });
 
-// POST /users - Create user
+// POST /users - Create user (SUPER_ADMIN only)
 usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
   const adminUser = (await getAuthUser(c)) as User;
+
+  // Only SUPER_ADMIN can create users
+  if (adminUser.role !== 'SUPER_ADMIN') {
+    return c.json(
+      {
+        success: false,
+        msg: '只有超级管理员可以创建用户',
+      },
+      403,
+    );
+  }
+
   const { phone, nickname, enterprise_id, invitation_code_id } = await c.req.json();
 
   if (!phone || !enterprise_id) {
@@ -312,9 +324,21 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
   });
 });
 
-// PUT /users/:id - Update user
+// PUT /users/:id - Update user (SUPER_ADMIN only)
 usersRoutes.put('/users/:id', authMiddleware, adminMiddleware, async (c) => {
   const adminUser = (await getAuthUser(c)) as User;
+
+  // Only SUPER_ADMIN can update users
+  if (adminUser.role !== 'SUPER_ADMIN') {
+    return c.json(
+      {
+        success: false,
+        msg: '只有超级管理员可以编辑用户',
+      },
+      403,
+    );
+  }
+
   const id = c.req.param('id');
   const { nickname, status, enterprise_id } = await c.req.json();
 
@@ -362,9 +386,22 @@ usersRoutes.put('/users/:id', authMiddleware, adminMiddleware, async (c) => {
 
 // POST /users/:id/role - Set user role
 usersRoutes.post('/users/:id/role', authMiddleware, adminMiddleware, async (c) => {
+  const adminUser = (await getAuthUser(c)) as User;
   const id = c.req.param('id');
   const { role } = await c.req.json();
 
+  // Cannot change role to SUPER_ADMIN
+  if (role === 'SUPER_ADMIN') {
+    return c.json(
+      {
+        success: false,
+        msg: '无法将用户设置为超级管理员',
+      },
+      400,
+    );
+  }
+
+  // Only allow setting to USER or ENTERPRISE_ADMIN
   if (!['USER', 'ENTERPRISE_ADMIN'].includes(role)) {
     return c.json(
       {
@@ -375,12 +412,58 @@ usersRoutes.post('/users/:id/role', authMiddleware, adminMiddleware, async (c) =
     );
   }
 
-  db.run('UPDATE users SET role = ? WHERE id = ?', [role, id]);
+  // Get target user
+  const targetUser = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
 
-  return c.json({
-    success: true,
-    msg: '角色更新成功',
-  });
+  if (!targetUser) {
+    return c.json({ success: false, msg: '用户不存在' }, 404);
+  }
+
+  // Cannot modify SUPER_ADMIN
+  if (targetUser.role === 'SUPER_ADMIN') {
+    return c.json(
+      {
+        success: false,
+        msg: '无法修改超级管理员的角色',
+      },
+      403,
+    );
+  }
+
+  // SUPER_ADMIN can modify any user
+  if (adminUser.role === 'SUPER_ADMIN') {
+    db.run('UPDATE users SET role = ? WHERE id = ?', [role, id]);
+    return c.json({
+      success: true,
+      msg: '角色更新成功',
+    });
+  }
+
+  // ENTERPRISE_ADMIN can only modify users in the same enterprise
+  if (adminUser.role === 'ENTERPRISE_ADMIN') {
+    if (targetUser.enterprise_id !== adminUser.enterprise_id) {
+      return c.json(
+        {
+          success: false,
+          msg: '只能修改本企业的用户角色',
+        },
+        403,
+      );
+    }
+    db.run('UPDATE users SET role = ? WHERE id = ?', [role, id]);
+    return c.json({
+      success: true,
+      msg: '角色更新成功',
+    });
+  }
+
+  return c.json(
+    {
+      success: false,
+      msg: '权限不足',
+    },
+    403,
+  );
 });
 
 // POST /users/:id/manage - Enable/Disable user
@@ -450,9 +533,21 @@ usersRoutes.post('/users/:id/manage', authMiddleware, adminMiddleware, async (c)
   });
 });
 
-// DELETE /users/:id - Delete user (hard delete with Sudorouter sync)
+// DELETE /users/:id - Delete user (SUPER_ADMIN only)
 usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
   const adminUser = (await getAuthUser(c)) as User;
+
+  // Only SUPER_ADMIN can delete users
+  if (adminUser.role !== 'SUPER_ADMIN') {
+    return c.json(
+      {
+        success: false,
+        msg: '只有超级管理员可以删除用户',
+      },
+      403,
+    );
+  }
+
   const id = c.req.param('id');
 
   // Check if user exists

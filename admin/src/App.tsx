@@ -14,6 +14,7 @@ import {
   AppstoreOutlined,
   UserOutlined,
   LogoutOutlined,
+  RobotOutlined,
   GiftOutlined,
   FileTextOutlined,
   PayCircleOutlined,
@@ -28,16 +29,58 @@ import OperationLogs from "./pages/OperationLogs";
 import RechargeList from "./pages/RechargeList";
 import RechargeRecords from "./pages/RechargeRecords";
 import ConfigItemList from "./pages/ConfigItemList";
+import SkillsList from "./pages/SkillsList";
 import "antd/dist/reset.css";
 import "./components/Layout.css";
 
 const { Sider, Content, Header } = Layout;
+
+type Role = "SUPER_ADMIN" | "ENTERPRISE_ADMIN" | "USER";
+
+interface MenuItemConfig {
+  key: string;
+  icon?: React.ReactNode;
+  label: string;
+  roles: Role[];
+  children?: Array<{
+    key: string;
+    label: string;
+    roles: Role[];
+  }>;
+}
+
+const menuConfig: MenuItemConfig[] = [
+  { key: "/", icon: <DashboardOutlined />, label: "仪表盘", roles: ["SUPER_ADMIN"] },
+  { key: "enterprise-mgmt", icon: <AppstoreOutlined />, label: "企业管理", roles: ["SUPER_ADMIN"], children: [
+    { key: "/enterprises", label: "企业列表", roles: ["SUPER_ADMIN"] },
+    { key: "/config-items", label: "配置项列表", roles: ["SUPER_ADMIN"] },
+  ]},
+  { key: "/users", icon: <UserOutlined />, label: "用户管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+  { key: "/skills", icon: <AppstoreOutlined />, label: "专属技能", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+  { key: "/assistants", icon: <RobotOutlined />, label: "专属助手", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+  { key: "/orders", icon: <UnorderedListOutlined />, label: "订单管理", roles: ["SUPER_ADMIN"] },
+  { key: "/recharge-records", icon: <PayCircleOutlined />, label: "充值记录", roles: ["SUPER_ADMIN"] },
+  { key: "/invitation-codes", icon: <GiftOutlined />, label: "邀请码管理", roles: ["SUPER_ADMIN"] },
+  { key: "/logs", icon: <FileTextOutlined />, label: "操作日志", roles: ["SUPER_ADMIN"] },
+];
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const token = localStorage.getItem("admin_token");
   if (!token) {
     return <Navigate to="/login" replace />;
   }
+
+  // 禁止普通用户登录管理后台
+  const userStr = localStorage.getItem("admin_user");
+  try {
+    const user = JSON.parse(userStr || "{}");
+    if (user.role === "USER") {
+      localStorage.removeItem("admin_token");
+      localStorage.removeItem("admin_user");
+      message.error("普通用户无权访问管理后台");
+      return <Navigate to="/login" replace />;
+    }
+  } catch {}
   return <>{children}</>;
 };
 
@@ -53,6 +96,8 @@ const MainLayout = () => {
     user = {};
   }
 
+  const userRole: Role = user.role || "USER";
+
   const handleLogout = () => {
     localStorage.removeItem("admin_token");
     localStorage.removeItem("admin_user");
@@ -60,23 +105,18 @@ const MainLayout = () => {
     navigate("/login");
   };
 
-  const menuItems = [
-    { key: "/", icon: <DashboardOutlined />, label: "仪表盘" },
-    {
-      key: "enterprise-mgmt",
-      icon: <AppstoreOutlined />,
-      label: "企业管理",
-      children: [
-        { key: "/enterprises", label: "企业列表" },
-        { key: "/config-items", label: "配置项列表" },
-      ],
-    },
-    { key: "/users", icon: <UserOutlined />, label: "用户管理" },
-    { key: "/orders", icon: <UnorderedListOutlined />, label: "订单管理" },
-    { key: "/recharge-records", icon: <PayCircleOutlined />, label: "充值记录" },
-    { key: "/invitation-codes", icon: <GiftOutlined />, label: "邀请码管理" },
-    { key: "/logs", icon: <FileTextOutlined />, label: "操作日志" },
-  ];
+  // 根据用户角色过滤菜单
+  const menuItems = (menuConfig
+    .filter((item) => item.roles.includes(userRole))
+    .map((item) => {
+      if ('children' in item && item.children) {
+        return {
+          ...item,
+          children: item.children.filter((child) => child.roles.includes(userRole)),
+        };
+      }
+      return item;
+    })) as any;
 
   const userMenuItems = [
     {
@@ -162,6 +202,8 @@ const App = () => {
           <Route path="enterprises" element={<EnterpriseList />} />
           <Route path="config-items" element={<ConfigItemList />} />
           <Route path="users" element={<UserList />} />
+          <Route path="skills" element={<SkillsList assetType="skills" />} />
+          <Route path="assistants" element={<SkillsList assetType="assistants" />} />
           <Route path="orders" element={<RechargeList />} />
           <Route path="recharge-records" element={<RechargeRecords />} />
           <Route path="invitation-codes" element={<InvitationCodeList />} />

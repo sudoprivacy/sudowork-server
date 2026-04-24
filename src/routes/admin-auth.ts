@@ -66,6 +66,13 @@ adminAuthRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) =>
   const deviceId = c.req.header('X-Device-Id') || 'default';
   const refreshToken = crypto.randomUUID();
 
+  // 获取企业的 code 作为 tenant_id
+  let tenantId = null;
+  if ((admin as any).enterprise_id) {
+    const enterprise = db.prepare("SELECT code FROM enterprises WHERE id = ?").get((admin as any).enterprise_id) as any;
+    tenantId = enterprise?.code || null;
+  }
+
   // 存储 refresh_token 到 Redis（30天）
   await redis.setex(
     `refresh_token:${(admin as any).id}:${deviceId}:${refreshToken}`,
@@ -117,6 +124,8 @@ adminAuthRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) =>
         nickname: (admin as any).nickname,
         role: (admin as any).role,
         avatar: null,
+        enterprise_id: (admin as any).enterprise_id,
+        tenant_id: tenantId,
       },
     },
   });

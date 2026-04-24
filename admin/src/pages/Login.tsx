@@ -1,6 +1,6 @@
-import React, { useState } from "react";
-import { Form, Input, Button, message } from "antd";
-import { UserOutlined, LockOutlined } from "@ant-design/icons";
+import React, { useState, useCallback, memo } from "react";
+import { Form, Input, Button, message, Tabs } from "antd";
+import { UserOutlined, LockOutlined, MobileOutlined } from "@ant-design/icons";
 import { adminApi } from "../api/index";
 import { useNavigate } from "react-router-dom";
 import "./Login.css";
@@ -10,20 +10,117 @@ interface LoginFormValues {
   password: string;
 }
 
+interface AdminLoginProps {
+  loading: boolean;
+  onFinish: (values: LoginFormValues) => Promise<void>;
+}
+
+interface UserLoginProps {
+  phone: string;
+  code: string;
+  countdown: number;
+  loading: boolean;
+  sendingCode: boolean;
+  onPhoneChange: (value: string) => void;
+  onCodeChange: (value: string) => void;
+  onSendCode: () => void;
+  onLogin: () => void;
+}
+
+const AdminLogin: React.FC<AdminLoginProps> = memo(({ loading, onFinish }) => (
+  <Form name="adminLogin" onFinish={onFinish} autoComplete="off" size="large">
+    <Form.Item
+      name="phone"
+      rules={[{ required: true, message: "请输入账号" }]}
+    >
+      <Input prefix={<UserOutlined />} placeholder="请输入账号" />
+    </Form.Item>
+
+    <Form.Item
+      name="password"
+      rules={[{ required: true, message: "请输入密码" }]}
+    >
+      <Input.Password prefix={<LockOutlined />} placeholder="密码" />
+    </Form.Item>
+
+    <Form.Item>
+      <Button type="primary" htmlType="submit" block loading={loading}>
+        管理员登录
+      </Button>
+    </Form.Item>
+  </Form>
+));
+
+const UserLogin: React.FC<UserLoginProps> = memo(({
+  phone,
+  code,
+  countdown,
+  loading,
+  sendingCode,
+  onPhoneChange,
+  onCodeChange,
+  onSendCode,
+  onLogin,
+}) => (
+  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+    <Input
+      prefix={<MobileOutlined />}
+      placeholder="请输入手机号"
+      size="large"
+      disabled={countdown > 0}
+      value={phone}
+      onChange={(e) => onPhoneChange(e.target.value)}
+      maxLength={11}
+    />
+
+    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+      <Input
+        placeholder="短信验证码"
+        size="large"
+        maxLength={6}
+        value={code}
+        onChange={(e) => onCodeChange(e.target.value)}
+        onPressEnter={onLogin}
+      />
+      <Button
+        type="primary"
+        onClick={onSendCode}
+        loading={sendingCode}
+        disabled={countdown > 0}
+        style={{ flexShrink: 0 }}
+      >
+        {countdown > 0 ? `${countdown}s` : "获取验证码"}
+      </Button>
+    </div>
+
+    <Button
+      type="primary"
+      block
+      size="large"
+      loading={loading}
+      onClick={onLogin}
+    >
+      登录
+    </Button>
+  </div>
+));
+
 const LoginForm: React.FC = () => {
   const [loading, setLoading] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
   const navigate = useNavigate();
 
-  const onFinish = async (values: LoginFormValues) => {
+  const onAdminFinish = useCallback(async (values: LoginFormValues) => {
     setLoading(true);
     try {
       const data = await adminApi.login(values);
       if ((data as any).success) {
-        // 兼容新旧返回格式
         const token = (data as any).data.access_token || (data as any).data.token;
         localStorage.setItem("admin_token", token);
         localStorage.setItem("admin_user", JSON.stringify((data as any).data.user));
-        // 存储 refresh_token（如果有）
         if ((data as any).data.refresh_token) {
           localStorage.setItem("admin_refresh_token", (data as any).data.refresh_token);
         }
@@ -37,7 +134,69 @@ const LoginForm: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
+
+  const handleSendCode = useCallback(async () => {
+    if (!phone || !/^1[3-9]\d{9}$/.test(phone)) {
+      message.warning("请输入正确的手机号");
+      return;
+    }
+    setSendingCode(true);
+    try {
+      const data = await adminApi.sendCode(phone);
+      if ((data as any).success) {
+        message.success("验证码已发送");
+        setCountdown(60);
+        const timer = setInterval(() => {
+          setCountdown((prev) => {
+            if (prev <= 1) {
+              clearInterval(timer);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      } else {
+        message.error((data as any).msg || "发送失败");
+      }
+    } catch (error: any) {
+      message.error(error.response?.data?.msg || "发送失败");
+    } finally {
+      setSendingCode(false);
+    }
+  }, [phone]);
+
+  const handleUserLogin = useCallback(async () => {
+    if (!phone || !/^1[3-9]\d{9}$/.test(phone)) {
+      message.warning("请输入正确的手机号");
+      return;
+    }
+    if (!code || !/^\d{4,6}$/.test(code)) {
+      message.warning("请输入4-6位验证码");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const data = await adminApi.userLogin({ phone, code });
+      if ((data as any).success) {
+        const token = (data as any).data.access_token || (data as any).data.token;
+        localStorage.setItem("admin_token", token);
+        localStorage.setItem("admin_user", JSON.stringify((data as any).data.user));
+        if ((data as any).data.refresh_token) {
+          localStorage.setItem("admin_refresh_token", (data as any).data.refresh_token);
+        }
+        message.success("登录成功");
+        navigate("/");
+      } else {
+        message.error((data as any).msg || "登录失败");
+      }
+    } catch (error: any) {
+      message.error(error.response?.data?.msg || "登录失败");
+    } finally {
+      setLoading(false);
+    }
+  }, [phone, code, navigate]);
 
   return (
     <div className="login-container">
@@ -61,27 +220,33 @@ const LoginForm: React.FC = () => {
           <p className="login-subtitle">管理后台</p>
         </div>
 
-        <Form name="login" onFinish={onFinish} autoComplete="off" size="large">
-          <Form.Item
-            name="phone"
-            rules={[{ required: true, message: "请输入账号" }]}
-          >
-            <Input prefix={<UserOutlined />} placeholder="请输入账号" />
-          </Form.Item>
-
-          <Form.Item
-            name="password"
-            rules={[{ required: true, message: "请输入密码" }]}
-          >
-            <Input.Password prefix={<LockOutlined />} placeholder="密码" />
-          </Form.Item>
-
-          <Form.Item>
-            <Button type="primary" htmlType="submit" block loading={loading}>
-              登录
-            </Button>
-          </Form.Item>
-        </Form>
+        <Tabs
+          defaultActiveKey="admin"
+          items={[
+            {
+              key: "admin",
+              label: "管理员登录",
+              children: <AdminLogin loading={loading} onFinish={onAdminFinish} />,
+            },
+            {
+              key: "user",
+              label: "用户登录",
+              children: (
+                <UserLogin
+                  phone={phone}
+                  code={code}
+                  countdown={countdown}
+                  loading={loading}
+                  sendingCode={sendingCode}
+                  onPhoneChange={setPhone}
+                  onCodeChange={setCode}
+                  onSendCode={handleSendCode}
+                  onLogin={handleUserLogin}
+                />
+              ),
+            },
+          ]}
+        />
       </div>
     </div>
   );
