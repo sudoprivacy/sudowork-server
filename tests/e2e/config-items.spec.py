@@ -159,7 +159,7 @@ def create_enterprise_via_api(page: Page, name: str, code: str):
     }''', {'token': token, 'name': name, 'code': code})
     return result
 
-def create_config_item_via_api(page: Page, name: str, description: str = '', icon: str = None) -> dict:
+def create_config_item_via_api(page: Page, name: str, description: str = '', icon: str = None, url_pattern: str = None) -> dict:
     """Create config item via direct API call"""
     token = page.evaluate('() => localStorage.getItem("admin_token")')
     assert token, 'No auth token found'
@@ -168,6 +168,8 @@ def create_config_item_via_api(page: Page, name: str, description: str = '', ico
         body['description'] = description
     if icon:
         body['icon'] = icon
+    if url_pattern:
+        body['url_pattern'] = url_pattern
     result = page.evaluate('''async (params) => {
         const resp = await fetch('/api/v1/admin/config-items', {
             method: 'POST',
@@ -2272,59 +2274,16 @@ _redis_client = None
 _cached_user_token = None  # Cache user token to avoid re-login within 60s rate limit
 
 def _get_redis():
-    """Get Redis client connected to Docker Redis via docker exec"""
+    """Get Redis client connected to local Redis (same instance as the server)"""
     global _redis_client
     if _redis_client is None:
-        # Docker Redis is not exposed to host. Use docker exec to interact with it.
-        # We create a simple wrapper that executes redis-cli commands via docker exec.
-        class DockerRedisCli:
-            """Wrapper that uses docker exec to run redis-cli commands"""
-            def get(self, key):
-                result = subprocess.run(
-                    ['docker', 'exec', 'sudowork-redis', 'redis-cli', 'GET', key],
-                    capture_output=True, text=True, timeout=5
-                )
-                output = result.stdout.strip()
-                if output == '' or result.returncode != 0:
-                    return None
-                # redis-cli returns quoted strings for values with special chars
-                if output.startswith('"') and output.endswith('"'):
-                    output = output[1:-1]
-                    # Handle escape sequences
-                    output = output.replace('\\"', '"').replace('\\\\', '\\')
-                return output
-
-            def keys(self, pattern='*'):
-                result = subprocess.run(
-                    ['docker', 'exec', 'sudowork-redis', 'redis-cli', 'KEYS', pattern],
-                    capture_output=True, text=True, timeout=5
-                )
-                output = result.stdout.strip()
-                if not output or output == '':
-                    return []
-                # Parse the output - each key on a separate line
-                keys = []
-                for line in output.split('\n'):
-                    line = line.strip()
-                    if line:
-                        keys.append(line)
-                return keys
-
-            def ping(self):
-                result = subprocess.run(
-                    ['docker', 'exec', 'sudowork-redis', 'redis-cli', 'PING'],
-                    capture_output=True, text=True, timeout=5
-                )
-                return result.stdout.strip() == 'PONG'
-
-            def delete(self, key):
-                result = subprocess.run(
-                    ['docker', 'exec', 'sudowork-redis', 'redis-cli', 'DEL', key],
-                    capture_output=True, text=True, timeout=5
-                )
-                return int(result.stdout.strip() or '0')
-
-        _redis_client = DockerRedisCli()
+        import redis as redis_lib
+        _redis_client = redis_lib.Redis(
+            host='localhost',
+            port=6379,
+            password='tradingagents123',
+            decode_responses=True
+        )
     return _redis_client
 
 
@@ -2343,6 +2302,28 @@ def get_config_item_detail_via_api(page: Page, item_id: int) -> dict:
             return json.loads(result['body'])
         except:
             print(f'  [WARN] get_config_item_detail JSON parse failed: status={result.get("status")}, body={result.get("body","")[:200]}')
+            return {'success': False, 'msg': 'JSON parse error'}
+    return result if isinstance(result, dict) else {'success': False, 'msg': f'Unexpected result: {result}'}
+
+
+def update_config_item_via_api(page: Page, item_id: int, data: dict) -> dict:
+    """Update config item via direct API call"""
+    token = page.evaluate('() => localStorage.getItem("admin_token")')
+    assert token, 'No auth token found'
+    result = page.evaluate('''async (params) => {
+        const resp = await fetch('/api/v1/admin/config-items/' + params.id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + params.token },
+            body: JSON.stringify(params.data)
+        });
+        const text = await resp.text();
+        return { status: resp.status, body: text };
+    }''', {'token': token, 'id': str(item_id), 'data': data})
+    if isinstance(result, dict) and 'body' in result:
+        try:
+            return json.loads(result['body'])
+        except:
+            print(f'  [WARN] update_config_item JSON parse failed: status={result.get("status")}, body={result.get("body","")[:200]}')
             return {'success': False, 'msg': 'JSON parse error'}
     return result if isinstance(result, dict) else {'success': False, 'msg': f'Unexpected result: {result}'}
 
@@ -3450,7 +3431,583 @@ def test_49_public_api_empty_for_no_association(page: Page):
     print('  PASS')
 
 
-# ==================== Main ====================
+# ==================== Tests 50-54: URL Pattern - Create & Validation ====================
+
+def test_50_create_with_url_pattern(page: Page):
+    """Create a config item with url_pattern filled in"""
+    print('\n=== Test 50: Create with URL Pattern ===')
+    navigate_to_config_items(page)
+    click_add_button(page)
+    page.wait_for_timeout(1000)
+
+    # Fill name (1st text input)
+    name_input = page.locator('.ant-modal:visible input[type="text"]').nth(0)
+    unique_name = f'E2E_URLPattern_{UNIQUE_SUFFIX}'
+    name_input.fill(unique_name)
+    page.wait_for_timeout(300)
+
+    # Fill url_pattern (2nd text input in create mode)
+    url_input = page.locator('.ant-modal:visible input[type="text"]').nth(1)
+    url_input.fill('https://api.openai.com/*')
+    page.wait_for_timeout(300)
+
+    # Fill description
+    page.locator('.ant-modal:visible textarea').first.fill('URL pattern test')
+    page.wait_for_timeout(300)
+
+    # Click confirm
+    page.locator('.ant-modal:visible .ant-btn-primary').last.click()
+    wait_for_message(page)
+    msg = get_message_text(page)
+    assert '成功' in msg, f'Expected success message, got: {msg}'
+    print(f'  Created config item with url_pattern')
+    screenshot(page, 'test_50_create_with_url_pattern')
+    print('  PASS')
+
+
+def test_51_create_without_url_pattern(page: Page):
+    """Create a config item without url_pattern - should succeed since it's optional"""
+    print('\n=== Test 51: Create without URL Pattern ===')
+    navigate_to_config_items(page)
+    click_add_button(page)
+    page.wait_for_timeout(1000)
+
+    # Fill name only
+    name_input = page.locator('.ant-modal:visible input[type="text"]').nth(0)
+    unique_name = f'E2E_NoURL_{UNIQUE_SUFFIX}'
+    name_input.fill(unique_name)
+    page.wait_for_timeout(300)
+
+    # Do NOT fill url_pattern
+    # Click confirm
+    page.locator('.ant-modal:visible .ant-btn-primary').last.click()
+    wait_for_message(page)
+    msg = get_message_text(page)
+    assert '成功' in msg, f'Expected success message, got: {msg}'
+    print(f'  Created config item without url_pattern - OK')
+    screenshot(page, 'test_51_create_without_url_pattern')
+    print('  PASS')
+
+
+def test_52_create_url_pattern_validation_invalid_scheme(page: Page):
+    """Verify url_pattern validation rejects invalid schemes like ftp://"""
+    print('\n=== Test 52: URL Pattern Validation - Invalid Scheme ===')
+    navigate_to_config_items(page)
+    click_add_button(page)
+    page.wait_for_timeout(1000)
+
+    # Fill name
+    name_input = page.locator('.ant-modal:visible input[type="text"]').nth(0)
+    name_input.fill(f'E2E_ValScheme_{UNIQUE_SUFFIX}')
+    page.wait_for_timeout(300)
+
+    url_input = page.locator('.ant-modal:visible input[type="text"]').nth(1)
+
+    # Test ftp:// scheme
+    url_input.fill('ftp://example.com/*')
+    # Trigger blur by clicking name input
+    name_input.click()
+    page.wait_for_timeout(500)
+
+    error_el = page.locator('.ant-form-item-explain-error')
+    assert error_el.count() > 0, 'Expected error message for ftp:// scheme'
+    print(f'  ftp:// scheme rejected: {error_el.first.inner_text()}')
+
+    # Clear and test plain string
+    url_input.fill('')
+    url_input.fill('just-a-string')
+    name_input.click()
+    page.wait_for_timeout(500)
+
+    error_el = page.locator('.ant-form-item-explain-error')
+    assert error_el.count() > 0, 'Expected error message for plain string'
+    print(f'  Plain string rejected: {error_el.first.inner_text()}')
+
+    close_modal(page)
+    screenshot(page, 'test_52_invalid_scheme')
+    print('  PASS')
+
+
+def test_53_create_url_pattern_validation_invalid_glob(page: Page):
+    """Verify url_pattern validation rejects invalid glob characters like **, [], {}"""
+    print('\n=== Test 53: URL Pattern Validation - Invalid Glob ===')
+    navigate_to_config_items(page)
+    click_add_button(page)
+    page.wait_for_timeout(1000)
+
+    # Fill name
+    name_input = page.locator('.ant-modal:visible input[type="text"]').nth(0)
+    name_input.fill(f'E2E_ValGlob_{UNIQUE_SUFFIX}')
+    page.wait_for_timeout(300)
+
+    url_input = page.locator('.ant-modal:visible input[type="text"]').nth(1)
+
+    # Test ** (consecutive double-star)
+    url_input.fill('https://api.openai.com/**')
+    name_input.click()
+    page.wait_for_timeout(500)
+    error_el = page.locator('.ant-form-item-explain-error')
+    assert error_el.count() > 0, 'Expected error for ** pattern'
+    print(f'  ** rejected: {error_el.first.inner_text()}')
+
+    # Clear and test [] characters
+    url_input.fill('')
+    url_input.fill('https://api.openai.com/a[b]c')
+    name_input.click()
+    page.wait_for_timeout(500)
+    error_el = page.locator('.ant-form-item-explain-error')
+    assert error_el.count() > 0, 'Expected error for [] pattern'
+    print(f'  [] rejected: {error_el.first.inner_text()}')
+
+    # Clear and test {} characters
+    url_input.fill('')
+    url_input.fill('https://api.openai.com/{a,b}')
+    name_input.click()
+    page.wait_for_timeout(500)
+    error_el = page.locator('.ant-form-item-explain-error')
+    assert error_el.count() > 0, 'Expected error for {} pattern'
+    print(f'  {{}} rejected: {error_el.first.inner_text()}')
+
+    close_modal(page)
+    screenshot(page, 'test_53_invalid_glob')
+    print('  PASS')
+
+
+def test_54_create_url_pattern_validation_invalid_host(page: Page):
+    """Verify url_pattern validation rejects incomplete URL and URL with spaces"""
+    print('\n=== Test 54: URL Pattern Validation - Invalid Host ===')
+    navigate_to_config_items(page)
+    click_add_button(page)
+    page.wait_for_timeout(1000)
+
+    # Fill name
+    name_input = page.locator('.ant-modal:visible input[type="text"]').nth(0)
+    name_input.fill(f'E2E_ValHost_{UNIQUE_SUFFIX}')
+    page.wait_for_timeout(300)
+
+    url_input = page.locator('.ant-modal:visible input[type="text"]').nth(1)
+
+    # Test incomplete URL (no host)
+    url_input.fill('https://')
+    name_input.click()
+    page.wait_for_timeout(500)
+    error_el = page.locator('.ant-form-item-explain-error')
+    assert error_el.count() > 0, 'Expected error for incomplete URL'
+    print(f'  Incomplete URL rejected: {error_el.first.inner_text()}')
+
+    # Clear and test URL with spaces
+    url_input.fill('')
+    url_input.fill('https://api.open ai.com/*')
+    name_input.click()
+    page.wait_for_timeout(500)
+    error_el = page.locator('.ant-form-item-explain-error')
+    assert error_el.count() > 0, 'Expected error for URL with spaces'
+    print(f'  URL with spaces rejected: {error_el.first.inner_text()}')
+
+    close_modal(page)
+    screenshot(page, 'test_54_invalid_host')
+    print('  PASS')
+
+
+# ==================== Tests 55-59: URL Pattern - More Create/Edit ====================
+
+def test_55_create_url_pattern_validation_too_long(page: Page):
+    """Verify url_pattern validation rejects values exceeding 256 characters"""
+    print('\n=== Test 55: URL Pattern Validation - Too Long ===')
+    navigate_to_config_items(page)
+    click_add_button(page)
+    page.wait_for_timeout(1000)
+
+    # Fill name
+    name_input = page.locator('.ant-modal:visible input[type="text"]').nth(0)
+    name_input.fill(f'E2E_ValLong_{UNIQUE_SUFFIX}')
+    page.wait_for_timeout(300)
+
+    url_input = page.locator('.ant-modal:visible input[type="text"]').nth(1)
+
+    # Use evaluate to bypass maxLength and set a value > 256 chars
+    long_value = 'https://api.example.com/' + 'a' * 300 + '/*'
+    url_input.evaluate('(el) => { el.value = ""; el.dispatchEvent(new Event("input", {bubbles: true})); }')
+    page.wait_for_timeout(100)
+    url_input.evaluate('(el, val) => { const s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; s.call(el, val); el.dispatchEvent(new Event("input", {bubbles: true})); el.dispatchEvent(new Event("change", {bubbles: true})); }', long_value)
+    page.wait_for_timeout(300)
+
+    # Click confirm to trigger server-side or form-level validation
+    page.locator('.ant-modal:visible .ant-btn-primary').last.click()
+    page.wait_for_timeout(1000)
+
+    # Check for error message (either form-level or message toast)
+    error_el = page.locator('.ant-form-item-explain-error')
+    msg_text = get_message_text(page)
+    has_error = error_el.count() > 0 or ('失败' in msg_text or '错误' in msg_text or '过长' in msg_text or 'error' in msg_text.lower())
+    assert has_error, f'Expected error for url_pattern exceeding 256 chars, error_el={error_el.count()}, msg={msg_text}'
+    print(f'  Long url_pattern rejected')
+
+    close_modal(page)
+    screenshot(page, 'test_55_too_long')
+    print('  PASS')
+
+
+def test_56_create_url_pattern_valid_various(page: Page):
+    """Verify various valid url_pattern values can be created via API and saved correctly"""
+    print('\n=== Test 56: Create URL Pattern Valid Various via API ===')
+    valid_patterns = [
+        'https://api.openai.com/*',
+        'https://*.example.com/api/*',
+        'http://localhost:3000/api/*',
+        'https://api.openai.com',
+    ]
+    created_ids = []
+    for pattern in valid_patterns:
+        item_name = f'E2E_VURL{UNIQUE_SUFFIX[:4]}_{len(created_ids)}'
+        create_result = create_config_item_via_api(page, item_name, url_pattern=pattern)
+        assert create_result.get('success'), f'Create with url_pattern="{pattern}" failed: {create_result.get("msg")}'
+        item_id = create_result.get('data', {}).get('id')
+        assert item_id, f'No id returned for pattern: {pattern}'
+        created_ids.append(item_id)
+        print(f'  Created item with url_pattern="{pattern}" (id={item_id})')
+
+    # Verify each item's url_pattern via detail API
+    for i, item_id in enumerate(created_ids):
+        detail = get_config_item_detail_via_api(page, item_id)
+        assert detail.get('success'), f'Get detail failed for item {item_id}: {detail.get("msg")}'
+        actual_pattern = detail.get('data', {}).get('url_pattern', '')
+        assert actual_pattern == valid_patterns[i], f'Expected url_pattern="{valid_patterns[i]}", got="{actual_pattern}"'
+        print(f'  Verified url_pattern for item {item_id}: "{actual_pattern}"')
+
+    screenshot(page, 'test_56_valid_various')
+    print('  PASS')
+
+
+def test_57_edit_url_pattern_set_value(page: Page):
+    """Edit a config item and set url_pattern via UI"""
+    print('\n=== Test 57: Edit - Set URL Pattern ===')
+
+    # Create config item without url_pattern via API
+    item_name = f'E2E_EdtSetURL_{UNIQUE_SUFFIX}'
+    create_result = create_config_item_via_api(page, item_name)
+    assert create_result.get('success'), f'Create failed: {create_result.get("msg")}'
+    item_id = create_result.get('data', {}).get('id')
+    print(f'  Created item without url_pattern: {item_name} (id={item_id})')
+
+    navigate_to_config_items(page)
+    page.wait_for_timeout(1000)
+
+    # Find the row and click edit
+    row_idx = find_row_index_by_name(page, item_name)
+    assert row_idx is not None, f'Row not found for: {item_name}'
+    btns = get_row_action_btns(page, row_idx)
+    btns.nth(LINK_EDIT).click()
+    page.wait_for_timeout(1000)
+
+    # Fill url_pattern (2nd text input in edit mode)
+    url_input = page.locator('.ant-modal:visible input[type="text"]').nth(1)
+    url_input.fill('https://api.openai.com/*')
+    page.wait_for_timeout(300)
+
+    # Click confirm
+    page.locator('.ant-modal:visible .ant-btn-primary').last.click()
+    wait_for_message(page)
+    msg = get_message_text(page)
+    assert '成功' in msg, f'Expected success message, got: {msg}'
+    print(f'  Updated url_pattern via edit')
+
+    # Open detail modal to verify
+    btns = get_row_action_btns(page, row_idx)
+    btns.nth(LINK_DETAIL).click()
+    page.wait_for_timeout(1500)
+
+    modal = page.locator('.ant-modal:visible')
+    modal_text = modal.inner_text()
+    assert 'https://api.openai.com/*' in modal_text, f'url_pattern not found in detail modal'
+    print(f'  Detail modal shows url_pattern correctly')
+
+    close_modal(page)
+    screenshot(page, 'test_57_edit_set_url')
+    print('  PASS')
+
+
+def test_58_edit_url_pattern_update_value(page: Page):
+    """Edit a config item and update existing url_pattern to a new value"""
+    print('\n=== Test 58: Edit - Update URL Pattern ===')
+
+    # Create config item with old url_pattern via API
+    item_name = f'E2E_EdtUpdURL_{UNIQUE_SUFFIX}'
+    create_result = create_config_item_via_api(page, item_name, url_pattern='https://old.example.com/*')
+    assert create_result.get('success'), f'Create failed: {create_result.get("msg")}'
+    item_id = create_result.get('data', {}).get('id')
+    print(f'  Created item with old url_pattern: {item_name} (id={item_id})')
+
+    navigate_to_config_items(page)
+    page.wait_for_timeout(1000)
+
+    # Find the row and click edit
+    row_idx = find_row_index_by_name(page, item_name)
+    assert row_idx is not None, f'Row not found for: {item_name}'
+    btns = get_row_action_btns(page, row_idx)
+    btns.nth(LINK_EDIT).click()
+    page.wait_for_timeout(1000)
+
+    # Clear existing url_pattern and fill new one
+    url_input = page.locator('.ant-modal:visible input[type="text"]').nth(1)
+    url_input.fill('')
+    url_input.fill('https://new.example.com/api/*')
+    page.wait_for_timeout(300)
+
+    # Click confirm
+    page.locator('.ant-modal:visible .ant-btn-primary').last.click()
+    wait_for_message(page)
+    msg = get_message_text(page)
+    assert '成功' in msg, f'Expected success message, got: {msg}'
+    print(f'  Updated url_pattern from old to new')
+
+    # Open detail modal to verify
+    btns = get_row_action_btns(page, row_idx)
+    btns.nth(LINK_DETAIL).click()
+    page.wait_for_timeout(1500)
+
+    modal = page.locator('.ant-modal:visible')
+    modal_text = modal.inner_text()
+    assert 'https://new.example.com/api/*' in modal_text, f'New url_pattern not found in detail modal'
+    assert 'https://old.example.com/*' not in modal_text, f'Old url_pattern should not appear in detail modal'
+    print(f'  Detail modal shows new url_pattern correctly')
+
+    close_modal(page)
+    screenshot(page, 'test_58_edit_update_url')
+    print('  PASS')
+
+
+def test_59_edit_url_pattern_clear_value(page: Page):
+    """Edit a config item and clear its url_pattern"""
+    print('\n=== Test 59: Edit - Clear URL Pattern ===')
+
+    # Create config item with url_pattern via API
+    item_name = f'E2E_EdtClrURL_{UNIQUE_SUFFIX}'
+    create_result = create_config_item_via_api(page, item_name, url_pattern='https://api.openai.com/*')
+    assert create_result.get('success'), f'Create failed: {create_result.get("msg")}'
+    item_id = create_result.get('data', {}).get('id')
+    print(f'  Created item with url_pattern: {item_name} (id={item_id})')
+
+    navigate_to_config_items(page)
+    page.wait_for_timeout(1000)
+
+    # Find the row and click edit
+    row_idx = find_row_index_by_name(page, item_name)
+    assert row_idx is not None, f'Row not found for: {item_name}'
+    btns = get_row_action_btns(page, row_idx)
+    btns.nth(LINK_EDIT).click()
+    page.wait_for_timeout(1000)
+
+    # Clear url_pattern (use evaluate to trigger React onChange)
+    url_input = page.locator('.ant-modal:visible input[type="text"]').nth(1)
+    url_input.click()
+    page.wait_for_timeout(200)
+    url_input.press('Control+a')
+    page.wait_for_timeout(100)
+    url_input.press('Backspace')
+    page.wait_for_timeout(300)
+
+    # Click confirm
+    page.locator('.ant-modal:visible .ant-btn-primary').last.click()
+    wait_for_message(page)
+    msg = get_message_text(page)
+    assert '成功' in msg, f'Expected success message, got: {msg}'
+    print(f'  Cleared url_pattern via edit')
+
+    # Open detail modal to verify it shows "-"
+    btns = get_row_action_btns(page, row_idx)
+    btns.nth(LINK_DETAIL).click()
+    page.wait_for_timeout(1500)
+
+    modal = page.locator('.ant-modal:visible')
+    modal_text = modal.inner_text()
+    # The url_pattern field should show "-" when empty
+    # Check that old value is not present
+    assert 'https://api.openai.com/*' not in modal_text, f'Old url_pattern should not appear in detail modal'
+    print(f'  Detail modal shows url_pattern as empty/cleared')
+
+    close_modal(page)
+    screenshot(page, 'test_59_edit_clear_url')
+    print('  PASS')
+
+
+# ==================== Tests 60-64: URL Pattern - Detail, API, Public API ====================
+
+def test_60_detail_shows_url_pattern(page: Page):
+    """Verify detail modal shows url_pattern correctly"""
+    print('\n=== Test 60: Detail Shows URL Pattern ===')
+
+    # Create config item with url_pattern via API
+    item_name = f'E2E_DetailURL_{UNIQUE_SUFFIX}'
+    create_result = create_config_item_via_api(page, item_name, url_pattern='https://api.openai.com/*')
+    assert create_result.get('success'), f'Create failed: {create_result.get("msg")}'
+    item_id = create_result.get('data', {}).get('id')
+    print(f'  Created item with url_pattern: {item_name} (id={item_id})')
+
+    navigate_to_config_items(page)
+    page.wait_for_timeout(1000)
+
+    # Find the row and click detail
+    row_idx = find_row_index_by_name(page, item_name)
+    assert row_idx is not None, f'Row not found for: {item_name}'
+    btns = get_row_action_btns(page, row_idx)
+    btns.nth(LINK_DETAIL).click()
+    page.wait_for_timeout(1500)
+
+    modal = page.locator('.ant-modal:visible')
+    modal_text = modal.inner_text()
+
+    # Verify URL pattern label and value exist
+    # Check for the value
+    assert 'https://api.openai.com/*' in modal_text, f'url_pattern value not found in detail modal text'
+    print(f'  Detail modal shows url_pattern: https://api.openai.com/*')
+
+    close_modal(page)
+    screenshot(page, 'test_60_detail_url')
+    print('  PASS')
+
+
+def test_61_detail_shows_url_pattern_empty(page: Page):
+    """Verify detail modal shows '-' for empty url_pattern"""
+    print('\n=== Test 61: Detail Shows URL Pattern Empty ===')
+
+    # Create config item without url_pattern via API
+    item_name = f'E2E_DtlEmpty_{UNIQUE_SUFFIX}'
+    create_result = create_config_item_via_api(page, item_name)
+    assert create_result.get('success'), f'Create failed: {create_result.get("msg")}'
+    item_id = create_result.get('data', {}).get('id')
+    print(f'  Created item without url_pattern: {item_name} (id={item_id})')
+
+    navigate_to_config_items(page)
+    page.wait_for_timeout(1000)
+
+    # Find the row and click detail
+    row_idx = find_row_index_by_name(page, item_name)
+    assert row_idx is not None, f'Row not found for: {item_name}'
+    btns = get_row_action_btns(page, row_idx)
+    btns.nth(LINK_DETAIL).click()
+    page.wait_for_timeout(1500)
+
+    modal = page.locator('.ant-modal:visible')
+    modal_text = modal.inner_text()
+
+    # When url_pattern is empty, it should show "-"
+    # Look for the "-" placeholder near the url_pattern label area
+    print(f'  Detail modal text (excerpt): ...{modal_text[:500]}...')
+    # Verify no url value is present
+    assert 'https://' not in modal_text or '-' in modal_text, f'Expected empty url_pattern to show "-" in detail modal'
+    print(f'  Detail modal shows url_pattern as empty correctly')
+
+    close_modal(page)
+    screenshot(page, 'test_61_detail_empty_url')
+    print('  PASS')
+
+
+def test_62_create_url_pattern_via_api(page: Page):
+    """Verify url_pattern is correctly saved when creating via API"""
+    print('\n=== Test 62: Create URL Pattern via API ===')
+
+    test_pattern = 'https://api.openai.com/v1/*'
+    item_name = f'E2E_APIURL_{UNIQUE_SUFFIX}'
+    create_result = create_config_item_via_api(page, item_name, url_pattern=test_pattern)
+    assert create_result.get('success'), f'Create failed: {create_result.get("msg")}'
+    item_id = create_result.get('data', {}).get('id')
+    print(f'  Created item via API: {item_name} (id={item_id})')
+
+    # Verify via detail API
+    detail = get_config_item_detail_via_api(page, item_id)
+    assert detail.get('success'), f'Get detail failed: {detail.get("msg")}'
+    actual_pattern = detail.get('data', {}).get('url_pattern', '')
+    assert actual_pattern == test_pattern, f'Expected url_pattern="{test_pattern}", got="{actual_pattern}"'
+    print(f'  Verified url_pattern via API: {actual_pattern}')
+
+    screenshot(page, 'test_62_api_url')
+    print('  PASS')
+
+
+def test_63_create_url_pattern_invalid_via_api(page: Page):
+    """Verify API rejects invalid url_pattern values"""
+    print('\n=== Test 63: Create URL Pattern Invalid via API ===')
+
+    # Test ftp:// scheme (invalid)
+    item_name_1 = f'E2E_InvURL1_{UNIQUE_SUFFIX}'
+    create_result_1 = create_config_item_via_api(page, item_name_1, url_pattern='ftp://example.com/*')
+    assert create_result_1.get('success') is False, f'Expected create to fail for ftp:// scheme, but got success'
+    print(f'  ftp:// scheme rejected by API: {create_result_1.get("msg")}')
+
+    # Test ** pattern (invalid)
+    item_name_2 = f'E2E_InvURL2_{UNIQUE_SUFFIX}'
+    create_result_2 = create_config_item_via_api(page, item_name_2, url_pattern='https://api.openai.com/**')
+    assert create_result_2.get('success') is False, f'Expected create to fail for ** pattern, but got success'
+    print(f'  ** pattern rejected by API: {create_result_2.get("msg")}')
+
+    screenshot(page, 'test_63_invalid_api')
+    print('  PASS')
+
+
+def test_64_public_api_returns_url_pattern(page: Page):
+    """Verify public API returns url_pattern field for associated config items"""
+    print('\n=== Test 64: Public API Returns URL Pattern ===')
+
+    test_pattern = 'https://api.openai.com/v1/*'
+
+    # Step 1: Create config item via admin API with url_pattern
+    item_name = f'E2E_PubURL_{UNIQUE_SUFFIX}'
+    create_result = create_config_item_via_api(page, item_name, url_pattern=test_pattern)
+    assert create_result.get('success'), f'Create failed: {create_result.get("msg")}'
+    item_id = create_result.get('data', {}).get('id')
+    print(f'  Created config item: {item_name} (id={item_id}) with url_pattern={test_pattern}')
+
+    # Save entries so public API returns this item
+    entries = [
+        {'name': 'PubURLEntry', 'config_key': f'pub_url_{UNIQUE_SUFFIX}', 'required': 0, 'config_desc': 'test'},
+    ]
+    save_result = save_entries_via_api(page, item_id, entries)
+    assert save_result.get('success'), f'Save entries failed: {save_result.get("msg")}'
+
+    # Step 2: Login as user via SMS
+    user_phone = '18612680109'
+    user_token = user_login_with_sms(page, user_phone)
+    if not user_token:
+        print('  SKIP: Cannot login as user (SMS daily limit reached)')
+        return
+    print(f'  Logged in as user: {user_phone}')
+
+    # Step 3: Associate config item with user's enterprise
+    enterprise_id = 1
+    assoc_result = associate_enterprise_via_api(page, item_id, enterprise_id)
+    assert assoc_result.get('success'), f'Associate failed: {assoc_result.get("msg")}'
+    print(f'  Associated config item with enterprise {enterprise_id}')
+
+    # Step 4: Clear Redis cache
+    r = _get_redis()
+    cache_key = f'config_items:{enterprise_id}'
+    deleted = r.delete(cache_key)
+    print(f'  Cleared Redis cache key "{cache_key}": deleted={deleted}')
+
+    # Step 5: Call public API
+    api_result = call_public_config_api(page, user_token)
+    assert api_result.get('success'), f'Public API failed: {api_result.get("msg")}'
+
+    data = api_result.get('data', [])
+    # Find our config item
+    target_item = None
+    for item in data:
+        if item.get('id') == item_id:
+            target_item = item
+            break
+
+    assert target_item is not None, f'Config item {item_name} not found in public API response'
+    print(f'  Found config item in public API response')
+
+    # Step 6: Verify url_pattern field
+    assert 'url_pattern' in target_item, 'Response should contain url_pattern field'
+    assert target_item['url_pattern'] == test_pattern, f'Expected url_pattern="{test_pattern}", got="{target_item.get("url_pattern")}"'
+    print(f'  url_pattern field verified: {target_item["url_pattern"]}')
+
+    screenshot(page, 'test_64_public_api_url')
+    print('  PASS')
+
 
 def run_all_tests():
     print('=' * 60)
@@ -3530,6 +4087,22 @@ def run_all_tests():
                 # --- Public API with real user tests ---
                 ('48_public_api_with_user', test_48_public_api_returns_required_and_pinyin),
                 ('49_public_api_no_assoc', test_49_public_api_empty_for_no_association),
+                # --- URL Pattern tests ---
+                ('50_create_with_url', test_50_create_with_url_pattern),
+                ('51_create_without_url', test_51_create_without_url_pattern),
+                ('52_url_invalid_scheme', test_52_create_url_pattern_validation_invalid_scheme),
+                ('53_url_invalid_glob', test_53_create_url_pattern_validation_invalid_glob),
+                ('54_url_invalid_host', test_54_create_url_pattern_validation_invalid_host),
+                ('55_url_too_long', test_55_create_url_pattern_validation_too_long),
+                ('56_url_valid_various', test_56_create_url_pattern_valid_various),
+                ('57_edit_url_set', test_57_edit_url_pattern_set_value),
+                ('58_edit_url_update', test_58_edit_url_pattern_update_value),
+                ('59_edit_url_clear', test_59_edit_url_pattern_clear_value),
+                ('60_detail_url', test_60_detail_shows_url_pattern),
+                ('61_detail_url_empty', test_61_detail_shows_url_pattern_empty),
+                ('62_api_url', test_62_create_url_pattern_via_api),
+                ('63_api_url_invalid', test_63_create_url_pattern_invalid_via_api),
+                ('64_public_api_url', test_64_public_api_returns_url_pattern),
             ]
 
             for name, test_fn in tests:

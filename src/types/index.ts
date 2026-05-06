@@ -123,6 +123,7 @@ export interface ConfigItem {
   name: string;
   description: string | null;
   pinyin: string | null;
+  url_pattern: string | null;
   status: ConfigItemStatus;
   created_by_id: number | null;
   created_by_name: string | null;

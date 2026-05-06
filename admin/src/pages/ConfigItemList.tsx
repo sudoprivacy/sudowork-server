@@ -38,6 +38,7 @@ interface ConfigItemRecord {
   description: string | null;
   icon: string | null;
   pinyin: string | null;
+  url_pattern: string | null;
   status: number;
   enterprise_count: number;
   created_by_name: string | null;
@@ -67,6 +68,7 @@ interface DetailData {
   description: string | null;
   icon: string | null;
   pinyin: string | null;
+  url_pattern: string | null;
   status: number;
   created_by_name: string | null;
   created_by_id: number | null;
@@ -173,6 +175,7 @@ const ConfigItemList: React.FC = () => {
     form.setFieldsValue({
       name: record.name,
       description: record.description,
+      url_pattern: record.url_pattern || '',
       pinyin: record.pinyin || '',
     });
     setIconFilename(record.icon);
@@ -808,6 +811,44 @@ const ConfigItemList: React.FC = () => {
             <Input placeholder="请输入配置项名称" maxLength={20} showCount />
           </Form.Item>
           <Form.Item
+            label="URL 匹配模式（如：https://api.openai.com/*）"
+            name="url_pattern"
+            rules={[
+              { max: 256, message: "URL匹配模式不超过256个字符" },
+              {
+                validator: (_, value) => {
+                  if (!value || !value.trim()) return Promise.resolve();
+                  const trimmed = value.trim();
+                  if (!/^https?:\/\//.test(trimmed))
+                    return Promise.reject(new Error("必须以 http:// 或 https:// 开头"));
+                  if (trimmed.includes("**"))
+                    return Promise.reject(new Error("不允许连续的 ** 通配符"));
+                  if (/[\[\]{}]/.test(trimmed))
+                    return Promise.reject(new Error("不支持 [] 或 {} 语法"));
+                  const afterScheme = trimmed.replace(/^https?:\/\//, "");
+                  const slashIdx = afterScheme.indexOf("/");
+                  const hostPart = slashIdx === -1 ? afterScheme : afterScheme.slice(0, slashIdx);
+                  const pathPart = slashIdx === -1 ? "" : afterScheme.slice(slashIdx);
+                  if (!hostPart)
+                    return Promise.reject(new Error("请输入完整的URL地址"));
+                  const colonIdx = hostPart.lastIndexOf(":");
+                  const hostWithoutPort = colonIdx > 0 ? hostPart.slice(0, colonIdx) : hostPart;
+                  if (hostWithoutPort !== "*" && !hostWithoutPort.startsWith("*.")) {
+                    if (hostWithoutPort.includes("*") || hostWithoutPort.includes("?"))
+                      return Promise.reject(new Error("通配符 * 和 ? 只能用于路径部分，或作为子域名前缀（如 *.example.com）"));
+                  }
+                  if (pathPart && !pathPart.startsWith("/"))
+                    return Promise.reject(new Error("路径部分必须以 / 开头"));
+                  if (!/^[a-zA-Z0-9\-._~!$&'()*+,;=:%@?/:]+$/.test(afterScheme))
+                    return Promise.reject(new Error("包含非法字符"));
+                  return Promise.resolve();
+                },
+              },
+            ]}
+          >
+            <Input placeholder="如：https://api.openai.com/*" maxLength={256} showCount />
+          </Form.Item>
+          <Form.Item
             label="配置项说明"
             name="description"
             rules={[{ max: 200, message: "配置项说明不超过200个字符" }]}
@@ -867,6 +908,7 @@ const ConfigItemList: React.FC = () => {
             <Descriptions bordered column={2} size="small">
               <Descriptions.Item label="ID">{detailData.id}</Descriptions.Item>
               <Descriptions.Item label="配置项名称">{detailData.name}</Descriptions.Item>
+              <Descriptions.Item label="URL 匹配模式">{detailData.url_pattern || "-"}</Descriptions.Item>
               <Descriptions.Item label="拼音">{detailData.pinyin || "-"}</Descriptions.Item>
               <Descriptions.Item label="配置项图标">
                 <Image

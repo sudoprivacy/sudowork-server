@@ -7,6 +7,7 @@ import { db } from '../../db/index.js';
 import { authMiddleware, adminMiddleware, getAuthUser } from '../../middleware/auth.js';
 import { logOperation } from '../../utils/logger.js';
 import { generateUniquePinyin } from '../../utils/pinyin.js';
+import { isValidUrlPattern } from '../../utils/validation.js';
 
 const configItemsRoutes = new Hono();
 
@@ -60,7 +61,7 @@ configItemsRoutes.get('/config-items', authMiddleware, adminMiddleware, async (c
 // ==================== POST /config-items - Create ====================
 
 configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (c) => {
-  const { name, description, icon } = await c.req.json();
+  const { name, description, icon, url_pattern } = await c.req.json();
 
   if (!name || !name.trim()) {
     return c.json({ success: false, msg: '配置项名称不能为空' }, 400);
@@ -70,6 +71,15 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
   }
   if (description && description.length > 200) {
     return c.json({ success: false, msg: '配置项说明不超过200个字符' }, 400);
+  }
+  if (url_pattern !== undefined && url_pattern !== null && url_pattern.trim()) {
+    const urlPatternTrimmed = url_pattern.trim();
+    if (urlPatternTrimmed.length > 256) {
+      return c.json({ success: false, msg: 'URL匹配模式不超过256个字符' }, 400);
+    }
+    if (!isValidUrlPattern(urlPatternTrimmed)) {
+      return c.json({ success: false, msg: 'URL匹配模式格式不正确，需以http://或https://开头的合法URL，路径中可使用*和?通配符' }, 400);
+    }
   }
 
   const existing = db.prepare('SELECT id FROM config_items WHERE name = ?').get(name.trim());
@@ -82,9 +92,9 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
   const adminUser = (await getAuthUser(c)) as any;
 
   const result = db.run(
-    `INSERT INTO config_items (name, description, icon, pinyin, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
-     VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-    [name.trim(), description || null, icon || null, pinyinValue, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
+    `INSERT INTO config_items (name, description, icon, pinyin, url_pattern, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+    [name.trim(), description || null, icon || null, pinyinValue, url_pattern?.trim() || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
   );
 
   const newId = Number(result.lastInsertRowid);
@@ -130,7 +140,7 @@ configItemsRoutes.get('/config-items/:id', authMiddleware, adminMiddleware, asyn
 
 configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, async (c) => {
   const id = c.req.param('id');
-  const { name, description, icon, pinyin } = await c.req.json();
+  const { name, description, icon, pinyin, url_pattern } = await c.req.json();
 
   const item = db.prepare('SELECT * FROM config_items WHERE id = ?').get(id) as any;
   if (!item) {
@@ -172,14 +182,27 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
     }
   }
 
+  if (url_pattern !== undefined && url_pattern !== null && url_pattern.trim()) {
+    const urlPatternTrimmed = url_pattern.trim();
+    if (urlPatternTrimmed.length > 256) {
+      return c.json({ success: false, msg: 'URL匹配模式不超过256个字符' }, 400);
+    }
+    if (!isValidUrlPattern(urlPatternTrimmed)) {
+      return c.json({ success: false, msg: 'URL匹配模式格式不正确，需以http://或https://开头的合法URL，路径中可使用*和?通配符' }, 400);
+    }
+  }
+
   const adminUser = (await getAuthUser(c)) as any;
 
   const pinyinValue = (pinyin !== undefined && pinyin !== null && pinyin.trim()) ? pinyin.trim() : null;
 
+  const urlPatternProvided = url_pattern !== undefined;
+  const urlPatternValue = url_pattern !== undefined ? (url_pattern === null ? null : (url_pattern.trim() || null)) : null;
+
   db.run(
-    `UPDATE config_items SET name = COALESCE(?, name), description = COALESCE(?, description), icon = COALESCE(?, icon), pinyin = CASE WHEN ? IS NOT NULL THEN ? ELSE pinyin END, updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
+    `UPDATE config_items SET name = COALESCE(?, name), description = COALESCE(?, description), icon = COALESCE(?, icon), pinyin = CASE WHEN ? IS NOT NULL THEN ? ELSE pinyin END, url_pattern = CASE WHEN ? THEN ? ELSE url_pattern END, updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
      WHERE id = ?`,
-    [name?.trim() || null, description ?? null, icon ?? null, pinyinValue, pinyinValue, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
+    [name?.trim() || null, description ?? null, icon ?? null, pinyinValue, pinyinValue, urlPatternProvided, urlPatternValue, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
   );
 
   logOperation({
@@ -190,7 +213,7 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
     resourceId: Number(id),
     method: 'PUT',
     path: `/api/v1/admin/config-items/${id}`,
-    requestData: { name, description, icon, pinyin },
+    requestData: { name, description, icon, pinyin, url_pattern },
   });
 
   return c.json({ success: true, msg: '配置项更新成功' });

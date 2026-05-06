@@ -261,6 +261,7 @@ export function initSchema(): void {
       description TEXT,
       icon TEXT,
       pinyin TEXT,
+      url_pattern TEXT,
       status INTEGER DEFAULT 1,
       created_by_id INTEGER,
       created_by_name TEXT,

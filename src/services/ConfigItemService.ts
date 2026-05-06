@@ -15,6 +15,7 @@ export interface ConfigItemWithEntries {
   icon: string | null;
   icon_url: string;
   pinyin: string | null;
+  url_pattern: string | null;
   entries: ConfigEntry[];
 }
 
@@ -53,6 +54,7 @@ export async function getConfigItemsForEnterprise(
         ci.name,
         ci.icon,
         ci.pinyin,
+        ci.url_pattern,
         ce.id AS entry_id,
         ce.config_key,
         ce.name AS entry_name,
@@ -78,6 +80,7 @@ export async function getConfigItemsForEnterprise(
         icon: row.icon || null,
         icon_url: getIconUrl(row.icon),
         pinyin: row.pinyin || null,
+        url_pattern: row.url_pattern || null,
         entries: [],
       });
     }
