@@ -19,6 +19,7 @@ export function runMigrations(): void {
   addColumnIfNotExists("config_entries", "name", "TEXT NOT NULL DEFAULT ''");
   addColumnIfNotExists("config_entries", "required", "INTEGER DEFAULT 1");
   addColumnIfNotExists("config_items", "pinyin", "TEXT");
+  addColumnIfNotExists("config_items", "url_pattern", "TEXT");
   // Enterprise new fields
   addColumnIfNotExists("enterprises", "logo", "TEXT");
   addColumnIfNotExists("enterprises", "app_name", "TEXT");
