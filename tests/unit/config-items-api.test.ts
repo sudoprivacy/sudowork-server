@@ -73,9 +73,9 @@ async function makeExpiredToken(): Promise<string> {
 }
 
 const sampleDbRows = [
-  { id: 1, name: "model_config", icon: "abc123.svg", entry_id: 10, config_key: "max_tokens", entry_name: "最大Token数", config_desc: "最大token数" },
-  { id: 1, name: "model_config", icon: "abc123.svg", entry_id: 11, config_key: "temperature", entry_name: "温度参数", config_desc: "温度参数" },
-  { id: 2, name: "prompt_config", icon: null, entry_id: 20, config_key: "system_prompt", entry_name: "系统提示词", config_desc: "系统提示词" },
+  { id: 1, name: "model_config", icon: "abc123.svg", pinyin: "model_config", url_pattern: "https://api.openai.com/*", scheme: "bearer", bearer_prefix: "Bearer ", entry_id: 10, config_key: "max_tokens", entry_name: "最大Token数", config_desc: "最大token数", required: 1 },
+  { id: 1, name: "model_config", icon: "abc123.svg", pinyin: "model_config", url_pattern: "https://api.openai.com/*", scheme: "bearer", bearer_prefix: "Bearer ", entry_id: 11, config_key: "temperature", entry_name: "温度参数", config_desc: "温度参数", required: 1 },
+  { id: 2, name: "prompt_config", icon: null, pinyin: "prompt_config", url_pattern: null, scheme: "header", bearer_prefix: null, entry_id: 20, config_key: "system_prompt", entry_name: "系统提示词", config_desc: "系统提示词", required: 1 },
 ];
 
 const expectedGrouped = [
@@ -84,9 +84,13 @@ const expectedGrouped = [
     name: "model_config",
     icon: "abc123.svg",
     icon_url: "/uploads/config-items/abc123.svg",
+    pinyin: "model_config",
+    url_pattern: "https://api.openai.com/*",
+    scheme: "bearer",
+    bearer_prefix: "Bearer ",
     entries: [
-      { id: 10, config_key: "max_tokens", name: "最大Token数", config_desc: "最大token数" },
-      { id: 11, config_key: "temperature", name: "温度参数", config_desc: "温度参数" },
+      { id: 10, config_key: "max_tokens", name: "最大Token数", config_desc: "最大token数", required: 1 },
+      { id: 11, config_key: "temperature", name: "温度参数", config_desc: "温度参数", required: 1 },
     ],
   },
   {
@@ -94,7 +98,11 @@ const expectedGrouped = [
     name: "prompt_config",
     icon: null,
     icon_url: "/config-item-default.svg",
-    entries: [{ id: 20, config_key: "system_prompt", name: "系统提示词", config_desc: "系统提示词" }],
+    pinyin: "prompt_config",
+    url_pattern: null,
+    scheme: "header",
+    bearer_prefix: null,
+    entries: [{ id: 20, config_key: "system_prompt", name: "系统提示词", config_desc: "系统提示词", required: 1 }],
   },
 ];
 

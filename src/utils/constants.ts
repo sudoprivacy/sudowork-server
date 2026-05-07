@@ -77,3 +77,15 @@ export const CONFIG_ITEM_STATUS_TEXT: Record<ConfigItemStatus, string> = {
   [CONFIG_ITEM_STATUS.DISABLED]: '禁用',
   [CONFIG_ITEM_STATUS.ENABLED]: '正常',
 };
+
+// ==================== Config Item Scheme ====================
+
+export const CONFIG_ITEM_SCHEME = {
+  BEARER: 'bearer',
+  BASIC: 'basic',
+  HEADER: 'header',
+  QUERY: 'query',
+} as const;
+
+export const CONFIG_ITEM_SCHEME_OPTIONS = ['bearer', 'basic', 'header', 'query'] as const;
+export type ConfigItemScheme = typeof CONFIG_ITEM_SCHEME_OPTIONS[number];
