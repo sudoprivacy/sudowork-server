@@ -8,6 +8,9 @@ import { authMiddleware, adminMiddleware, getAuthUser } from '../../middleware/a
 import { logOperation } from '../../utils/logger.js';
 import { generateUniquePinyin } from '../../utils/pinyin.js';
 import { isValidUrlPattern } from '../../utils/validation.js';
+import { CONFIG_ITEM_SCHEME_OPTIONS } from '../../utils/constants.js';
+
+const VALID_SCHEMES = new Set<string>(CONFIG_ITEM_SCHEME_OPTIONS);
 
 const configItemsRoutes = new Hono();
 
@@ -61,7 +64,7 @@ configItemsRoutes.get('/config-items', authMiddleware, adminMiddleware, async (c
 // ==================== POST /config-items - Create ====================
 
 configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (c) => {
-  const { name, description, icon, url_pattern } = await c.req.json();
+  const { name, description, icon, url_pattern, scheme, bearer_prefix } = await c.req.json();
 
   if (!name || !name.trim()) {
     return c.json({ success: false, msg: '配置项名称不能为空' }, 400);
@@ -82,6 +85,23 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
     }
   }
 
+  // Scheme validation
+  const urlPatternHasValue = url_pattern !== undefined && url_pattern !== null && url_pattern.trim();
+  const schemeValue = scheme !== undefined && scheme !== null && scheme.trim() ? scheme.trim() : null;
+
+  if (schemeValue && !VALID_SCHEMES.has(schemeValue)) {
+    return c.json({ success: false, msg: 'Scheme值无效，仅允许bearer、basic、header、query' }, 400);
+  }
+  if (urlPatternHasValue && !schemeValue) {
+    return c.json({ success: false, msg: 'URL匹配模式已填写，请选择Scheme' }, 400);
+  }
+  if (schemeValue !== 'bearer' && bearer_prefix !== undefined && bearer_prefix !== null && bearer_prefix.trim()) {
+    return c.json({ success: false, msg: '仅bearer类型的Scheme可以设置Bearer前缀' }, 400);
+  }
+  if (schemeValue === 'bearer' && bearer_prefix !== undefined && bearer_prefix !== null && bearer_prefix.trim() && bearer_prefix.trim().length > 128) {
+    return c.json({ success: false, msg: 'Bearer前缀不超过128个字符' }, 400);
+  }
+
   const existing = db.prepare('SELECT id FROM config_items WHERE name = ?').get(name.trim());
   if (existing) {
     return c.json({ success: false, msg: '配置项名称已存在' }, 400);
@@ -92,9 +112,9 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
   const adminUser = (await getAuthUser(c)) as any;
 
   const result = db.run(
-    `INSERT INTO config_items (name, description, icon, pinyin, url_pattern, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
-     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-    [name.trim(), description || null, icon || null, pinyinValue, url_pattern?.trim() || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
+    `INSERT INTO config_items (name, description, icon, pinyin, url_pattern, scheme, bearer_prefix, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+    [name.trim(), description || null, icon || null, pinyinValue, url_pattern?.trim() || null, schemeValue, schemeValue === 'bearer' ? (bearer_prefix?.trim() || null) : null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
   );
 
   const newId = Number(result.lastInsertRowid);
@@ -107,8 +127,8 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
     resourceId: newId,
     method: 'POST',
     path: '/api/v1/admin/config-items',
-    requestData: { name, description, icon, pinyin: pinyinValue },
-    responseData: { id: newId, name, pinyin: pinyinValue },
+    requestData: { name, description, icon, scheme: schemeValue, pinyin: pinyinValue },
+    responseData: { id: newId, name, scheme: schemeValue, pinyin: pinyinValue },
   });
 
   return c.json({ success: true, msg: '配置项创建成功', data: { id: newId } });
@@ -140,7 +160,7 @@ configItemsRoutes.get('/config-items/:id', authMiddleware, adminMiddleware, asyn
 
 configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, async (c) => {
   const id = c.req.param('id');
-  const { name, description, icon, pinyin, url_pattern } = await c.req.json();
+  const { name, description, icon, pinyin, url_pattern, scheme, bearer_prefix } = await c.req.json();
 
   const item = db.prepare('SELECT * FROM config_items WHERE id = ?').get(id) as any;
   if (!item) {
@@ -192,6 +212,34 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
     }
   }
 
+  // Scheme validation
+  const schemeProvided = scheme !== undefined;
+  const schemeValue = scheme !== undefined && scheme !== null && scheme.trim() ? scheme.trim() : null;
+
+  // Determine the effective url_pattern for cross-field validation
+  const effectiveUrlPattern = url_pattern !== undefined ? (url_pattern === null ? null : (url_pattern.trim() || null)) : item.url_pattern;
+
+  if (schemeValue && !VALID_SCHEMES.has(schemeValue)) {
+    return c.json({ success: false, msg: 'Scheme值无效，仅允许bearer、basic、header、query' }, 400);
+  }
+  if (effectiveUrlPattern && !schemeValue) {
+    return c.json({ success: false, msg: 'URL匹配模式已填写，请选择Scheme' }, 400);
+  }
+  if (schemeValue !== 'bearer' && bearer_prefix !== undefined && bearer_prefix !== null && bearer_prefix.trim()) {
+    return c.json({ success: false, msg: '仅bearer类型的Scheme可以设置Bearer前缀' }, 400);
+  }
+  if (schemeValue === 'bearer' && bearer_prefix !== undefined && bearer_prefix !== null && bearer_prefix.trim() && bearer_prefix.trim().length > 128) {
+    return c.json({ success: false, msg: 'Bearer前缀不超过128个字符' }, 400);
+  }
+
+  // Check entries count constraint when setting scheme to bearer/basic
+  if (schemeValue && (schemeValue === 'bearer' || schemeValue === 'basic')) {
+    const entryCount = db.prepare('SELECT COUNT(*) as cnt FROM config_entries WHERE config_item_id = ?').get(id) as any;
+    if (entryCount && entryCount.cnt > 1) {
+      return c.json({ success: false, msg: '当前配置项已有超过1条配置列表，不能设置为bearer或basic类型的Scheme' }, 400);
+    }
+  }
+
   const adminUser = (await getAuthUser(c)) as any;
 
   const pinyinValue = (pinyin !== undefined && pinyin !== null && pinyin.trim()) ? pinyin.trim() : null;
@@ -199,10 +247,12 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
   const urlPatternProvided = url_pattern !== undefined;
   const urlPatternValue = url_pattern !== undefined ? (url_pattern === null ? null : (url_pattern.trim() || null)) : null;
 
+  const bearerPrefixValue = schemeValue === 'bearer' ? (bearer_prefix !== undefined ? (bearer_prefix === null ? null : (bearer_prefix.trim() || null)) : item.bearer_prefix) : null;
+
   db.run(
-    `UPDATE config_items SET name = COALESCE(?, name), description = COALESCE(?, description), icon = COALESCE(?, icon), pinyin = CASE WHEN ? IS NOT NULL THEN ? ELSE pinyin END, url_pattern = CASE WHEN ? THEN ? ELSE url_pattern END, updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
+    `UPDATE config_items SET name = COALESCE(?, name), description = COALESCE(?, description), icon = COALESCE(?, icon), pinyin = CASE WHEN ? IS NOT NULL THEN ? ELSE pinyin END, url_pattern = CASE WHEN ? THEN ? ELSE url_pattern END, scheme = CASE WHEN ? THEN ? ELSE scheme END, bearer_prefix = CASE WHEN ? THEN ? ELSE bearer_prefix END, updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
      WHERE id = ?`,
-    [name?.trim() || null, description ?? null, icon ?? null, pinyinValue, pinyinValue, urlPatternProvided, urlPatternValue, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
+    [name?.trim() || null, description ?? null, icon ?? null, pinyinValue, pinyinValue, urlPatternProvided, urlPatternValue, schemeProvided, schemeValue, schemeProvided, bearerPrefixValue, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
   );
 
   logOperation({
@@ -213,7 +263,7 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
     resourceId: Number(id),
     method: 'PUT',
     path: `/api/v1/admin/config-items/${id}`,
-    requestData: { name, description, icon, pinyin, url_pattern },
+    requestData: { name, description, icon, pinyin, url_pattern, scheme: schemeValue },
   });
 
   return c.json({ success: true, msg: '配置项更新成功' });
@@ -297,7 +347,7 @@ configItemsRoutes.put('/config-items/:id/entries', authMiddleware, adminMiddlewa
   const id = c.req.param('id');
   const { entries } = await c.req.json();
 
-  const item = db.prepare('SELECT id, status FROM config_items WHERE id = ?').get(id) as any;
+  const item = db.prepare('SELECT id, status, scheme FROM config_items WHERE id = ?').get(id) as any;
   if (!item) {
     return c.json({ success: false, msg: '配置项不存在' }, 404);
   }
@@ -336,6 +386,13 @@ configItemsRoutes.put('/config-items/:id/entries', authMiddleware, adminMiddlewa
     }
     if (entry.config_desc && entry.config_desc.length > 500) {
       return c.json({ success: false, msg: `第 ${i + 1} 行的配置说明不超过500个字符` }, 400);
+    }
+  }
+
+  // Scheme constraint: bearer/basic only allows 1 entry
+  if (item.scheme === 'bearer' || item.scheme === 'basic') {
+    if (entries.length > 1) {
+      return c.json({ success: false, msg: '当前Scheme类型仅允许配置1条配置项' }, 400);
     }
   }
 

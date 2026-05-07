@@ -218,13 +218,13 @@ export const adminApi = {
     page_size?: number;
   }) => api.get("/v1/admin/config-items", { params }),
 
-  createConfigItem: (data: { name: string; description?: string; icon?: string; url_pattern?: string }) =>
+  createConfigItem: (data: { name: string; description?: string; icon?: string; url_pattern?: string; scheme?: string; bearer_prefix?: string }) =>
     api.post("/v1/admin/config-items", data),
 
   getConfigItemDetail: (id: number) =>
     api.get(`/v1/admin/config-items/${id}`),
 
-  updateConfigItem: (id: number, data: { name?: string; description?: string; icon?: string; pinyin?: string; url_pattern?: string }) =>
+  updateConfigItem: (id: number, data: { name?: string; description?: string; icon?: string; pinyin?: string; url_pattern?: string; scheme?: string; bearer_prefix?: string }) =>
     api.put(`/v1/admin/config-items/${id}`, data),
 
   updateConfigItemStatus: (id: number, status: number) =>

@@ -39,6 +39,8 @@ interface ConfigItemRecord {
   icon: string | null;
   pinyin: string | null;
   url_pattern: string | null;
+  scheme: string | null;
+  bearer_prefix: string | null;
   status: number;
   enterprise_count: number;
   created_by_name: string | null;
@@ -69,6 +71,8 @@ interface DetailData {
   icon: string | null;
   pinyin: string | null;
   url_pattern: string | null;
+  scheme: string | null;
+  bearer_prefix: string | null;
   status: number;
   created_by_name: string | null;
   created_by_id: number | null;
@@ -176,6 +180,8 @@ const ConfigItemList: React.FC = () => {
       name: record.name,
       description: record.description,
       url_pattern: record.url_pattern || '',
+      scheme: record.scheme || undefined,
+      bearer_prefix: record.bearer_prefix || '',
       pinyin: record.pinyin || '',
     });
     setIconFilename(record.icon);
@@ -229,6 +235,11 @@ const ConfigItemList: React.FC = () => {
     setFormModalLoading(true);
     try {
       const submitData: any = { ...values, icon: iconFilename };
+
+      // Clear bearer_prefix if scheme is not bearer
+      if (submitData.scheme !== 'bearer') {
+        submitData.bearer_prefix = null;
+      }
 
       // For edit mode, include pinyin only if the checkbox was checked
       if (editingItem && pinyinEditable) {
@@ -325,6 +336,11 @@ const ConfigItemList: React.FC = () => {
   };
 
   const handleAddEntry = () => {
+    // Scheme constraint: bearer/basic only allows 1 entry
+    if (entriesItem && (entriesItem.scheme === 'bearer' || entriesItem.scheme === 'basic') && entriesData.length >= 1) {
+      message.warning('当前Scheme类型仅允许配置1条配置项');
+      return;
+    }
     setEntriesData([...entriesData, { id: Date.now(), config_key: "", name: "", config_desc: null, required: 1 }]);
   };
 
@@ -849,6 +865,44 @@ const ConfigItemList: React.FC = () => {
             <Input placeholder="如：https://api.openai.com/*" maxLength={256} showCount />
           </Form.Item>
           <Form.Item
+            noStyle
+            shouldUpdate={(prev, cur) => prev.url_pattern !== cur.url_pattern}
+          >
+            {({ getFieldValue }) => {
+              const urlPatternHasValue = getFieldValue('url_pattern') && getFieldValue('url_pattern').trim();
+              return (
+                <Form.Item
+                  label="Scheme"
+                  name="scheme"
+                  rules={[{ required: !!urlPatternHasValue, message: "URL匹配模式已填写，请选择Scheme" }]}
+                >
+                  <Select placeholder="请选择Scheme" allowClear>
+                    <Select.Option value="bearer">bearer</Select.Option>
+                    <Select.Option value="basic">basic</Select.Option>
+                    <Select.Option value="header">header</Select.Option>
+                    <Select.Option value="query">query</Select.Option>
+                  </Select>
+                </Form.Item>
+              );
+            }}
+          </Form.Item>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, cur) => prev.scheme !== cur.scheme}
+          >
+            {({ getFieldValue }) =>
+              getFieldValue('scheme') === 'bearer' ? (
+                <Form.Item
+                  label="Bearer 前缀"
+                  name="bearer_prefix"
+                  rules={[{ max: 128, message: 'Bearer前缀不超过128个字符' }]}
+                >
+                  <Input placeholder="请输入Bearer前缀（可选）" maxLength={128} />
+                </Form.Item>
+              ) : null
+            }
+          </Form.Item>
+          <Form.Item
             label="配置项说明"
             name="description"
             rules={[{ max: 200, message: "配置项说明不超过200个字符" }]}
@@ -908,7 +962,8 @@ const ConfigItemList: React.FC = () => {
             <Descriptions bordered column={2} size="small">
               <Descriptions.Item label="ID">{detailData.id}</Descriptions.Item>
               <Descriptions.Item label="配置项名称">{detailData.name}</Descriptions.Item>
-              <Descriptions.Item label="URL 匹配模式">{detailData.url_pattern || "-"}</Descriptions.Item>
+              <Descriptions.Item label="URL 匹配模式" span={2} style={{ wordBreak: 'break-all' }}>{detailData.url_pattern || "-"}</Descriptions.Item>
+              <Descriptions.Item label="Scheme">{detailData.scheme || "-"}</Descriptions.Item>
               <Descriptions.Item label="拼音">{detailData.pinyin || "-"}</Descriptions.Item>
               <Descriptions.Item label="配置项图标">
                 <Image
@@ -920,6 +975,9 @@ const ConfigItemList: React.FC = () => {
                   preview={{ mask: "查看原图" }}
                 />
               </Descriptions.Item>
+              {detailData.scheme === 'bearer' && (
+                <Descriptions.Item label="Bearer 前缀">{detailData.bearer_prefix || "-"}</Descriptions.Item>
+              )}
               <Descriptions.Item label="状态">
                 {detailData.status === 1 ? <Tag color="green">正常</Tag> : <Tag color="red">禁用</Tag>}
               </Descriptions.Item>
