@@ -64,7 +64,7 @@ configItemsRoutes.get('/config-items', authMiddleware, adminMiddleware, async (c
 // ==================== POST /config-items - Create ====================
 
 configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (c) => {
-  const { name, description, icon, url_pattern, scheme, bearer_prefix } = await c.req.json();
+  const { name, description, icon, url_pattern, scheme, bearer_prefix, visible_to_all } = await c.req.json();
 
   if (!name || !name.trim()) {
     return c.json({ success: false, msg: '配置项名称不能为空' }, 400);
@@ -111,10 +111,12 @@ configItemsRoutes.post('/config-items', authMiddleware, adminMiddleware, async (
 
   const adminUser = (await getAuthUser(c)) as any;
 
+  const visibleToAllValue = visible_to_all === 1 ? 1 : 0;
+
   const result = db.run(
-    `INSERT INTO config_items (name, description, icon, pinyin, url_pattern, scheme, bearer_prefix, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-    [name.trim(), description || null, icon || null, pinyinValue, url_pattern?.trim() || null, schemeValue, schemeValue === 'bearer' ? (bearer_prefix?.trim() || null) : null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
+    `INSERT INTO config_items (name, description, icon, pinyin, url_pattern, scheme, bearer_prefix, visible_to_all, status, created_by_id, created_by_name, updated_by_id, updated_by_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+    [name.trim(), description || null, icon || null, pinyinValue, url_pattern?.trim() || null, schemeValue, schemeValue === 'bearer' ? (bearer_prefix?.trim() || null) : null, visibleToAllValue, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null]
   );
 
   const newId = Number(result.lastInsertRowid);
@@ -160,7 +162,7 @@ configItemsRoutes.get('/config-items/:id', authMiddleware, adminMiddleware, asyn
 
 configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, async (c) => {
   const id = c.req.param('id');
-  const { name, description, icon, pinyin, url_pattern, scheme, bearer_prefix } = await c.req.json();
+  const { name, description, icon, pinyin, url_pattern, scheme, bearer_prefix, visible_to_all } = await c.req.json();
 
   const item = db.prepare('SELECT * FROM config_items WHERE id = ?').get(id) as any;
   if (!item) {
@@ -249,10 +251,12 @@ configItemsRoutes.put('/config-items/:id', authMiddleware, adminMiddleware, asyn
 
   const bearerPrefixValue = schemeValue === 'bearer' ? (bearer_prefix !== undefined ? (bearer_prefix === null ? null : (bearer_prefix.trim() || null)) : item.bearer_prefix) : null;
 
+  const visibleToAllParam = visible_to_all !== undefined ? (visible_to_all ? 1 : 0) : null;
+
   db.run(
-    `UPDATE config_items SET name = COALESCE(?, name), description = COALESCE(?, description), icon = COALESCE(?, icon), pinyin = CASE WHEN ? IS NOT NULL THEN ? ELSE pinyin END, url_pattern = CASE WHEN ? THEN ? ELSE url_pattern END, scheme = CASE WHEN ? THEN ? ELSE scheme END, bearer_prefix = CASE WHEN ? THEN ? ELSE bearer_prefix END, updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
+    `UPDATE config_items SET name = COALESCE(?, name), description = COALESCE(?, description), icon = COALESCE(?, icon), pinyin = CASE WHEN ? IS NOT NULL THEN ? ELSE pinyin END, url_pattern = CASE WHEN ? THEN ? ELSE url_pattern END, scheme = CASE WHEN ? THEN ? ELSE scheme END, bearer_prefix = CASE WHEN ? THEN ? ELSE bearer_prefix END, visible_to_all = COALESCE(?, visible_to_all), updated_by_id = ?, updated_by_name = ?, updated_at = datetime('now')
      WHERE id = ?`,
-    [name?.trim() || null, description ?? null, icon ?? null, pinyinValue, pinyinValue, urlPatternProvided, urlPatternValue, schemeProvided, schemeValue, schemeProvided, bearerPrefixValue, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
+    [name?.trim() || null, description ?? null, icon ?? null, pinyinValue, pinyinValue, urlPatternProvided, urlPatternValue, schemeProvided, schemeValue, schemeProvided, bearerPrefixValue, visibleToAllParam, adminUser?.id || null, adminUser?.nickname || adminUser?.phone || null, id]
   );
 
   logOperation({

@@ -49,3 +49,6 @@ session-*.md
 
 # Python
 __pycache__/
+
+# Tests
+tests/

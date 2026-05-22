@@ -22,6 +22,7 @@ export function runMigrations(): void {
   addColumnIfNotExists("config_items", "url_pattern", "TEXT");
   addColumnIfNotExists("config_items", "scheme", "TEXT");
   addColumnIfNotExists("config_items", "bearer_prefix", "TEXT");
+  addColumnIfNotExists("config_items", "visible_to_all", "INTEGER DEFAULT 0");
   // Enterprise new fields
   addColumnIfNotExists("enterprises", "logo", "TEXT");
   addColumnIfNotExists("enterprises", "app_name", "TEXT");

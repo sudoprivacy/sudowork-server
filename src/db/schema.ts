@@ -264,6 +264,7 @@ export function initSchema(): void {
       url_pattern TEXT,
       scheme TEXT,
       bearer_prefix TEXT,
+      visible_to_all INTEGER DEFAULT 0,
       status INTEGER DEFAULT 1,
       created_by_id INTEGER,
       created_by_name TEXT,
