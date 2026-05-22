@@ -64,15 +64,15 @@ export async function getConfigItemsForEnterprise(
         ce.name AS entry_name,
         ce.config_desc,
         ce.required
-      FROM config_enterprise_rel cer
-      JOIN config_items ci ON ci.id = cer.config_item_id
+      FROM config_items ci
       JOIN config_entries ce ON ce.config_item_id = ci.id
-      WHERE cer.enterprise_id = ?
-        AND ci.status = 1
+      LEFT JOIN config_enterprise_rel cer ON cer.config_item_id = ci.id AND cer.enterprise_id = ?
+      WHERE ci.status = 1
+        AND (cer.enterprise_id = ? OR ci.visible_to_all = 1)
       ORDER BY ci.id, ce.id
       `
     )
-    .all(enterpriseId) as any[];
+    .all(enterpriseId, enterpriseId) as any[];
 
   // Group entries under their parent config item
   const itemMap = new Map<number, ConfigItemWithEntries>();

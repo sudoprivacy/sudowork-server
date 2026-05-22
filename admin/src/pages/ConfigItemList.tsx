@@ -15,6 +15,7 @@ import {
   Upload,
   Image,
   Checkbox,
+  Switch,
 } from "antd";
 import { PlusOutlined, UploadOutlined } from "@ant-design/icons";
 import { adminApi } from "../api/index";
@@ -41,6 +42,7 @@ interface ConfigItemRecord {
   url_pattern: string | null;
   scheme: string | null;
   bearer_prefix: string | null;
+  visible_to_all: number;
   status: number;
   enterprise_count: number;
   created_by_name: string | null;
@@ -73,6 +75,7 @@ interface DetailData {
   url_pattern: string | null;
   scheme: string | null;
   bearer_prefix: string | null;
+  visible_to_all: number;
   status: number;
   created_by_name: string | null;
   created_by_id: number | null;
@@ -183,6 +186,7 @@ const ConfigItemList: React.FC = () => {
       scheme: record.scheme || undefined,
       bearer_prefix: record.bearer_prefix || '',
       pinyin: record.pinyin || '',
+      visible_to_all: record.visible_to_all === 1 ? 1 : 0,
     });
     setIconFilename(record.icon);
     setPinyinEditable(false);
@@ -538,6 +542,8 @@ const ConfigItemList: React.FC = () => {
       key: "enterprise_count",
       width: 100,
       align: "center" as const,
+      render: (val: number, record: ConfigItemRecord) =>
+        record.visible_to_all === 1 ? "全部" : val,
     },
     {
       title: "状态",
@@ -587,9 +593,11 @@ const ConfigItemList: React.FC = () => {
               <Button type="link" size="small" onClick={() => openEntriesModal(record)}>
                 配置列表
               </Button>
-              <Button type="link" size="small" onClick={() => openEnterpriseModal(record)}>
-                关联企业
-              </Button>
+              {record.visible_to_all !== 1 && (
+                <Button type="link" size="small" onClick={() => openEnterpriseModal(record)}>
+                  关联企业
+                </Button>
+              )}
             </Space>
           )}
         </Space>
@@ -909,6 +917,16 @@ const ConfigItemList: React.FC = () => {
           >
             <Input.TextArea placeholder="请输入配置项说明（可选）" maxLength={200} showCount rows={3} />
           </Form.Item>
+          <Form.Item
+            label="全部企业可见"
+            name="visible_to_all"
+            valuePropName="checked"
+            tooltip="选中后该配置项对所有企业可见，无需手动关联企业"
+            getValueFromEvent={(checked: boolean) => checked ? 1 : 0}
+            getValueProps={(value: number) => ({ checked: value === 1 })}
+          >
+            <Switch />
+          </Form.Item>
           {editingItem && (
             <Form.Item label="拼音">
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -981,6 +999,9 @@ const ConfigItemList: React.FC = () => {
               <Descriptions.Item label="状态">
                 {detailData.status === 1 ? <Tag color="green">正常</Tag> : <Tag color="red">禁用</Tag>}
               </Descriptions.Item>
+              <Descriptions.Item label="全部企业可见">
+                {detailData.visible_to_all === 1 ? <Tag color="blue">是</Tag> : <Tag>否</Tag>}
+              </Descriptions.Item>
               <Descriptions.Item label="配置项说明" span={2}>
                 {detailData.description || "-"}
               </Descriptions.Item>
@@ -992,14 +1013,18 @@ const ConfigItemList: React.FC = () => {
 
             <div style={{ marginTop: 24 }}>
               <Title level={5} style={{ marginBottom: 12 }}>关联企业</Title>
-              <Table
-                columns={[{ title: "企业名称", dataIndex: "name", key: "name" }]}
-                dataSource={detailData.enterprises || []}
-                rowKey="id"
-                size="small"
-                pagination={false}
-                locale={{ emptyText: "暂无关联企业" }}
-              />
+              {detailData.visible_to_all === 1 ? (
+                <div style={{ color: '#1890ff' }}>全部企业可见</div>
+              ) : (
+                <Table
+                  columns={[{ title: "企业名称", dataIndex: "name", key: "name" }]}
+                  dataSource={detailData.enterprises || []}
+                  rowKey="id"
+                  size="small"
+                  pagination={false}
+                  locale={{ emptyText: "暂无关联企业" }}
+                />
+              )}
             </div>
 
             <div style={{ marginTop: 24 }}>

@@ -124,6 +124,7 @@ export interface ConfigItem {
   description: string | null;
   pinyin: string | null;
   url_pattern: string | null;
+  visible_to_all: number;
   status: ConfigItemStatus;
   created_by_id: number | null;
   created_by_name: string | null;
