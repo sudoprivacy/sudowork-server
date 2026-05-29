@@ -1,6 +1,6 @@
 /**
  * External API Proxy Routes
- * Proxy requests to sudoclawhub.sudoprivacy.com
+ * Proxy requests to sudoworkhub.sudoprivacy.com
  */
 
 import { Hono } from "hono";
@@ -41,7 +41,7 @@ proxyRoutes.get("/skills/cursor", authMiddleware, adminMiddleware, async (c) => 
   if (query) params.append("query", query);
   if (categories) params.append("categories", categories);
 
-  const url = `https://sudoclawhub.sudoprivacy.com/api/skills/admin/cursor?${params.toString()}`;
+  const url = `https://sudoworkhub.sudoprivacy.com/api/skills/admin/cursor?${params.toString()}`;
 
   console.log("=== 专属技能请求 ===");
   console.log("完整URL:", url);
@@ -74,7 +74,7 @@ proxyRoutes.get("/assistants/cursor", authMiddleware, adminMiddleware, async (c)
   if (query) params.append("query", query);
   if (category) params.append("category", category);
 
-  const url = `https://sudoclawhub.sudoprivacy.com/api/assistants/admin/cursor?${params.toString()}`;
+  const url = `https://sudoworkhub.sudoprivacy.com/api/assistants/admin/cursor?${params.toString()}`;
 
   console.log("=== 专属助手请求 ===");
   console.log("完整URL:", url);
@@ -95,7 +95,7 @@ proxyRoutes.get("/assistants/cursor", authMiddleware, adminMiddleware, async (c)
 // Approve skill API
 proxyRoutes.post("/skills/:skillId/approve", authMiddleware, adminMiddleware, async (c) => {
   const skillId = c.req.param("skillId");
-  const url = `https://sudoclawhub.sudoprivacy.com/api/skills/${skillId}/approve`;
+  const url = `https://sudoworkhub.sudoprivacy.com/api/skills/${skillId}/approve`;
 
   console.log("=== 审批专属技能请求 ===");
   console.log("完整URL:", url);
@@ -116,7 +116,7 @@ proxyRoutes.post("/skills/:skillId/approve", authMiddleware, adminMiddleware, as
 // Delete skill API
 proxyRoutes.delete("/skills/:skillId", authMiddleware, adminMiddleware, async (c) => {
   const skillId = c.req.param("skillId");
-  const url = `https://sudoclawhub.sudoprivacy.com/api/skills/${skillId}`;
+  const url = `https://sudoworkhub.sudoprivacy.com/api/skills/${skillId}`;
 
   console.log("=== 删除专属技能请求 ===");
   console.log("完整URL:", url);
@@ -137,7 +137,7 @@ proxyRoutes.delete("/skills/:skillId", authMiddleware, adminMiddleware, async (c
 // Approve assistant API
 proxyRoutes.post("/assistants/:assistantId/approve", authMiddleware, adminMiddleware, async (c) => {
   const assistantId = c.req.param("assistantId");
-  const url = `https://sudoclawhub.sudoprivacy.com/api/assistants/${assistantId}/approve`;
+  const url = `https://sudoworkhub.sudoprivacy.com/api/assistants/${assistantId}/approve`;
 
   console.log("=== 审批专属助手请求 ===");
   console.log("完整URL:", url);
@@ -158,7 +158,7 @@ proxyRoutes.post("/assistants/:assistantId/approve", authMiddleware, adminMiddle
 // Delete assistant API
 proxyRoutes.delete("/assistants/:assistantId", authMiddleware, adminMiddleware, async (c) => {
   const assistantId = c.req.param("assistantId");
-  const url = `https://sudoclawhub.sudoprivacy.com/api/assistants/${assistantId}`;
+  const url = `https://sudoworkhub.sudoprivacy.com/api/assistants/${assistantId}`;
 
   console.log("=== 删除专属助手请求 ===");
   console.log("完整URL:", url);
