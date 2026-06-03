@@ -177,7 +177,7 @@ userRoutes.get("/dashboard", async (c) => {
         (log: any) => log.type !== "manage" && log.model_name,
       );
 
-      totalLogs = validLogs.length;
+      totalLogs = logsResult.data.count || 0;
       usageLogs = validLogs.map((log: any) => ({
         id: log.id,
         model: log.model_name,
