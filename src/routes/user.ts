@@ -106,8 +106,9 @@ userRoutes.get("/dashboard", async (c) => {
     const now = Math.floor(Date.now() / 1000);
     const monthAgo = now - 30 * 24 * 60 * 60;
 
-    const [getUserResult, logsResult] = await Promise.all([
+    const [getUserResult, allLogsResult, logsResult] = await Promise.all([
       sudorouterService.getUserWithLog(user.sudorouter_user_id),
+      sudorouterService.getAllUsageLogs(user.sudorouter_user_id, monthAgo, now),
       sudorouterService.getUsageLogs(user.sudorouter_user_id, monthAgo, now, 1, 100),
     ]);
 
@@ -159,9 +160,19 @@ userRoutes.get("/dashboard", async (c) => {
       );
     }
 
-    // 处理使用日志（过滤掉 manage 类型和空模型名的记录）
+    // 计算今日统计（基于全量日志）
+    if (allLogsResult) {
+      for (const log of allLogsResult) {
+        if (log.created_at >= todayStart && log.type !== "manage" && log.model_name) {
+          todayRequests += 1;
+          todayTokens += (log.prompt_tokens || 0) + (log.completion_tokens || 0);
+          todayQuota += log.cost || 0;
+        }
+      }
+    }
+
+    // 处理使用日志（分页，用于流水展示）
     if (logsResult && logsResult.data) {
-      // 过滤有效的使用记录（与今日统计过滤条件一致）
       const validLogs = logsResult.data.data.filter(
         (log: any) => log.type !== "manage" && log.model_name,
       );
@@ -175,16 +186,6 @@ userRoutes.get("/dashboard", async (c) => {
         completion_tokens: log.completion_tokens || 0,
         created_at: log.created_at,
       }));
-
-      // 计算今日统计（从同一份数据中计算，避免重复调用）
-      for (const log of validLogs) {
-        if (log.created_at >= todayStart) {
-          todayRequests += 1;
-          todayTokens +=
-            (log.prompt_tokens || 0) + (log.completion_tokens || 0);
-          todayQuota += log.cost || 0;
-        }
-      }
 
       // 记录 API 调用日志
       db.run(
@@ -399,12 +400,10 @@ userRoutes.get("/stats", async (c) => {
     const todayStart = Math.floor(new Date().setHours(0, 0, 0, 0) / 1000);
     const now = Math.floor(Date.now() / 1000);
 
-    const todayLogs = await sudorouterService.getUsageLogs(
+    const todayLogs = await sudorouterService.getAllUsageLogs(
       user.sudorouter_user_id,
       todayStart,
       now,
-      1,
-      1000,
     );
 
     // 记录获取使用日志的 API 调用
@@ -426,13 +425,13 @@ userRoutes.get("/stats", async (c) => {
         }),
         JSON.stringify({
           success: !!todayLogs,
-          count: todayLogs?.data?.count || 0,
+          count: todayLogs?.length || 0,
         }),
       ],
     );
 
-    if (todayLogs && todayLogs.data && todayLogs.data.data) {
-      for (const log of todayLogs.data.data) {
+    if (todayLogs) {
+      for (const log of todayLogs) {
         // 只统计模型使用记录，排除管理操作(manage)类型的日志
         if (log.type !== "manage" && log.model_name) {
           todayRequests += 1;

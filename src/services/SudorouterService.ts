@@ -449,7 +449,7 @@ class SudorouterService {
   }
 
   // 获取全量使用日志（分页并行获取）用于统计分析
-  private async getAllUsageLogs(
+  async getAllUsageLogs(
     sudorouterUserId: number,
     timeFrom: number,
     timeTo: number
