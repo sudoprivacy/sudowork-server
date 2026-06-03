@@ -94,6 +94,7 @@ interface ModelUsageStatItem {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  cost: number;
 }
 
 // 带超时的 fetch
@@ -568,18 +569,19 @@ class SudorouterService {
     }
 
     // 4. 按 (date, model) 双重分组聚合
-    const grouped: Record<string, Record<string, { prompt: number; completion: number; total: number }>> = {};
+    const grouped: Record<string, Record<string, { prompt: number; completion: number; total: number; cost: number }>> = {};
     for (const log of validLogs) {
       const date = this.formatDateFromTimestamp(log.created_at);
       // After filter, model_name is guaranteed to be truthy
       const model = log.model_name!;
 
       if (!grouped[date]) grouped[date] = {};
-      if (!grouped[date][model]) grouped[date][model] = { prompt: 0, completion: 0, total: 0 };
+      if (!grouped[date][model]) grouped[date][model] = { prompt: 0, completion: 0, total: 0, cost: 0 };
 
       grouped[date][model].prompt += log.prompt_tokens || 0;
       grouped[date][model].completion += log.completion_tokens || 0;
       grouped[date][model].total += (log.prompt_tokens || 0) + (log.completion_tokens || 0);
+      grouped[date][model].cost += log.cost || 0;
     }
 
     // 5. 计算每个模型的总用量
@@ -601,7 +603,7 @@ class SudorouterService {
     for (const date of Object.keys(grouped).sort()) {
       // 收集该日期下所有模型的聚合数据
       const dateModels = grouped[date];
-      const otherData = { prompt: 0, completion: 0, total: 0 };
+      const otherData = { prompt: 0, completion: 0, total: 0, cost: 0 };
 
       for (const model in dateModels) {
         const data = dateModels[model]!;
@@ -612,11 +614,13 @@ class SudorouterService {
             prompt_tokens: data.prompt,
             completion_tokens: data.completion,
             total_tokens: data.total,
+            cost: data.cost,
           });
         } else {
           otherData.prompt += data.prompt;
           otherData.completion += data.completion;
           otherData.total += data.total;
+          otherData.cost += data.cost;
         }
       }
 
@@ -628,6 +632,7 @@ class SudorouterService {
           prompt_tokens: otherData.prompt,
           completion_tokens: otherData.completion,
           total_tokens: otherData.total,
+          cost: otherData.cost,
         });
       }
     }
