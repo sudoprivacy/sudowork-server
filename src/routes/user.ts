@@ -108,7 +108,7 @@ userRoutes.get("/dashboard", async (c) => {
 
     const [getUserResult, allLogsResult, logsResult] = await Promise.all([
       sudorouterService.getUserWithLog(user.sudorouter_user_id),
-      sudorouterService.getAllUsageLogs(user.sudorouter_user_id, monthAgo, now),
+      sudorouterService.getAllUsageLogs(user.sudorouter_user_id, todayStart, now),
       sudorouterService.getUsageLogs(user.sudorouter_user_id, monthAgo, now, 1, 100),
     ]);
 
