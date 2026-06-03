@@ -41,14 +41,24 @@ interface UsageLog {
   id: number;
   user_id: number;
   created_at: number;
-  type: number;
+  type: string;
   model_name: string;
-  quota: number;
+  cost: number;
   prompt_tokens: number;
   completion_tokens: number;
-  use_time: number;
-  channel: number;
-  is_stream: boolean;
+  duration: number;
+  channel_id: number;
+  api_key_name: string;
+  detail: string;
+  other: {
+    cache_ratio?: number;
+    cache_tokens?: number;
+    completion_ratio?: number;
+    group_ratio?: number;
+    model_price?: number;
+    model_ratio?: number;
+  };
+  user_name: string;
 }
 
 interface UsageLogsResponse {
@@ -550,7 +560,7 @@ class SudorouterService {
 
     // 3. 过滤有效记录（排除 manage 类型和无模型名的记录）
     const validLogs = logs.filter(
-      (log) => log.type !== 1 && log.model_name
+      (log) => log.type !== "manage" && log.model_name
     );
 
     if (validLogs.length === 0) {

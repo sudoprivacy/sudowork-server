@@ -92,7 +92,7 @@ userRoutes.get("/dashboard", async (c) => {
 
   // 今日使用统计
   let todayTokens = 0;
-  let todayCostPoints = 0;
+  let todayQuota = 0; // 先累加原始 quota，避免单条记录 round 后为 0
   let todayRequests = 0;
 
   // 使用流水
@@ -182,7 +182,7 @@ userRoutes.get("/dashboard", async (c) => {
           todayRequests += 1;
           todayTokens +=
             (log.prompt_tokens || 0) + (log.completion_tokens || 0);
-          todayCostPoints += sudorouterService.quotaToPoints(log.quota || 0);
+          todayQuota += log.cost || 0;
         }
       }
 
@@ -220,7 +220,7 @@ userRoutes.get("/dashboard", async (c) => {
       },
       usage_today: {
         tokens: todayTokens,
-        cost_points: Math.round(todayCostPoints * 1000) / 1000,
+        cost_points: Math.round(sudorouterService.quotaToPoints(todayQuota) * 1000) / 1000,
         requests: todayRequests,
       },
       ledger: {
@@ -288,14 +288,14 @@ userRoutes.get("/ledger", async (c) => {
       const formattedLogs = logs.data.data.map((log: any) => ({
         id: log.id,
         user_id: user.id,
-        amount: -sudorouterService.quotaToPoints(log.quota || 0),
+        amount: -sudorouterService.quotaToPoints(log.cost || 0),
         type: "CONSUME",
         memo: `${log.model_name || "unknown"} (${log.prompt_tokens || 0}+${log.completion_tokens || 0} tokens)`,
         timestamp: new Date(log.created_at * 1000).toISOString(),
         model: log.model_name,
         prompt_tokens: log.prompt_tokens,
         completion_tokens: log.completion_tokens,
-        quota: log.quota,
+        quota: log.cost,
       }));
 
       return c.json({
@@ -340,7 +340,7 @@ userRoutes.get("/stats", async (c) => {
 
   // 今日使用统计
   let todayTokens = 0;
-  let todayCostPoints = 0;
+  let todayQuota = 0; // 先累加原始 quota，避免单条记录 round 后为 0
   let todayRequests = 0;
 
   // 从 sudorouter 获取用户信息
@@ -437,7 +437,7 @@ userRoutes.get("/stats", async (c) => {
         if (log.type !== "manage" && log.model_name) {
           todayRequests += 1;
           todayTokens += (log.prompt_tokens || 0) + (log.completion_tokens || 0);
-          todayCostPoints += sudorouterService.quotaToPoints(log.quota || 0);
+          todayQuota += log.cost || 0;
         }
       }
     }
@@ -454,7 +454,7 @@ userRoutes.get("/stats", async (c) => {
       },
       usage_today: {
         tokens: todayTokens,
-        cost_points: Math.round(todayCostPoints * 1000) / 1000,
+        cost_points: Math.round(sudorouterService.quotaToPoints(todayQuota) * 1000) / 1000,
         requests: todayRequests,
       },
     },
