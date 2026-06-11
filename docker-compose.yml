@@ -14,6 +14,13 @@ services:
       # 容器间通信配置（必须在 environment 中指定）
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - QMS_ENABLED=true
+      - QMS_DB_HOST=postgres
+      - QMS_DB_PORT=5432
+      - QMS_DB_NAME=sudowork_qms
+      - QMS_DB_USER=postgres
+      - QMS_REDIS_HOST=redis
+      - QMS_REDIS_PORT=6379
       - NODE_ENV=production
     volumes:
       # Persist SQLite database
@@ -22,6 +29,8 @@ services:
       - ./.env:/app/.env:ro
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - sudowork-network
@@ -51,6 +60,28 @@ services:
       retries: 3
       start_period: 5s
 
+  # ============================================
+  # PostgreSQL Service for QMS telemetry
+  # ============================================
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: sudowork-qms-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=sudowork_qms
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${QMS_DB_PASSWORD:-postgres}
+    volumes:
+      - qms-postgres-data:/var/lib/postgresql/data
+    networks:
+      - sudowork-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sudowork_qms"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 # ============================================
 # Networks
 # ============================================
@@ -66,3 +97,6 @@ volumes:
   redis-data:
     driver: local
     name: sudowork-redis-data
+  qms-postgres-data:
+    driver: local
+    name: sudowork-qms-postgres-data

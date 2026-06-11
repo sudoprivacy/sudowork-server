@@ -19,6 +19,7 @@ import {
   FileTextOutlined,
   PayCircleOutlined,
   UnorderedListOutlined,
+  BarChartOutlined,
 } from "@ant-design/icons";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -30,6 +31,16 @@ import RechargeList from "./pages/RechargeList";
 import RechargeRecords from "./pages/RechargeRecords";
 import ConfigItemList from "./pages/ConfigItemList";
 import SkillsList from "./pages/SkillsList";
+import { TenantSelector as QmsTenantSelector } from "./components/qms";
+import QmsDashboard from "./pages/qms/Dashboard";
+import QmsPerformance from "./pages/qms/Performance";
+import QmsConversations from "./pages/qms/Conversations";
+import QmsInstalls from "./pages/qms/Installs";
+import QmsAlerts from "./pages/qms/Alerts";
+import QmsCrashIssues from "./pages/qms/CrashIssues";
+import QmsCrashStats from "./pages/qms/CrashStats";
+import QmsSystem from "./pages/qms/System";
+import QmsUserStats from "./pages/qms/UserStats";
 import "antd/dist/reset.css";
 import "./components/Layout.css";
 
@@ -58,6 +69,17 @@ const menuConfig: MenuItemConfig[] = [
   { key: "/users", icon: <UserOutlined />, label: "用户管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "/skills", icon: <AppstoreOutlined />, label: "专属技能", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "/assistants", icon: <RobotOutlined />, label: "专属助手", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+  { key: "qms-mgmt", icon: <BarChartOutlined />, label: "QMS", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"], children: [
+    { key: "/qms", label: "总览", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+    { key: "/qms/user-stats", label: "用户统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+    { key: "/qms/conversations", label: "会话质量", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+    { key: "/qms/performance", label: "性能指标", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+    { key: "/qms/installs", label: "安装统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+    { key: "/qms/crash-stats", label: "崩溃统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+    { key: "/qms/crash-issues", label: "崩溃问题", roles: ["SUPER_ADMIN"] },
+    { key: "/qms/alerts", label: "告警配置", roles: ["SUPER_ADMIN"] },
+    { key: "/qms/system", label: "系统配置", roles: ["SUPER_ADMIN"] },
+  ]},
   { key: "/orders", icon: <UnorderedListOutlined />, label: "订单管理", roles: ["SUPER_ADMIN"] },
   { key: "/recharge-records", icon: <PayCircleOutlined />, label: "充值记录", roles: ["SUPER_ADMIN"] },
   { key: "/invitation-codes", icon: <GiftOutlined />, label: "邀请码管理", roles: ["SUPER_ADMIN"] },
@@ -97,6 +119,7 @@ const MainLayout = () => {
   }
 
   const userRole: Role = user.role || "USER";
+  const isQmsPage = location.pathname === "/qms" || location.pathname.startsWith("/qms/");
 
   const handleLogout = () => {
     localStorage.removeItem("admin_token");
@@ -136,7 +159,7 @@ const MainLayout = () => {
           theme="dark"
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={["enterprise-mgmt"]}
+          defaultOpenKeys={["enterprise-mgmt", "qms-mgmt"]}
           onClick={({ key }) => navigate(key)}
           items={menuItems}
         />
@@ -166,6 +189,8 @@ const MainLayout = () => {
               return <Breadcrumb.Item>页面</Breadcrumb.Item>;
             })()}
           </Breadcrumb>
+
+          {isQmsPage && <QmsTenantSelector />}
 
           <Dropdown menu={{ items: userMenuItems, onClick: ({ key }) => key === "logout" && handleLogout() }} placement="bottomRight">
             <div className="admin-user">
@@ -204,6 +229,15 @@ const App = () => {
           <Route path="users" element={<UserList />} />
           <Route path="skills" element={<SkillsList assetType="skills" />} />
           <Route path="assistants" element={<SkillsList assetType="assistants" />} />
+          <Route path="qms" element={<QmsDashboard />} />
+          <Route path="qms/user-stats" element={<QmsUserStats />} />
+          <Route path="qms/conversations" element={<QmsConversations />} />
+          <Route path="qms/performance" element={<QmsPerformance />} />
+          <Route path="qms/installs" element={<QmsInstalls />} />
+          <Route path="qms/crash-stats" element={<QmsCrashStats />} />
+          <Route path="qms/crash-issues" element={<QmsCrashIssues />} />
+          <Route path="qms/alerts" element={<QmsAlerts />} />
+          <Route path="qms/system" element={<QmsSystem />} />
           <Route path="orders" element={<RechargeList />} />
           <Route path="recharge-records" element={<RechargeRecords />} />
           <Route path="invitation-codes" element={<InvitationCodeList />} />
