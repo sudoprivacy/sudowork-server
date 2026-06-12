@@ -20,11 +20,21 @@ import { userRoutes } from "./routes/user.js";
 import { miscRoutes } from "./routes/misc.js";
 import { rechargeRoutes } from "./routes/recharge.js";
 import { proxyRoutes } from "./routes/external-proxy.js";
+import { initDatabase as initQmsDatabase } from "./qms/db/init.js";
+import qmsRoutes from "./qms/routes/index.js";
+import { createScheduler, setSchedulerInstance } from "./qms/tasks/index.js";
+import { corsMiddleware as qmsCorsMiddleware, errorHandler as qmsErrorHandler, requestLogger as qmsRequestLogger } from "./qms/middleware/index.js";
+
+const qmsEnabled = process.env.QMS_ENABLED === "true";
 
 // Initialize database
 initSchema();
 runMigrations();
 await initDatabase();
+
+if (qmsEnabled) {
+  await initQmsDatabase();
+}
 
 // Create app
 const app = new Hono();
@@ -63,6 +73,22 @@ app.route("/api/v1/admin", adminRoutes);
 app.route("/api/v1/auth", authRoutes);
 app.route("/api/v1/user", userRoutes);
 app.route("/api/v1/recharge", rechargeRoutes);
+if (qmsEnabled) {
+  const qmsApp = new Hono();
+
+  qmsApp.use("*", qmsErrorHandler);
+  qmsApp.use("*", qmsRequestLogger);
+  qmsApp.use("*", qmsCorsMiddleware);
+  qmsApp.route("/telemetry", qmsRoutes.telemetry);
+  qmsApp.route("/crash", qmsRoutes.crash);
+  qmsApp.route("/qms/dashboard", qmsRoutes.dashboard);
+  qmsApp.route("/qms/user-stats", qmsRoutes.userStats);
+  qmsApp.route("/qms/crash", qmsRoutes.crash);
+  qmsApp.route("/qms/alerts", qmsRoutes.alerts);
+  qmsApp.route("/qms/system", qmsRoutes.system);
+
+  app.route("/api/v1", qmsApp);
+}
 app.route("/api/v1", miscRoutes);
 
 // SPA fallback - serve index.html for all other routes (must be after all API routes)
@@ -74,4 +100,10 @@ app.get("/*", async (c) => {
 });
 
 // Start server
+if (qmsEnabled) {
+  const qmsScheduler = createScheduler();
+  setSchedulerInstance(qmsScheduler);
+  qmsScheduler.start();
+}
+
 export default { port: 3000, fetch: app.fetch };

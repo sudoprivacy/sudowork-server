@@ -14,6 +14,12 @@ services:
       # 容器间通信配置（必须在 environment 中指定）
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - QMS_ENABLED=true
+      - PG_DB_HOST=postgres
+      - PG_DB_PORT=5432
+      - PG_DB_NAME=sudowork
+      - PG_DB_USER=postgres
+      - PG_DB_PASSWORD=${PG_DB_PASSWORD:-postgres}
       - NODE_ENV=production
     volumes:
       # Persist SQLite database
@@ -23,10 +29,12 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - sudowork-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/" ]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -45,11 +53,33 @@ services:
     networks:
       - sudowork-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  # ============================================
+  # Shared PostgreSQL/TimescaleDB Service
+  # ============================================
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: sudowork-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=sudowork
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${PG_DB_PASSWORD:-postgres}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - sudowork-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d sudowork" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 # ============================================
 # Networks
@@ -66,3 +96,6 @@ volumes:
   redis-data:
     driver: local
     name: sudowork-redis-data
+  postgres-data:
+    driver: local
+    name: sudowork-postgres-data
