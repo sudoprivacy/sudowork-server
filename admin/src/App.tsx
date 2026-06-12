@@ -9,6 +9,7 @@ import {
   Outlet,
 } from "react-router-dom";
 import { Layout, Menu, Avatar, Dropdown, Breadcrumb, message } from "antd";
+import type { MenuProps } from "antd";
 import {
   DashboardOutlined,
   AppstoreOutlined,
@@ -48,16 +49,44 @@ const { Sider, Content, Header } = Layout;
 
 type Role = "SUPER_ADMIN" | "ENTERPRISE_ADMIN" | "USER";
 
+interface AdminUser {
+  role?: Role;
+  nickname?: string;
+}
+
 interface MenuItemConfig {
   key: string;
   icon?: React.ReactNode;
   label: string;
   roles: Role[];
+  hidden?: boolean;
   children?: Array<{
     key: string;
     label: string;
     roles: Role[];
+    hidden?: boolean;
   }>;
+}
+
+function isRole(value: unknown): value is Role {
+  return value === "SUPER_ADMIN" || value === "ENTERPRISE_ADMIN" || value === "USER";
+}
+
+function parseAdminUser(value: string | null): AdminUser {
+  if (!value) return {};
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+
+    const data = parsed as Record<string, unknown>;
+    return {
+      role: isRole(data.role) ? data.role : undefined,
+      nickname: typeof data.nickname === "string" ? data.nickname : undefined,
+    };
+  } catch {
+    return {};
+  }
 }
 
 const menuConfig: MenuItemConfig[] = [
@@ -69,16 +98,16 @@ const menuConfig: MenuItemConfig[] = [
   { key: "/users", icon: <UserOutlined />, label: "用户管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "/skills", icon: <AppstoreOutlined />, label: "专属技能", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "/assistants", icon: <RobotOutlined />, label: "专属助手", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
-  { key: "qms-mgmt", icon: <BarChartOutlined />, label: "QMS", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"], children: [
+  { key: "qms-mgmt", icon: <BarChartOutlined />, label: "质量管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"], children: [
     { key: "/qms", label: "总览", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
     { key: "/qms/user-stats", label: "用户统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
     { key: "/qms/conversations", label: "会话质量", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
-    { key: "/qms/performance", label: "性能指标", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+    { key: "/qms/performance", label: "性能指标", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"], hidden: true },
     { key: "/qms/installs", label: "安装统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
     { key: "/qms/crash-stats", label: "崩溃统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
-    { key: "/qms/crash-issues", label: "崩溃问题", roles: ["SUPER_ADMIN"] },
-    { key: "/qms/alerts", label: "告警配置", roles: ["SUPER_ADMIN"] },
-    { key: "/qms/system", label: "系统配置", roles: ["SUPER_ADMIN"] },
+    { key: "/qms/crash-issues", label: "崩溃问题", roles: ["SUPER_ADMIN"], hidden: true },
+    { key: "/qms/alerts", label: "告警配置", roles: ["SUPER_ADMIN"], hidden: true },
+    { key: "/qms/system", label: "配置", roles: ["SUPER_ADMIN"] },
   ]},
   { key: "/orders", icon: <UnorderedListOutlined />, label: "订单管理", roles: ["SUPER_ADMIN"] },
   { key: "/recharge-records", icon: <PayCircleOutlined />, label: "充值记录", roles: ["SUPER_ADMIN"] },
@@ -94,15 +123,14 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
   // 禁止普通用户登录管理后台
   const userStr = localStorage.getItem("admin_user");
-  try {
-    const user = JSON.parse(userStr || "{}");
-    if (user.role === "USER") {
-      localStorage.removeItem("admin_token");
-      localStorage.removeItem("admin_user");
-      message.error("普通用户无权访问管理后台");
-      return <Navigate to="/login" replace />;
-    }
-  } catch {}
+  const user = parseAdminUser(userStr);
+  if (user.role === "USER") {
+    localStorage.removeItem("admin_token");
+    localStorage.removeItem("admin_user");
+    message.error("普通用户无权访问管理后台");
+    return <Navigate to="/login" replace />;
+  }
+
   return <>{children}</>;
 };
 
@@ -110,16 +138,11 @@ const MainLayout = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const userStr = localStorage.getItem("admin_user");
-  let user: any = {};
-  try {
-    const parsed = userStr ? JSON.parse(userStr) : null;
-    user = parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    user = {};
-  }
+  const user = parseAdminUser(userStr);
 
   const userRole: Role = user.role || "USER";
   const isQmsPage = location.pathname === "/qms" || location.pathname.startsWith("/qms/");
+  const canSelectQmsTenant = isQmsPage && userRole === "SUPER_ADMIN";
 
   const handleLogout = () => {
     localStorage.removeItem("admin_token");
@@ -129,17 +152,27 @@ const MainLayout = () => {
   };
 
   // 根据用户角色过滤菜单
-  const menuItems = (menuConfig
-    .filter((item) => item.roles.includes(userRole))
+  const visibleMenuConfig = menuConfig
+    .filter((item) => item.roles.includes(userRole) && !item.hidden)
     .map((item) => {
       if ('children' in item && item.children) {
         return {
           ...item,
-          children: item.children.filter((child) => child.roles.includes(userRole)),
+          children: item.children.filter((child) => child.roles.includes(userRole) && !child.hidden),
         };
       }
       return item;
-    })) as any;
+    });
+
+  const menuItems: MenuProps["items"] = visibleMenuConfig.map((item) => ({
+    key: item.key,
+    icon: item.icon,
+    label: item.label,
+    children: item.children?.map((child) => ({
+      key: child.key,
+      label: child.label,
+    })),
+  }));
 
   const userMenuItems = [
     {
@@ -170,7 +203,7 @@ const MainLayout = () => {
           <Breadcrumb className="admin-breadcrumb">
             <Breadcrumb.Item>首页</Breadcrumb.Item>
             {location.pathname !== "/" && (() => {
-              for (const item of menuItems) {
+              for (const item of visibleMenuConfig) {
                 if ('children' in item && item.children) {
                   for (const child of item.children) {
                     if (child.key === location.pathname) {
@@ -190,7 +223,7 @@ const MainLayout = () => {
             })()}
           </Breadcrumb>
 
-          {isQmsPage && <QmsTenantSelector />}
+          {canSelectQmsTenant && <QmsTenantSelector />}
 
           <Dropdown menu={{ items: userMenuItems, onClick: ({ key }) => key === "logout" && handleLogout() }} placement="bottomRight">
             <div className="admin-user">

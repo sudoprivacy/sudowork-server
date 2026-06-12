@@ -17,6 +17,20 @@ interface AdminUser {
   tenant_id?: string | null;
 }
 
+interface EnterprisesResponse {
+  success: boolean;
+  data?: Enterprise[];
+}
+
+function isEnterprisesResponse(value: unknown): value is EnterprisesResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const response = value as Partial<EnterprisesResponse>;
+  return response.success === true;
+}
+
 function getAdminUser(): AdminUser {
   try {
     const user = JSON.parse(localStorage.getItem("admin_user") || "{}");
@@ -41,9 +55,9 @@ export default function TenantSelector() {
     const loadEnterprises = async () => {
       setLoading(true);
       try {
-        const response = await adminApi.getEnterprises();
-        if ((response as any).success) {
-          setEnterprises((response as any).data || []);
+        const response: unknown = await adminApi.getEnterprises();
+        if (isEnterprisesResponse(response)) {
+          setEnterprises(response.data || []);
         }
       } finally {
         setLoading(false);
@@ -54,17 +68,12 @@ export default function TenantSelector() {
   }, [isSuperAdmin]);
 
   if (!isSuperAdmin) {
-    return (
-      <Space size={6}>
-        <Typography.Text type="secondary">QMS 租户</Typography.Text>
-        <Tag color="blue">{user.tenant_id || "未绑定"}</Tag>
-      </Space>
-    );
+    return null;
   }
 
   return (
     <Space size={8}>
-      <Typography.Text type="secondary">QMS 租户</Typography.Text>
+      <Typography.Text type="secondary">租户</Typography.Text>
       <Select
         value={tenantId || ""}
         loading={loading}

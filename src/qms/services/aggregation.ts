@@ -10,6 +10,14 @@ import { db } from "../db/index.js";
 import { isTimescaleDBAvailable } from "../db/schema.js";
 import { logger } from "../utils/logger.js";
 
+function userIdentityColumn() {
+  return db`COALESCE(NULLIF(user_id, ''), NULLIF(user_phone, ''))`;
+}
+
+function hasUserIdentityFilter() {
+  return db`AND ${userIdentityColumn()} IS NOT NULL`;
+}
+
 /**
  * Check if a table is a TimescaleDB continuous aggregate (materialized view)
  */
@@ -333,7 +341,7 @@ class AggregationService {
     const aggregated = await db`
       WITH conversation_stats AS (
         SELECT
-          user_id,
+          ${userIdentityColumn()} as user_id,
           org_id,
           tenant_id,
           login_mode,
@@ -349,12 +357,12 @@ class AggregationService {
           AVG(duration_ms)::BIGINT as avg_duration_ms
         FROM telemetry_conversations
         WHERE created_at >= ${dayStart} AND created_at < ${dayEnd}
-          AND user_id IS NOT NULL
-        GROUP BY user_id, org_id, tenant_id, login_mode
+          ${hasUserIdentityFilter()}
+        GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
       ),
       turn_token_stats AS (
         SELECT
-          user_id,
+          ${userIdentityColumn()} as user_id,
           org_id,
           tenant_id,
           login_mode,
@@ -363,8 +371,8 @@ class AggregationService {
           COALESCE(SUM(output_tokens), 0)::BIGINT as output_tokens
         FROM telemetry_turns
         WHERE created_at >= ${dayStart} AND created_at < ${dayEnd}
-          AND user_id IS NOT NULL
-        GROUP BY user_id, org_id, tenant_id, login_mode
+          ${hasUserIdentityFilter()}
+        GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
       )
       SELECT
         c.user_id,
@@ -426,7 +434,7 @@ class AggregationService {
   private async aggregateUserTurnData(bucket: Date, dayStart: Date, dayEnd: Date): Promise<void> {
     const aggregated = await db`
       SELECT
-        user_id,
+        ${userIdentityColumn()} as user_id,
         org_id,
         tenant_id,
         login_mode,
@@ -441,8 +449,8 @@ class AggregationService {
         AVG(duration_ms)::BIGINT as avg_duration_ms
       FROM telemetry_turns
       WHERE created_at >= ${dayStart} AND created_at < ${dayEnd}
-        AND user_id IS NOT NULL
-      GROUP BY user_id, org_id, tenant_id, login_mode
+        ${hasUserIdentityFilter()}
+      GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
     `;
 
     if (aggregated.length === 0) {
@@ -481,7 +489,7 @@ class AggregationService {
   private async aggregateUserStepData(bucket: Date, dayStart: Date, dayEnd: Date): Promise<void> {
     const aggregated = await db`
       SELECT
-        user_id,
+        ${userIdentityColumn()} as user_id,
         org_id,
         tenant_id,
         login_mode,
@@ -494,8 +502,8 @@ class AggregationService {
         AVG(COALESCE(duration_ms, 0))::BIGINT as avg_duration_ms
       FROM telemetry_steps
       WHERE created_at >= ${dayStart} AND created_at < ${dayEnd}
-        AND user_id IS NOT NULL
-      GROUP BY user_id, org_id, tenant_id, login_mode, step_type
+        ${hasUserIdentityFilter()}
+      GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode, step_type
     `;
 
     if (aggregated.length === 0) {

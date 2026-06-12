@@ -55,6 +55,11 @@ function normalizeCrashEvent(event: CrashEvent, common?: Partial<CrashEvent>): C
   ) as unknown as CrashEvent;
 }
 
+function hasTenantId(event: CrashEvent): boolean {
+  const tenantId = (event as { tenant_id?: unknown }).tenant_id;
+  return typeof tenantId === "string" && tenantId.trim().length > 0;
+}
+
 // ============================================
 // Data Upload Endpoints
 // ============================================
@@ -83,6 +88,17 @@ crash.post("/events/batch", apiKeyAuth, decryptMiddleware, async (c) => {
       const event = normalizeCrashEvent(rawEvent, bodyRecord);
       return { event, index };
     });
+    const missingTenantRefs = normalizedEvents.flatMap(({ event, index }) => hasTenantId(event) ? [] : [`events[${index}]`]);
+    if (missingTenantRefs.length > 0) {
+      return c.json({
+        success: false,
+        error: {
+          code: "TENANT_ID_REQUIRED",
+          message: "tenant_id is required for QMS crash ingestion",
+          items: missingTenantRefs,
+        },
+      }, 400);
+    }
 
     let received = 0;
     const errors: string[] = [];
@@ -131,6 +147,15 @@ crash.post("/events", apiKeyAuth, async (c) => {
 
     if (!event.type || !event.timestamp || !event.version || !event.platform) {
       return c.json({ success: false, error: "Missing required fields" }, 400);
+    }
+    if (!hasTenantId(event)) {
+      return c.json({
+        success: false,
+        error: {
+          code: "TENANT_ID_REQUIRED",
+          message: "tenant_id is required for QMS crash ingestion",
+        },
+      }, 400);
     }
 
     const fingerprint = generateFingerprint(event);

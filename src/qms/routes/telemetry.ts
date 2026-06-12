@@ -3,7 +3,7 @@
  * Uses Redis queue for async batch insertion
  */
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { apiKeyAuth } from "../middleware/auth.js";
 import { decryptMiddleware } from "../middleware/decrypt.js";
 import { pushToQueue, getQueueStats } from "../services/queue.js";
@@ -43,6 +43,24 @@ function mergeCommonFields<T extends Record<string, unknown>>(
   }, authTenantId, common);
 }
 
+function hasTenantId(item: Record<string, unknown>): boolean {
+  return typeof item.tenant_id === "string" && item.tenant_id.trim().length > 0;
+}
+
+function missingTenantResponse(c: Context, items: string[]) {
+  return c.json(
+    {
+      success: false,
+      error: {
+        code: "TENANT_ID_REQUIRED",
+        message: "tenant_id is required for QMS telemetry ingestion",
+        items,
+      },
+    },
+    400
+  );
+}
+
 // All telemetry endpoints require API key authentication
 telemetry.use("/*", apiKeyAuth);
 
@@ -64,6 +82,8 @@ telemetry.post("/batch", decryptMiddleware, async (c) => {
 
   // Push to Redis queues (async, non-blocking)
   try {
+    const missingTenantRefs: string[] = [];
+
     // Handle events array format (from newer clients)
     if (body.events && Array.isArray(body.events)) {
       const perfEvents: PerfRawData[] = [];
@@ -72,7 +92,7 @@ telemetry.post("/batch", decryptMiddleware, async (c) => {
       const stepEvents: StepRawData[] = [];
       const installEvents: InstallRawData[] = [];
 
-      for (const event of body.events) {
+      for (const [index, event] of body.events.entries()) {
         // Event format: { type, timestamp, version, platform, arch, org_id, user_id, tenant_id, login_mode, agent_type, data }
         // Need to merge top-level fields into data to match expected format
         const evt = event as {
@@ -113,6 +133,10 @@ telemetry.post("/batch", decryptMiddleware, async (c) => {
           evt.data,
           body as unknown as Record<string, unknown>,
         );
+        if (!hasTenantId(normalizedData)) {
+          missingTenantRefs.push(`events[${index}]`);
+          continue;
+        }
 
         if (evt.type === "perf") {
           perfEvents.push(normalizedData as PerfRawData);
@@ -125,6 +149,10 @@ telemetry.post("/batch", decryptMiddleware, async (c) => {
         } else if (evt.type === "install") {
           installEvents.push(normalizedData as InstallRawData);
         }
+      }
+
+      if (missingTenantRefs.length > 0) {
+        return missingTenantResponse(c, missingTenantRefs);
       }
 
       if (perfEvents.length > 0) {
@@ -158,35 +186,40 @@ telemetry.post("/batch", decryptMiddleware, async (c) => {
         user_nickname: body.user_nickname,
         user_phone: body.user_phone,
       };
+      const perfItems = (body.perf || []).map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as PerfRawData);
+      const conversationItems = (body.conversations || []).map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as ConversationRawData);
+      const turnItems = (body.turns || []).map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as TurnRawData);
+      const stepItems = (body.steps || []).map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as StepRawData);
+      const installItems = (body.installs || []).map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as InstallRawData);
 
-      if (body.perf && body.perf.length > 0) {
-        const items = body.perf.map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as PerfRawData);
-        await pushToQueue("perf", items);
-        results.perf = items.length;
+      missingTenantRefs.push(...perfItems.flatMap((item, index) => hasTenantId(item as unknown as Record<string, unknown>) ? [] : [`perf[${index}]`]));
+      missingTenantRefs.push(...conversationItems.flatMap((item, index) => hasTenantId(item as unknown as Record<string, unknown>) ? [] : [`conversations[${index}]`]));
+      missingTenantRefs.push(...turnItems.flatMap((item, index) => hasTenantId(item as unknown as Record<string, unknown>) ? [] : [`turns[${index}]`]));
+      missingTenantRefs.push(...stepItems.flatMap((item, index) => hasTenantId(item as unknown as Record<string, unknown>) ? [] : [`steps[${index}]`]));
+      missingTenantRefs.push(...installItems.flatMap((item, index) => hasTenantId(item as unknown as Record<string, unknown>) ? [] : [`installs[${index}]`]));
+      if (missingTenantRefs.length > 0) {
+        return missingTenantResponse(c, missingTenantRefs);
       }
 
-      if (body.conversations && body.conversations.length > 0) {
-        const items = body.conversations.map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as ConversationRawData);
-        await pushToQueue("conversations", items);
-        results.conversations = items.length;
+      if (perfItems.length > 0) {
+        await pushToQueue("perf", perfItems);
+        results.perf = perfItems.length;
       }
-
-      if (body.turns && body.turns.length > 0) {
-        const items = body.turns.map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as TurnRawData);
-        await pushToQueue("turns", items);
-        results.turns = items.length;
+      if (conversationItems.length > 0) {
+        await pushToQueue("conversations", conversationItems);
+        results.conversations = conversationItems.length;
       }
-
-      if (body.steps && body.steps.length > 0) {
-        const items = body.steps.map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as StepRawData);
-        await pushToQueue("steps", items);
-        results.steps = items.length;
+      if (turnItems.length > 0) {
+        await pushToQueue("turns", turnItems);
+        results.turns = turnItems.length;
       }
-
-      if (body.installs && body.installs.length > 0) {
-        const items = body.installs.map((item) => mergeCommonFields(item as unknown as Record<string, unknown>, common, authTenantId) as unknown as InstallRawData);
-        await pushToQueue("installs", items);
-        results.installs = items.length;
+      if (stepItems.length > 0) {
+        await pushToQueue("steps", stepItems);
+        results.steps = stepItems.length;
+      }
+      if (installItems.length > 0) {
+        await pushToQueue("installs", installItems);
+        results.installs = installItems.length;
       }
     }
 
@@ -230,6 +263,7 @@ telemetry.get("/queue/stats", async (c) => {
 telemetry.post("/perf", async (c) => {
   const authTenantId = await getTenantIdFromOptionalJwt(c);
   const body = withResolvedTenantId(await c.req.json<PerfRawData>() as unknown as Record<string, unknown>, authTenantId) as unknown as PerfRawData;
+  if (!hasTenantId(body as unknown as Record<string, unknown>)) return missingTenantResponse(c, ["perf"]);
 
   try {
     await pushToQueue("perf", [body]);
@@ -257,6 +291,7 @@ telemetry.post("/perf", async (c) => {
 telemetry.post("/conversation", async (c) => {
   const authTenantId = await getTenantIdFromOptionalJwt(c);
   const body = withResolvedTenantId(await c.req.json<ConversationRawData>() as unknown as Record<string, unknown>, authTenantId) as unknown as ConversationRawData;
+  if (!hasTenantId(body as unknown as Record<string, unknown>)) return missingTenantResponse(c, ["conversation"]);
 
   try {
     await pushToQueue("conversations", [body]);
@@ -284,6 +319,7 @@ telemetry.post("/conversation", async (c) => {
 telemetry.post("/install", async (c) => {
   const authTenantId = await getTenantIdFromOptionalJwt(c);
   const body = withResolvedTenantId(await c.req.json<InstallRawData>() as unknown as Record<string, unknown>, authTenantId) as unknown as InstallRawData;
+  if (!hasTenantId(body as unknown as Record<string, unknown>)) return missingTenantResponse(c, ["install"]);
 
   try {
     await pushToQueue("installs", [body]);

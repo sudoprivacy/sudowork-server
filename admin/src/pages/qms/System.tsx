@@ -61,6 +61,10 @@ interface ErrorCodeDefinition {
   trigger_scenario: string;
 }
 
+const SHOW_SYSTEM_STATUS = false;
+const SHOW_MEMORY_DETAILS = false;
+const SHOW_NOTIFICATION_CONFIG = false;
+
 export default function System() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [notificationConfig, setNotificationConfig] = useState<NotificationConfig | null>(null);
@@ -309,46 +313,50 @@ export default function System() {
       ) : (
         <>
           {/* System Stats */}
-          <Card title="系统状态" style={{ marginBottom: 16 }}>
-            <Row gutter={16}>
-              <Col span={6}>
-                <Statistic title="版本" value={stats?.version || "-"} />
-              </Col>
-              <Col span={6}>
-                <Statistic title="平台" value={stats?.platform || "-"} />
-              </Col>
-              <Col span={6}>
-                <Statistic
-                  title="内存使用"
-                  value={formatBytes(stats?.memory_usage?.heap_used || 0)}
-                />
-              </Col>
-              <Col span={6}>
-                <Statistic
-                  title="总内存"
-                  value={formatBytes(stats?.memory_usage?.heap_total || 0)}
-                />
-              </Col>
-            </Row>
-          </Card>
+          {SHOW_SYSTEM_STATUS && (
+            <Card title="系统状态" style={{ marginBottom: 16 }}>
+              <Row gutter={16}>
+                <Col span={6}>
+                  <Statistic title="版本" value={stats?.version || "-"} />
+                </Col>
+                <Col span={6}>
+                  <Statistic title="平台" value={stats?.platform || "-"} />
+                </Col>
+                <Col span={6}>
+                  <Statistic
+                    title="内存使用"
+                    value={formatBytes(stats?.memory_usage?.heap_used || 0)}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Statistic
+                    title="总内存"
+                    value={formatBytes(stats?.memory_usage?.heap_total || 0)}
+                  />
+                </Col>
+              </Row>
+            </Card>
+          )}
 
           {/* Memory Details */}
-          <Card title="内存详情" style={{ marginBottom: 16 }}>
-            <Descriptions bordered column={2}>
-              <Descriptions.Item label="RSS">
-                {formatBytes(stats?.memory_usage?.rss || 0)}
-              </Descriptions.Item>
-              <Descriptions.Item label="Heap Total">
-                {formatBytes(stats?.memory_usage?.heap_total || 0)}
-              </Descriptions.Item>
-              <Descriptions.Item label="Heap Used">
-                {formatBytes(stats?.memory_usage?.heap_used || 0)}
-              </Descriptions.Item>
-              <Descriptions.Item label="External">
-                {formatBytes(stats?.memory_usage?.external || 0)}
-              </Descriptions.Item>
-            </Descriptions>
-          </Card>
+          {SHOW_MEMORY_DETAILS && (
+            <Card title="内存详情" style={{ marginBottom: 16 }}>
+              <Descriptions bordered column={2}>
+                <Descriptions.Item label="RSS">
+                  {formatBytes(stats?.memory_usage?.rss || 0)}
+                </Descriptions.Item>
+                <Descriptions.Item label="Heap Total">
+                  {formatBytes(stats?.memory_usage?.heap_total || 0)}
+                </Descriptions.Item>
+                <Descriptions.Item label="Heap Used">
+                  {formatBytes(stats?.memory_usage?.heap_used || 0)}
+                </Descriptions.Item>
+                <Descriptions.Item label="External">
+                  {formatBytes(stats?.memory_usage?.external || 0)}
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+          )}
 
           {/* Aggregation Tasks */}
           <Card
@@ -496,9 +504,11 @@ export default function System() {
           )}
 
           {/* Notification Config */}
-          <Card title="通知配置" style={{ marginBottom: 16 }}>
-            <Collapse items={collapseItems} />
-          </Card>
+          {SHOW_NOTIFICATION_CONFIG && (
+            <Card title="通知配置" style={{ marginBottom: 16 }}>
+              <Collapse items={collapseItems} />
+            </Card>
+          )}
 
           {/* Error Code Definitions */}
           <Card title="错误码定义" style={{ marginBottom: 16 }}>

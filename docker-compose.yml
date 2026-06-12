@@ -15,12 +15,11 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - QMS_ENABLED=true
-      - QMS_DB_HOST=postgres
-      - QMS_DB_PORT=5432
-      - QMS_DB_NAME=sudowork_qms
-      - QMS_DB_USER=postgres
-      - QMS_REDIS_HOST=redis
-      - QMS_REDIS_PORT=6379
+      - PG_DB_HOST=postgres
+      - PG_DB_PORT=5432
+      - PG_DB_NAME=sudowork
+      - PG_DB_USER=postgres
+      - PG_DB_PASSWORD=${PG_DB_PASSWORD:-postgres}
       - NODE_ENV=production
     volumes:
       # Persist SQLite database
@@ -35,7 +34,7 @@ services:
     networks:
       - sudowork-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/" ]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -54,29 +53,29 @@ services:
     networks:
       - sudowork-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 3s
       retries: 3
       start_period: 5s
 
   # ============================================
-  # PostgreSQL Service for QMS telemetry
+  # Shared PostgreSQL/TimescaleDB Service
   # ============================================
   postgres:
     image: timescale/timescaledb:latest-pg16
-    container_name: sudowork-qms-postgres
+    container_name: sudowork-postgres
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=sudowork_qms
+      - POSTGRES_DB=sudowork
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${QMS_DB_PASSWORD:-postgres}
+      - POSTGRES_PASSWORD=${PG_DB_PASSWORD:-postgres}
     volumes:
-      - qms-postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     networks:
       - sudowork-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d sudowork_qms"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d sudowork" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -97,6 +96,6 @@ volumes:
   redis-data:
     driver: local
     name: sudowork-redis-data
-  qms-postgres-data:
+  postgres-data:
     driver: local
-    name: sudowork-qms-postgres-data
+    name: sudowork-postgres-data

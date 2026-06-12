@@ -23,13 +23,16 @@ import { proxyRoutes } from "./routes/external-proxy.js";
 import { initDatabase as initQmsDatabase } from "./qms/db/init.js";
 import qmsRoutes from "./qms/routes/index.js";
 import { createScheduler, setSchedulerInstance } from "./qms/tasks/index.js";
+import { corsMiddleware as qmsCorsMiddleware, errorHandler as qmsErrorHandler, requestLogger as qmsRequestLogger } from "./qms/middleware/index.js";
+
+const qmsEnabled = process.env.QMS_ENABLED === "true";
 
 // Initialize database
 initSchema();
 runMigrations();
 await initDatabase();
 
-if (process.env.QMS_ENABLED !== "false") {
+if (qmsEnabled) {
   await initQmsDatabase();
 }
 
@@ -70,14 +73,21 @@ app.route("/api/v1/admin", adminRoutes);
 app.route("/api/v1/auth", authRoutes);
 app.route("/api/v1/user", userRoutes);
 app.route("/api/v1/recharge", rechargeRoutes);
-if (process.env.QMS_ENABLED !== "false") {
-  app.route("/api/v1/telemetry", qmsRoutes.telemetry);
-  app.route("/api/v1/crash", qmsRoutes.crash);
-  app.route("/api/v1/qms/dashboard", qmsRoutes.dashboard);
-  app.route("/api/v1/qms/user-stats", qmsRoutes.userStats);
-  app.route("/api/v1/qms/crash", qmsRoutes.crash);
-  app.route("/api/v1/qms/alerts", qmsRoutes.alerts);
-  app.route("/api/v1/qms/system", qmsRoutes.system);
+if (qmsEnabled) {
+  const qmsApp = new Hono();
+
+  qmsApp.use("*", qmsErrorHandler);
+  qmsApp.use("*", qmsRequestLogger);
+  qmsApp.use("*", qmsCorsMiddleware);
+  qmsApp.route("/telemetry", qmsRoutes.telemetry);
+  qmsApp.route("/crash", qmsRoutes.crash);
+  qmsApp.route("/qms/dashboard", qmsRoutes.dashboard);
+  qmsApp.route("/qms/user-stats", qmsRoutes.userStats);
+  qmsApp.route("/qms/crash", qmsRoutes.crash);
+  qmsApp.route("/qms/alerts", qmsRoutes.alerts);
+  qmsApp.route("/qms/system", qmsRoutes.system);
+
+  app.route("/api/v1", qmsApp);
 }
 app.route("/api/v1", miscRoutes);
 
@@ -90,7 +100,7 @@ app.get("/*", async (c) => {
 });
 
 // Start server
-if (process.env.QMS_ENABLED !== "false") {
+if (qmsEnabled) {
   const qmsScheduler = createScheduler();
   setSchedulerInstance(qmsScheduler);
   qmsScheduler.start();

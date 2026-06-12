@@ -777,33 +777,20 @@ dashboard.get("/conversations/errors/trend", async (c) => {
 
   const errorCode = query.error_code;
 
-  // Aggregate across all dimensions (version, platform, arch) to get overall daily stats
-  let data;
-  if (errorCode) {
-    data = await db`
-      SELECT
-        bucket as date,
-        error_code,
-        SUM(count)::INTEGER as count
-      FROM telemetry_conversation_errors_daily
-      WHERE bucket >= ${startTime} AND bucket < ${endTime}
-            ${tenantId ? db`AND tenant_id = ${tenantId}` : db``} AND error_code = ${errorCode}
-      GROUP BY bucket, error_code
-      ORDER BY bucket ASC
-    `;
-  } else {
-    data = await db`
-      SELECT
-        bucket as date,
-        error_code,
-        SUM(count)::INTEGER as count
-      FROM telemetry_conversation_errors_daily
-      WHERE bucket >= ${startTime} AND bucket < ${endTime}
-            ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
-      GROUP BY bucket, error_code
-      ORDER BY bucket ASC
-    `;
-  }
+  const data = await db`
+    SELECT
+      DATE_TRUNC('day', timestamp) as date,
+      error_code,
+      COUNT(*)::INTEGER as count
+    FROM telemetry_conversations
+    WHERE timestamp >= ${startTime} AND timestamp < ${endTime}
+      ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
+      ${errorCode ? db`AND error_code = ${errorCode}` : db``}
+      AND status = 'error'
+      AND error_code IS NOT NULL
+    GROUP BY DATE_TRUNC('day', timestamp), error_code
+    ORDER BY date ASC
+  `;
 
   const formattedData = data.map((r) => ({
     date: r.date instanceof Date ? r.date.toISOString().split("T")[0]! : r.date,
@@ -833,58 +820,67 @@ dashboard.get("/conversations/trend", async (c) => {
     // Group by platform + arch
     data = await db`
       SELECT
-        bucket as date,
+        DATE_TRUNC('day', timestamp) as date,
         platform,
         arch,
-        SUM(success_count)::INTEGER as success_count,
-        SUM(error_count)::INTEGER as error_count,
-        SUM(user_cancel_count)::INTEGER as user_cancel_count,
-        SUM(total_count)::INTEGER as total_count,
-        AVG(avg_duration_ms)::INTEGER as avg_duration_ms,
-        AVG(avg_tokens)::INTEGER as avg_tokens,
-        COALESCE(ROUND((SUM(success_count)::DECIMAL / NULLIF(SUM(success_count) + SUM(error_count), 0)) * 100), 100)::INTEGER as success_rate
-      FROM telemetry_conversations_daily
-      WHERE bucket >= ${startTime} AND bucket < ${endTime}
-            ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
-      GROUP BY bucket, platform, arch
-      ORDER BY bucket ASC, platform, arch
+        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::INTEGER as success_count,
+        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)::INTEGER as error_count,
+        SUM(CASE WHEN status = 'user_cancel' THEN 1 ELSE 0 END)::INTEGER as user_cancel_count,
+        COUNT(*)::INTEGER as total_count,
+        AVG(duration_ms)::INTEGER as avg_duration_ms,
+        AVG(tokens_used)::INTEGER as avg_tokens,
+        COALESCE(ROUND((SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::DECIMAL / NULLIF(
+          SUM(CASE WHEN status IN ('success', 'error') THEN 1 ELSE 0 END),
+          0
+        )) * 100), 100)::INTEGER as success_rate
+      FROM telemetry_conversations
+      WHERE timestamp >= ${startTime} AND timestamp < ${endTime}
+        ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
+      GROUP BY DATE_TRUNC('day', timestamp), platform, arch
+      ORDER BY date ASC, platform, arch
     `;
   } else if (dimension === "version") {
     // Group by version
     data = await db`
       SELECT
-        bucket as date,
+        DATE_TRUNC('day', timestamp) as date,
         version,
-        SUM(success_count)::INTEGER as success_count,
-        SUM(error_count)::INTEGER as error_count,
-        SUM(user_cancel_count)::INTEGER as user_cancel_count,
-        SUM(total_count)::INTEGER as total_count,
-        AVG(avg_duration_ms)::INTEGER as avg_duration_ms,
-        AVG(avg_tokens)::INTEGER as avg_tokens,
-        COALESCE(ROUND((SUM(success_count)::DECIMAL / NULLIF(SUM(success_count) + SUM(error_count), 0)) * 100), 100)::INTEGER as success_rate
-      FROM telemetry_conversations_daily
-      WHERE bucket >= ${startTime} AND bucket < ${endTime}
-            ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
-      GROUP BY bucket, version
-      ORDER BY bucket ASC, version
+        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::INTEGER as success_count,
+        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)::INTEGER as error_count,
+        SUM(CASE WHEN status = 'user_cancel' THEN 1 ELSE 0 END)::INTEGER as user_cancel_count,
+        COUNT(*)::INTEGER as total_count,
+        AVG(duration_ms)::INTEGER as avg_duration_ms,
+        AVG(tokens_used)::INTEGER as avg_tokens,
+        COALESCE(ROUND((SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::DECIMAL / NULLIF(
+          SUM(CASE WHEN status IN ('success', 'error') THEN 1 ELSE 0 END),
+          0
+        )) * 100), 100)::INTEGER as success_rate
+      FROM telemetry_conversations
+      WHERE timestamp >= ${startTime} AND timestamp < ${endTime}
+        ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
+      GROUP BY DATE_TRUNC('day', timestamp), version
+      ORDER BY date ASC, version
     `;
   } else {
     // Aggregate across all dimensions (default)
     data = await db`
       SELECT
-        bucket as date,
-        SUM(success_count)::INTEGER as success_count,
-        SUM(error_count)::INTEGER as error_count,
-        SUM(user_cancel_count)::INTEGER as user_cancel_count,
-        SUM(total_count)::INTEGER as total_count,
-        AVG(avg_duration_ms)::INTEGER as avg_duration_ms,
-        AVG(avg_tokens)::INTEGER as avg_tokens,
-        COALESCE(ROUND((SUM(success_count)::DECIMAL / NULLIF(SUM(success_count) + SUM(error_count), 0)) * 100), 100)::INTEGER as success_rate
-      FROM telemetry_conversations_daily
-      WHERE bucket >= ${startTime} AND bucket < ${endTime}
-            ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
-      GROUP BY bucket
-      ORDER BY bucket ASC
+        DATE_TRUNC('day', timestamp) as date,
+        SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::INTEGER as success_count,
+        SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)::INTEGER as error_count,
+        SUM(CASE WHEN status = 'user_cancel' THEN 1 ELSE 0 END)::INTEGER as user_cancel_count,
+        COUNT(*)::INTEGER as total_count,
+        AVG(duration_ms)::INTEGER as avg_duration_ms,
+        AVG(tokens_used)::INTEGER as avg_tokens,
+        COALESCE(ROUND((SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::DECIMAL / NULLIF(
+          SUM(CASE WHEN status IN ('success', 'error') THEN 1 ELSE 0 END),
+          0
+        )) * 100), 100)::INTEGER as success_rate
+      FROM telemetry_conversations
+      WHERE timestamp >= ${startTime} AND timestamp < ${endTime}
+        ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
+      GROUP BY DATE_TRUNC('day', timestamp)
+      ORDER BY date ASC
     `;
   }
 
@@ -919,17 +915,17 @@ dashboard.get("/conversations/dimensions", async (c) => {
 
   const platforms = await db`
     SELECT DISTINCT platform, arch
-    FROM telemetry_conversations_daily
-    WHERE bucket >= ${startTime} AND bucket < ${endTime}
-            ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
+    FROM telemetry_conversations
+    WHERE timestamp >= ${startTime} AND timestamp < ${endTime}
+      ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
     ORDER BY platform, arch
   `;
 
   const versions = await db`
     SELECT DISTINCT version
-    FROM telemetry_conversations_daily
-    WHERE bucket >= ${startTime} AND bucket < ${endTime}
-            ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
+    FROM telemetry_conversations
+    WHERE timestamp >= ${startTime} AND timestamp < ${endTime}
+      ${tenantId ? db`AND tenant_id = ${tenantId}` : db``}
     ORDER BY version DESC
   `;
 

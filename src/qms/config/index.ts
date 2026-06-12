@@ -14,22 +14,22 @@ export const config = {
 
   // Database (PostgreSQL + TimescaleDB)
   database: {
-    host: process.env.QMS_DB_HOST || process.env.DB_HOST || "localhost",
-    port: parseInt(process.env.QMS_DB_PORT || process.env.DB_PORT || "5432", 10),
-    name: process.env.QMS_DB_NAME || process.env.DB_NAME || "sudowork_qms",
-    user: process.env.QMS_DB_USER || process.env.DB_USER || "postgres",
-    password: process.env.QMS_DB_PASSWORD || process.env.DB_PASSWORD || "postgres",
-    maxConnections: parseInt(process.env.QMS_DB_MAX_CONNECTIONS || process.env.DB_MAX_CONNECTIONS || "20", 10),
-    idleTimeout: parseInt(process.env.QMS_DB_IDLE_TIMEOUT || process.env.DB_IDLE_TIMEOUT || "30000", 10),
-    connectTimeout: parseInt(process.env.QMS_DB_CONNECT_TIMEOUT || process.env.DB_CONNECT_TIMEOUT || "10000", 10),
+    host: process.env.PG_DB_HOST || "localhost",
+    port: parseInt(process.env.PG_DB_PORT || "5432", 10),
+    name: process.env.PG_DB_NAME || "sudowork",
+    user: process.env.PG_DB_USER || "postgres",
+    password: process.env.PG_DB_PASSWORD || "postgres",
+    maxConnections: parseInt(process.env.PG_DB_MAX_CONNECTIONS || "20", 10),
+    idleTimeout: parseInt(process.env.PG_DB_IDLE_TIMEOUT || "30000", 10),
+    connectTimeout: parseInt(process.env.PG_DB_CONNECT_TIMEOUT || "10000", 10),
   },
 
-  // Redis (for queue and session storage)
+  // Redis (shared sudowork-server Redis, namespaced by keyPrefix)
   redis: {
-    host: process.env.QMS_REDIS_HOST || process.env.REDIS_HOST || "localhost",
-    port: parseInt(process.env.QMS_REDIS_PORT || process.env.REDIS_PORT || "6379", 10),
-    password: process.env.QMS_REDIS_PASSWORD || process.env.REDIS_PASSWORD || undefined,
-    db: parseInt(process.env.QMS_REDIS_DB || process.env.REDIS_DB || "0", 10),
+    host: process.env.REDIS_HOST || "localhost",
+    port: parseInt(process.env.REDIS_PORT || "6379", 10),
+    password: process.env.REDIS_PASSWORD || undefined,
+    db: parseInt(process.env.REDIS_DB || "0", 10),
     keyPrefix: process.env.QMS_REDIS_KEY_PREFIX || "qms:",
   },
 

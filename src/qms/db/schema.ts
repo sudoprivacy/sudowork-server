@@ -1252,6 +1252,18 @@ async function ensureUniqueNullsNotDistinctConstraint(
   constraintName: string,
   columns: string[]
 ): Promise<void> {
+  const relation = await db`
+    SELECT relkind
+    FROM pg_class
+    WHERE oid = to_regclass(${tableName})
+  `;
+
+  const relkind = relation[0]?.relkind;
+  if (relkind !== "r" && relkind !== "p") {
+    logger.info(`[DB] Skipping constraint ${constraintName} on non-table relation ${tableName}`);
+    return;
+  }
+
   const existing = await db`
     SELECT 1
     FROM pg_constraint

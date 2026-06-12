@@ -74,6 +74,18 @@ function optionalString(value: unknown): string | undefined {
   return value === null || value === undefined ? undefined : String(value);
 }
 
+function userIdentityColumn() {
+  return db`COALESCE(NULLIF(user_id, ''), NULLIF(user_phone, ''))`;
+}
+
+function userIdentityFilter(userId?: string) {
+  return userId ? db`AND ${userIdentityColumn()} = ${userId}` : db``;
+}
+
+function hasUserIdentityFilter() {
+  return db`AND ${userIdentityColumn()} IS NOT NULL`;
+}
+
 function userDimensionKey(row: UserDimension): string {
   return JSON.stringify([
     row.user_id,
@@ -244,7 +256,7 @@ userStats.get("/conversations", async (c) => {
       const rawData = await db`
         WITH conversation_stats AS (
           SELECT
-            user_id,
+            ${userIdentityColumn()} as user_id,
             org_id,
             tenant_id,
             login_mode,
@@ -266,12 +278,12 @@ userStats.get("/conversations", async (c) => {
             ${query.org_id ? db`AND org_id = ${query.org_id}` : db``}
             ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
             ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-            AND user_id IS NOT NULL
-          GROUP BY user_id, org_id, tenant_id, login_mode
+            ${hasUserIdentityFilter()}
+          GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
         ),
         turn_token_stats AS (
           SELECT
-            user_id,
+            ${userIdentityColumn()} as user_id,
             org_id,
             tenant_id,
             login_mode,
@@ -283,8 +295,8 @@ userStats.get("/conversations", async (c) => {
             ${query.org_id ? db`AND org_id = ${query.org_id}` : db``}
             ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
             ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-            AND user_id IS NOT NULL
-          GROUP BY user_id, org_id, tenant_id, login_mode
+            ${hasUserIdentityFilter()}
+          GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
         )
         SELECT
           c.user_id,
@@ -383,7 +395,7 @@ userStats.get("/conversations", async (c) => {
       const todayData = await db`
         WITH conversation_stats AS (
           SELECT
-            user_id,
+            ${userIdentityColumn()} as user_id,
             org_id,
             tenant_id,
             login_mode,
@@ -405,12 +417,12 @@ userStats.get("/conversations", async (c) => {
             ${query.org_id ? db`AND org_id = ${query.org_id}` : db``}
             ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
             ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-            AND user_id IS NOT NULL
-          GROUP BY user_id, org_id, tenant_id, login_mode
+            ${hasUserIdentityFilter()}
+          GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
         ),
         turn_token_stats AS (
           SELECT
-            user_id,
+            ${userIdentityColumn()} as user_id,
             org_id,
             tenant_id,
             login_mode,
@@ -422,8 +434,8 @@ userStats.get("/conversations", async (c) => {
             ${query.org_id ? db`AND org_id = ${query.org_id}` : db``}
             ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
             ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-            AND user_id IS NOT NULL
-          GROUP BY user_id, org_id, tenant_id, login_mode
+            ${hasUserIdentityFilter()}
+          GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
         )
         SELECT
           c.user_id,
@@ -548,7 +560,7 @@ userStats.get("/turns", async (c) => {
       const rawStart = startTime > todayStart ? startTime : todayStart;
       const rawData = await db`
         SELECT
-          user_id,
+          ${userIdentityColumn()} as user_id,
           org_id,
           tenant_id,
           login_mode,
@@ -560,11 +572,11 @@ userStats.get("/turns", async (c) => {
           ROUND((SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::DECIMAL / COUNT(*)) * 100) as success_rate
         FROM telemetry_turns
         WHERE created_at >= ${rawStart} AND created_at < ${endTime}
-          ${query.user_id ? db`AND user_id = ${query.user_id}` : db``}
+          ${userIdentityFilter(query.user_id)}
           ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
           ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-          AND user_id IS NOT NULL
-        GROUP BY user_id, org_id, tenant_id, login_mode
+          ${hasUserIdentityFilter()}
+        GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
         ORDER BY turn_count ${order === "asc" ? db`ASC` : db`DESC`}
         LIMIT ${limit}
       `;
@@ -594,7 +606,7 @@ userStats.get("/turns", async (c) => {
 
       const todayData = await db`
         SELECT
-          user_id,
+          ${userIdentityColumn()} as user_id,
           org_id,
           tenant_id,
           login_mode,
@@ -606,11 +618,11 @@ userStats.get("/turns", async (c) => {
           ROUND((SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::DECIMAL / COUNT(*)) * 100) as success_rate
         FROM telemetry_turns
         WHERE created_at >= ${todayStart} AND created_at < ${endTime}
-          ${query.user_id ? db`AND user_id = ${query.user_id}` : db``}
+          ${userIdentityFilter(query.user_id)}
           ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
           ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-          AND user_id IS NOT NULL
-        GROUP BY user_id, org_id, tenant_id, login_mode
+          ${hasUserIdentityFilter()}
+        GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
       `;
 
       // Merge
@@ -704,7 +716,7 @@ userStats.get("/steps", async (c) => {
       const rawStart = startTime > todayStart ? startTime : todayStart;
       const rawData = await db`
         SELECT
-          user_id,
+          ${userIdentityColumn()} as user_id,
           org_id,
           tenant_id,
           login_mode,
@@ -718,12 +730,12 @@ userStats.get("/steps", async (c) => {
           AVG(COALESCE(duration_ms, 0))::INTEGER as avg_duration_ms
         FROM telemetry_steps
         WHERE created_at >= ${rawStart} AND created_at < ${endTime}
-          ${query.user_id ? db`AND user_id = ${query.user_id}` : db``}
+          ${userIdentityFilter(query.user_id)}
           ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
           ${query.step_type ? db`AND step_type = ${query.step_type}` : db``}
           ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-          AND user_id IS NOT NULL
-        GROUP BY user_id, org_id, tenant_id, login_mode, step_type
+          ${hasUserIdentityFilter()}
+        GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode, step_type
         ORDER BY step_count ${order === "asc" ? db`ASC` : db`DESC`}
         LIMIT ${limit}
       `;
@@ -755,7 +767,7 @@ userStats.get("/steps", async (c) => {
 
       const todayData = await db`
         SELECT
-          user_id,
+          ${userIdentityColumn()} as user_id,
           org_id,
           tenant_id,
           login_mode,
@@ -769,12 +781,12 @@ userStats.get("/steps", async (c) => {
           AVG(COALESCE(duration_ms, 0))::INTEGER as avg_duration_ms
         FROM telemetry_steps
         WHERE created_at >= ${todayStart} AND created_at < ${endTime}
-          ${query.user_id ? db`AND user_id = ${query.user_id}` : db``}
+          ${userIdentityFilter(query.user_id)}
           ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
           ${query.step_type ? db`AND step_type = ${query.step_type}` : db``}
           ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-          AND user_id IS NOT NULL
-        GROUP BY user_id, org_id, tenant_id, login_mode, step_type
+          ${hasUserIdentityFilter()}
+        GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode, step_type
       `;
 
       // Merge
@@ -956,7 +968,7 @@ userStats.get("/leaderboard/:type", async (c) => {
         // For tokens, sum total_tokens instead of counting rows
         const data = await db`
           SELECT
-            user_id,
+            ${userIdentityColumn()} as user_id,
             org_id,
             tenant_id,
             login_mode,
@@ -967,8 +979,8 @@ userStats.get("/leaderboard/:type", async (c) => {
           WHERE created_at >= ${rawStart} AND created_at < ${endTime}
             ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
             ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-            AND user_id IS NOT NULL
-          GROUP BY user_id, org_id, tenant_id, login_mode
+            ${hasUserIdentityFilter()}
+          GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
           ORDER BY value ${order === "asc" ? db`ASC` : db`DESC`}
           LIMIT ${limit}
         `;
@@ -976,7 +988,7 @@ userStats.get("/leaderboard/:type", async (c) => {
       } else {
         const data = await db`
           SELECT
-            user_id,
+            ${userIdentityColumn()} as user_id,
             org_id,
             tenant_id,
             login_mode,
@@ -987,8 +999,8 @@ userStats.get("/leaderboard/:type", async (c) => {
           WHERE created_at >= ${rawStart} AND created_at < ${endTime}
             ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
             ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-            AND user_id IS NOT NULL
-          GROUP BY user_id, org_id, tenant_id, login_mode
+            ${hasUserIdentityFilter()}
+          GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
           ORDER BY value ${order === "asc" ? db`ASC` : db`DESC`}
           LIMIT ${limit}
         `;
@@ -1078,7 +1090,7 @@ userStats.get("/leaderboard/:type", async (c) => {
       if (type === "tokens") {
         const todayData = await db`
           SELECT
-            user_id,
+            ${userIdentityColumn()} as user_id,
             org_id,
             tenant_id,
             login_mode,
@@ -1089,14 +1101,14 @@ userStats.get("/leaderboard/:type", async (c) => {
           WHERE created_at >= ${todayStart} AND created_at < ${endTime}
             ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
             ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-            AND user_id IS NOT NULL
-          GROUP BY user_id, org_id, tenant_id, login_mode
+            ${hasUserIdentityFilter()}
+          GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
         `;
         todayRows = Array.from(todayData, (row) => normalizeLeaderboardRow(row as DbRow));
       } else {
         const todayData = await db`
           SELECT
-            user_id,
+            ${userIdentityColumn()} as user_id,
             org_id,
             tenant_id,
             login_mode,
@@ -1107,8 +1119,8 @@ userStats.get("/leaderboard/:type", async (c) => {
           WHERE created_at >= ${todayStart} AND created_at < ${endTime}
             ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
             ${query.login_mode ? db`AND login_mode = ${query.login_mode}` : db``}
-            AND user_id IS NOT NULL
-          GROUP BY user_id, org_id, tenant_id, login_mode
+            ${hasUserIdentityFilter()}
+          GROUP BY ${userIdentityColumn()}, org_id, tenant_id, login_mode
         `;
         todayRows = Array.from(todayData, (row) => normalizeLeaderboardRow(row as DbRow));
       }
@@ -1179,7 +1191,7 @@ userStats.get("/users/:userId", async (c) => {
         MAX(user_nickname) as user_nickname,
         MAX(user_phone) as user_phone
       FROM telemetry_conversations
-      WHERE user_id = ${userId}
+      WHERE ${userIdentityColumn()} = ${userId}
         ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
     `;
 
@@ -1197,14 +1209,14 @@ userStats.get("/users/:userId", async (c) => {
           )) * 100), 100)::INTEGER as success_rate
         FROM telemetry_conversations
         WHERE created_at >= ${startTime} AND created_at < ${endTime}
-          AND user_id = ${userId}
+          ${userIdentityFilter(userId)}
           ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
       ),
       turn_token_stats AS (
         SELECT COALESCE(SUM(total_tokens), 0)::BIGINT as total_tokens
         FROM telemetry_turns
         WHERE created_at >= ${startTime} AND created_at < ${endTime}
-          AND user_id = ${userId}
+          ${userIdentityFilter(userId)}
           ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
       )
       SELECT
@@ -1225,7 +1237,7 @@ userStats.get("/users/:userId", async (c) => {
         ROUND(AVG(COALESCE(total_tokens, 0)))::INTEGER as avg_tokens_per_turn
       FROM telemetry_turns
       WHERE created_at >= ${startTime} AND created_at < ${endTime}
-        AND user_id = ${userId}
+        ${userIdentityFilter(userId)}
         ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
     `;
 
@@ -1237,7 +1249,7 @@ userStats.get("/users/:userId", async (c) => {
         ROUND((SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END)::DECIMAL / COUNT(*)) * 100) as success_rate
       FROM telemetry_steps
       WHERE created_at >= ${startTime} AND created_at < ${endTime}
-        AND user_id = ${userId}
+        ${userIdentityFilter(userId)}
         ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
       GROUP BY step_type
     `;
@@ -1249,7 +1261,7 @@ userStats.get("/users/:userId", async (c) => {
         COUNT(*)::INTEGER as count
       FROM telemetry_turns
       WHERE created_at >= ${startTime} AND created_at < ${endTime}
-        AND user_id = ${userId}
+        ${userIdentityFilter(userId)}
         ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
       GROUP BY model_id
       ORDER BY count DESC
@@ -1300,7 +1312,7 @@ userStats.get("/users/:userId", async (c) => {
 /**
  * Get real-time statistics from raw tables
  * Provides current state without aggregation delay
- * Only counts records with user_id to match aggregated user stats
+ * Only counts records with a stable user identity to match aggregated user stats
  * Supports time range filtering
  */
 userStats.get("/realtime", async (c) => {
@@ -1311,47 +1323,47 @@ userStats.get("/realtime", async (c) => {
   try {
     // Total unique users from conversations table
     const userStats = await db`
-      SELECT COUNT(DISTINCT user_id)::INTEGER as total_users
+      SELECT COUNT(DISTINCT ${userIdentityColumn()})::INTEGER as total_users
       FROM telemetry_conversations
       WHERE created_at >= ${startTime} AND created_at < ${endTime}
         ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
-        AND user_id IS NOT NULL
+        ${hasUserIdentityFilter()}
     `;
 
-    // Total conversations (only with user_id)
+    // Total conversations (only with stable user identity)
     const conversationStats = await db`
       SELECT COUNT(*)::BIGINT as total_conversations
       FROM telemetry_conversations
       WHERE created_at >= ${startTime} AND created_at < ${endTime}
         ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
-        AND user_id IS NOT NULL
+        ${hasUserIdentityFilter()}
     `;
 
-    // Total turns (only with user_id)
+    // Total turns (only with stable user identity)
     const turnStats = await db`
       SELECT COUNT(*)::BIGINT as total_turns
       FROM telemetry_turns
       WHERE created_at >= ${startTime} AND created_at < ${endTime}
         ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
-        AND user_id IS NOT NULL
+        ${hasUserIdentityFilter()}
     `;
 
-    // Total steps (only with user_id)
+    // Total steps (only with stable user identity)
     const stepStats = await db`
       SELECT COUNT(*)::BIGINT as total_steps
       FROM telemetry_steps
       WHERE created_at >= ${startTime} AND created_at < ${endTime}
         ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
-        AND user_id IS NOT NULL
+        ${hasUserIdentityFilter()}
     `;
 
-    // Total tokens (only with user_id)
+    // Total tokens (only with stable user identity)
     const tokenStats = await db`
       SELECT COALESCE(SUM(total_tokens), 0)::BIGINT as total_tokens
       FROM telemetry_turns
       WHERE created_at >= ${startTime} AND created_at < ${endTime}
         ${query.tenant_id ? db`AND tenant_id = ${query.tenant_id}` : db``}
-        AND user_id IS NOT NULL
+        ${hasUserIdentityFilter()}
     `;
 
     return c.json({
