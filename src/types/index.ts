@@ -97,6 +97,7 @@ export interface InvitationCode {
   code: string;
   enterprise_id: number;
   status: 0 | 1;
+  initial_quota_usd: number | null;
   used_by_user_id: number | null;
   created_at: string;
   used_at: string | null;

@@ -61,6 +61,7 @@ export function initSchema(): void {
       code TEXT UNIQUE NOT NULL,
       enterprise_id INTEGER NOT NULL,
       status INTEGER DEFAULT 0,
+      initial_quota_usd REAL,
       used_by_user_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       used_at DATETIME,

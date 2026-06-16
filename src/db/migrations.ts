@@ -13,6 +13,7 @@ export function runMigrations(): void {
   addColumnIfNotExists("users", "invitation_code_id", "INTEGER");
   addColumnIfNotExists("users", "quota", "INTEGER DEFAULT 0");
   addColumnIfNotExists("users", "used_quota", "INTEGER DEFAULT 0");
+  addColumnIfNotExists("invitation_codes", "initial_quota_usd", "REAL");
   addColumnIfNotExists("operation_logs", "request_data", "TEXT");
   addColumnIfNotExists("operation_logs", "response_data", "TEXT");
   addColumnIfNotExists("config_items", "icon", "TEXT");

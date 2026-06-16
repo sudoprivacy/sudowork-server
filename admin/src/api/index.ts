@@ -134,8 +134,12 @@ export const adminApi = {
   getInvitationCodes: (params?: { status?: number; enterprise_id?: number; page?: number; page_size?: number }) =>
     api.get("/v1/admin/invitation-codes", { params }),
 
-  createInvitationCodes: (enterpriseId: number, count: number) =>
-    api.post("/v1/admin/invitation-codes", { enterprise_id: enterpriseId, count }),
+  createInvitationCodes: (enterpriseId: number, count: number, initialQuotaUsd?: number | null) =>
+    api.post("/v1/admin/invitation-codes", {
+      enterprise_id: enterpriseId,
+      count,
+      initial_quota_usd: initialQuotaUsd,
+    }),
 
   deleteInvitationCode: (id: number) =>
     api.delete(`/v1/admin/invitation-codes/${id}`),

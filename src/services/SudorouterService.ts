@@ -9,6 +9,7 @@
 
 // 积分换算系数：额度 * 0.002 = 积分
 const POINTS_CONVERSION_RATE = 0.002;
+const QUOTA_PER_USD = 500000;
 
 interface SudorouterConfig {
   baseUrl: string;
@@ -754,6 +755,11 @@ class SudorouterService {
 
   getInitialQuota(): number {
     return this.config.initialQuota;
+  }
+
+  // 美元转额度：1 美元 = 500000 额度
+  usdToQuota(usd: number): number {
+    return Math.round(usd * QUOTA_PER_USD);
   }
 
   // 获取初始积分（赠送积分）

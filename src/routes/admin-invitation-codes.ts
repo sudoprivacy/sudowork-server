@@ -76,8 +76,19 @@ adminInvitationRoutes.post(
   adminMiddleware,
   async (c) => {
     const adminUser = (await getAuthUser(c)) as any;
-    const { count, enterprise_id } = await c.req.json();
+    const { count, enterprise_id, initial_quota_usd } = await c.req.json();
     const createCount = Math.min(Math.max(count || 1, 1), 100); // 最多一次创建100个
+    const normalizedInitialQuotaUsd =
+      initial_quota_usd === undefined || initial_quota_usd === null || initial_quota_usd === ""
+        ? null
+        : Number(initial_quota_usd);
+
+    if (
+      normalizedInitialQuotaUsd !== null &&
+      (!Number.isFinite(normalizedInitialQuotaUsd) || normalizedInitialQuotaUsd < 0)
+    ) {
+      return c.json({ success: false, msg: "注册赠送额度必须是大于等于 0 的数字" }, 400);
+    }
 
     // 验证企业是否存在
     const enterprise = db
@@ -106,8 +117,8 @@ adminInvitationRoutes.post(
 
       try {
         db.run(
-          "INSERT INTO invitation_codes (code, enterprise_id) VALUES (?, ?)",
-          [code, enterprise_id],
+          "INSERT INTO invitation_codes (code, enterprise_id, initial_quota_usd) VALUES (?, ?, ?)",
+          [code, enterprise_id, normalizedInitialQuotaUsd],
         );
         codes.push(code);
       } catch (e) {
@@ -127,8 +138,16 @@ adminInvitationRoutes.post(
         enterprise_id,
         "POST",
         "/api/v1/admin/invitation-codes",
-        JSON.stringify({ count: createCount, enterprise_id }),
-        JSON.stringify({ codes, count: codes.length }),
+        JSON.stringify({
+          count: createCount,
+          enterprise_id,
+          initial_quota_usd: normalizedInitialQuotaUsd,
+        }),
+        JSON.stringify({
+          codes,
+          count: codes.length,
+          initial_quota_usd: normalizedInitialQuotaUsd,
+        }),
       ],
     );
 

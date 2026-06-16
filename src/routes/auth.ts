@@ -484,8 +484,10 @@ authRoutes.post(
       durationMs: createUserResult.duration_ms,
     });
 
-    // 充值初始额度
-    const initialQuota = sudorouterService.getInitialQuota();
+    // 充值初始额度：邀请码未设置时回退全局默认额度
+    const initialQuota = invitationCode.initial_quota_usd == null
+      ? sudorouterService.getInitialQuota()
+      : sudorouterService.usdToQuota(invitationCode.initial_quota_usd);
     const quotaResult = await sudorouterService.updateUserQuotaWithLog(
       sudorouterUser.id,
       initialQuota,
@@ -674,7 +676,7 @@ authRoutes.post(
       `[用户注册] 手机号: ${phone}, 昵称: ${nickname}, sudorouter用户ID: ${sudorouterUser.id}, 初始积分: ${initialBalance}`,
     );
 
-    const bonusPoints = sudorouterService.getInitialPoints(); // 赠送积分
+    const bonusPoints = initialBalance; // 本次实际赠送积分
 
     // 获取模型服务配置
     const modelServiceUrl = sudorouterService.getModelServiceUrl();

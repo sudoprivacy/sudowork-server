@@ -110,7 +110,13 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
   // Validate invitation code
   const invitationCode = db
     .prepare('SELECT * FROM invitation_codes WHERE id = ? AND status = 0')
-    .get(invitation_code_id) as { id: number; code: string; enterprise_id: number; status: number } | undefined;
+    .get(invitation_code_id) as {
+      id: number;
+      code: string;
+      enterprise_id: number;
+      status: number;
+      initial_quota_usd: number | null;
+    } | undefined;
 
   if (!invitationCode) {
     return c.json(
@@ -185,7 +191,9 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
   });
 
   // Call sudorouter to set initial quota
-  const initialQuota = sudorouterService.getInitialQuota();
+  const initialQuota = invitationCode.initial_quota_usd == null
+    ? sudorouterService.getInitialQuota()
+    : sudorouterService.usdToQuota(invitationCode.initial_quota_usd);
   const quotaResult = await sudorouterService.updateUserQuotaWithLog(
     sudorouterUser.id,
     initialQuota,

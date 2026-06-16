@@ -23,6 +23,7 @@ interface InvitationCode {
   enterprise_id: number;
   enterprise_name: string;
   status: number;
+  initial_quota_usd: number | null;
   used_by_user_id: number | null;
   used_by_phone: string | null;
   used_by_nickname: string | null;
@@ -35,6 +36,10 @@ interface Enterprise {
   name: string;
   code: string;
 }
+
+const quotaPerUsd = 500000;
+
+const formatQuota = (quota: number) => quota.toLocaleString();
 
 const InvitationCodeList: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -87,9 +92,17 @@ const InvitationCodeList: React.FC = () => {
     loadCodes();
   }, [page, pageSize, statusFilter, enterpriseFilter]);
 
-  const handleCreate = async (values: { count: number; enterprise_id: number }) => {
+  const handleCreate = async (values: {
+    count: number;
+    enterprise_id: number;
+    initial_quota_usd?: number | null;
+  }) => {
     try {
-      const response = await adminApi.createInvitationCodes(values.enterprise_id, values.count);
+      const response = await adminApi.createInvitationCodes(
+        values.enterprise_id,
+        values.count,
+        values.initial_quota_usd ?? null,
+      );
       if ((response as any).success) {
         message.success((response as any).msg || "创建成功");
         setCreateModalVisible(false);
@@ -142,6 +155,22 @@ const InvitationCodeList: React.FC = () => {
       width: 100,
       render: (val: number) =>
         val === 0 ? <Tag color="green">未使用</Tag> : <Tag color="orange">已使用</Tag>,
+    },
+    {
+      title: "赠送额度",
+      dataIndex: "initial_quota_usd",
+      key: "initial_quota_usd",
+      width: 160,
+      render: (val: number | null) => {
+        if (val === null || val === undefined) {
+          return <Tag>默认配置</Tag>;
+        }
+        return (
+          <span>
+            ${val} / {formatQuota(Math.round(val * quotaPerUsd))}额度
+          </span>
+        );
+      },
     },
     {
       title: "使用者",
@@ -291,8 +320,26 @@ const InvitationCodeList: React.FC = () => {
           >
             <InputNumber min={1} max={100} style={{ width: "100%" }} />
           </Form.Item>
+          <Form.Item
+            label="注册赠送额度（美元）"
+            name="initial_quota_usd"
+            rules={[
+              {
+                type: "number",
+                min: 0,
+                message: "注册赠送额度必须大于等于 0",
+              },
+            ]}
+          >
+            <InputNumber
+              min={0}
+              precision={2}
+              placeholder="留空使用默认配置"
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
           <p className="text-gray-500 text-sm">
-            一次最多创建 100 个邀请码，每个邀请码为 6 位数字组合
+            一次最多创建 100 个邀请码，赠送额度留空时使用系统默认配置。
           </p>
         </Form>
       </Modal>
