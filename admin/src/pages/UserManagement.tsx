@@ -15,7 +15,7 @@ const UserManagement: React.FC = () => {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const response = (await adminApi.getSystemConfig()) as any;
+        const response = (await adminApi.getAdminSystemConfig()) as any;
         if (response.success) {
           setLoginMethod(response.data.login_method);
         } else {

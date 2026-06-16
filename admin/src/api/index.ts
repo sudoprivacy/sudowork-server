@@ -304,6 +304,8 @@ export const adminApi = {
   // System Config APIs (登录方式可配置)
   getSystemConfig: () => api.get("/v1/system-config"),
 
+  getAdminSystemConfig: () => api.get("/v1/admin/system-config"),
+
   updateSystemConfig: (data: { login_method: number }) =>
     api.put("/v1/admin/system-config", data),
 

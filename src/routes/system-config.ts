@@ -8,20 +8,39 @@
 
 import { Hono } from "hono";
 import { systemConfigService } from "../services/SystemConfigService.js";
-import { authMiddleware, superAdminMiddleware } from "../middleware/auth.js";
+import { authMiddleware, adminMiddleware, superAdminMiddleware } from "../middleware/auth.js";
 
 const systemConfigRoutes = new Hono();
 
-// GET /api/v1/system-config — 公开,登录页/第三方在登录前读取当前登录方式
+// 对外公开配置白名单:此接口仅返回以下 system_config key;新增配置必须在此登记 key+取值函数才对外暴露
+const PUBLIC_CONFIG: Record<string, () => unknown> = {
+  login_method: () => systemConfigService.getLoginMethod(),
+};
+
+// GET /api/v1/system-config — 公开,登录页/第三方在登录前读取(白名单驱动)
 systemConfigRoutes.get("/system-config", (c) => {
-  return c.json({
-    success: true,
-    data: {
-      login_method: systemConfigService.getLoginMethod(),
-      sms_configured: systemConfigService.isSmsChannelConfigured(),
-    },
-  });
+  const data: Record<string, unknown> = {};
+  for (const [key, getter] of Object.entries(PUBLIC_CONFIG)) {
+    data[key] = getter();
+  }
+  return c.json({ success: true, data });
 });
+
+// GET /api/v1/admin/system-config — 鉴权,后台渲染系统配置页(全量,无白名单)
+systemConfigRoutes.get(
+  "/admin/system-config",
+  authMiddleware,
+  adminMiddleware,
+  (c) => {
+    return c.json({
+      success: true,
+      data: {
+        login_method: systemConfigService.getLoginMethod(),
+        sms_configured: systemConfigService.isSmsChannelConfigured(),
+      },
+    });
+  },
+);
 
 // PUT /api/v1/admin/system-config — SUPER_ADMIN 切换登录方式
 systemConfigRoutes.put(

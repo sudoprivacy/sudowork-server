@@ -22,6 +22,7 @@ import { rechargeRoutes } from "./routes/recharge.js";
 import { proxyRoutes } from "./routes/external-proxy.js";
 import { systemConfigRoutes } from "./routes/system-config.js";
 import { loginByConfigRoutes } from "./routes/auth-login-by-config.js";
+import { authChangePasswordRoutes } from "./routes/auth-change-password.js";
 import { initDatabase as initQmsDatabase } from "./qms/db/init.js";
 import qmsRoutes from "./qms/routes/index.js";
 import { createScheduler, setSchedulerInstance } from "./qms/tasks/index.js";
@@ -74,6 +75,7 @@ app.route("/api", proxyRoutes);
 app.route("/api/v1/admin", adminRoutes);
 app.route("/api/v1/auth", authRoutes);
 app.route("/api/v1/auth", loginByConfigRoutes);
+app.route("/api/v1/auth", authChangePasswordRoutes);
 app.route("/api/v1/user", userRoutes);
 app.route("/api/v1/recharge", rechargeRoutes);
 if (qmsEnabled) {

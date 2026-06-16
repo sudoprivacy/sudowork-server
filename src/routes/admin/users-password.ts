@@ -17,7 +17,7 @@ import { logOperation } from '../../utils/logger.js';
 import { hashPassword, validatePasswordStrength } from '../../utils/password.js';
 import type { User } from '../../types/index.js';
 
-const DEFAULT_PASSWORD = 'TempP@Sudo';
+const DEFAULT_PASSWORD = 'Temp@Sudo123';
 
 const usersPasswordRoutes = new Hono();
 

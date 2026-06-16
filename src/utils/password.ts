@@ -27,18 +27,34 @@ export async function verifyPassword(
 
 /**
  * Validate password strength
- * Requirements: At least 8 characters, contains letters and numbers
+ * Requirements: 8-20 characters, must contain uppercase + lowercase + digit
  */
 export function validatePasswordStrength(password: string): {
   valid: boolean;
   message?: string;
 } {
-  if (password.length < 8) {
-    return { valid: false, message: "密码必须至少 8 位" };
+  if (!password) {
+    return { valid: false, message: "密码不能为空" };
   }
 
-  if (!/(?=.*[A-Za-z])(?=.*\d)/.test(password)) {
-    return { valid: false, message: "密码必须包含字母和数字" };
+  if (password.length < 8) {
+    return { valid: false, message: "密码长度不能少于 8 位" };
+  }
+
+  if (password.length > 20) {
+    return { valid: false, message: "密码长度不能超过 20 位" };
+  }
+
+  if (!/[A-Z]/.test(password)) {
+    return { valid: false, message: "密码必须包含大写字母" };
+  }
+
+  if (!/[a-z]/.test(password)) {
+    return { valid: false, message: "密码必须包含小写字母" };
+  }
+
+  if (!/\d/.test(password)) {
+    return { valid: false, message: "密码必须包含数字" };
   }
 
   return { valid: true };

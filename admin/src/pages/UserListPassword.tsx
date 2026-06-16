@@ -27,6 +27,33 @@ import { adminApi } from "../api";
 
 const { Title } = Typography;
 
+/**
+ * 本地密码强度校验:规则与文案与后端 validatePasswordStrength 完全一致
+ * (admin 是独立 Vite 项目无法 import 后端,故复刻同款检查)
+ * 返回 null 表示通过,否则返回错误提示
+ */
+function validatePassword(pw: string): string | null {
+  if (!pw) {
+    return "密码不能为空";
+  }
+  if (pw.length < 8) {
+    return "密码长度不能少于 8 位";
+  }
+  if (pw.length > 20) {
+    return "密码长度不能超过 20 位";
+  }
+  if (!/[A-Z]/.test(pw)) {
+    return "密码必须包含大写字母";
+  }
+  if (!/[a-z]/.test(pw)) {
+    return "密码必须包含小写字母";
+  }
+  if (!/\d/.test(pw)) {
+    return "密码必须包含数字";
+  }
+  return null;
+}
+
 interface User {
   id: number;
   phone: string;
@@ -642,6 +669,20 @@ const UserListPassword: React.FC = () => {
           <Form.Item
             label="密码"
             name="password"
+            rules={[
+              {
+                validator: (_, value) => {
+                  if (!value) {
+                    return Promise.resolve();
+                  }
+                  const err = validatePassword(value);
+                  if (err) {
+                    return Promise.reject(new Error(err));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
             extra={
               editingId ? (
                 <span style={{ color: "#86909c" }}>
@@ -649,14 +690,14 @@ const UserListPassword: React.FC = () => {
                 </span>
               ) : (
                 <span style={{ color: "#faad14" }}>
-                  ⚠ 留空将使用默认密码:TempP@Sudo
+                  ⚠ 留空将使用默认密码:Temp@Sudo123
                 </span>
               )
             }
           >
             <Input.Password
               placeholder={
-                editingId ? "留空保持原密码" : "留空使用默认密码 TempP@Sudo"
+                editingId ? "留空保持原密码" : "留空使用默认密码 Temp@Sudo123"
               }
             />
           </Form.Item>
