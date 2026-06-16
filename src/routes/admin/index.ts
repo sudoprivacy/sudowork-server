@@ -11,6 +11,7 @@ import { rechargeRoutes } from './recharge.js';
 import { syncRoutes } from './sync.js';
 import { configItemsRoutes } from './config-items.js';
 import { uploadRoutes } from './upload.js';
+import { usersPasswordRoutes } from './users-password.js';
 
 const adminRoutes = new Hono();
 
@@ -22,5 +23,6 @@ adminRoutes.route('/', rechargeRoutes);
 adminRoutes.route('/', syncRoutes);
 adminRoutes.route('/', configItemsRoutes);
 adminRoutes.route('/', uploadRoutes);
+adminRoutes.route('/', usersPasswordRoutes);
 
 export { adminRoutes };

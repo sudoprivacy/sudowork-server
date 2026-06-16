@@ -29,6 +29,7 @@ export interface User {
   invitation_code_id: number | null;
   password_hash: string | null;
   must_change_password: boolean;
+  login_type: number; // 0: 手机验证码, 1: 用户名密码
   created_at: string;
 }
 

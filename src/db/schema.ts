@@ -37,6 +37,7 @@ export function initSchema(): void {
       balance REAL DEFAULT 0,
       password_hash TEXT,
       must_change_password BOOLEAN DEFAULT FALSE,
+      login_type INTEGER NOT NULL DEFAULT 0, -- 0: 手机验证码, 1: 用户名密码
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(enterprise_id) REFERENCES enterprises(id)
     );
@@ -310,4 +311,15 @@ export function initSchema(): void {
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_config_entries_item_key ON config_entries(config_item_id, config_key)`);
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_config_enterprise_rel_item_enterprise ON config_enterprise_rel(config_item_id, enterprise_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_config_enterprise_rel_enterprise_id ON config_enterprise_rel(enterprise_id)`);
+
+  // ============================================
+  // System Config Table (系统配置 KV)
+  // ============================================
+  db.run(`
+    CREATE TABLE IF NOT EXISTS system_config (
+      key TEXT UNIQUE NOT NULL,
+      value TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 }

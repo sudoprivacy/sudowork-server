@@ -6,6 +6,7 @@
 import { Hono } from 'hono';
 import { db } from '../../db/index.js';
 import { sudorouterService } from '../../services/SudorouterService.js';
+import { systemConfigService } from '../../services/SystemConfigService.js';
 import { authMiddleware, adminMiddleware, getAuthUser } from '../../middleware/auth.js';
 import { logOperation } from '../../utils/logger.js';
 import type { User } from '../../types/index.js';
@@ -32,6 +33,11 @@ pointsRoutes.post('/users/:id/points', authMiddleware, adminMiddleware, async (c
 
   if (!user) {
     return c.json({ success: false, msg: '用户不存在' }, 404);
+  }
+
+  // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
+  if (user.role !== 'SUPER_ADMIN' && user.login_type !== systemConfigService.getLoginMethod()) {
+    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
   }
 
   const actualAmount = operation === 'subtract' ? -amount : amount;
@@ -185,6 +191,11 @@ pointsRoutes.post('/users/:id/recharge', authMiddleware, adminMiddleware, async 
     return c.json({ success: false, msg: '用户不存在' }, 404);
   }
 
+  // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
+  if (user.role !== 'SUPER_ADMIN' && user.login_type !== systemConfigService.getLoginMethod()) {
+    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
+  }
+
   if (!user.sudorouter_user_id) {
     return c.json({ success: false, msg: '用户未绑定 sudorouter 账号' }, 400);
   }
@@ -284,6 +295,11 @@ pointsRoutes.post('/users/:id/sync-quota', authMiddleware, adminMiddleware, asyn
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
   if (!user) {
     return c.json({ success: false, msg: '用户不存在' }, 404);
+  }
+
+  // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
+  if (user.role !== 'SUPER_ADMIN' && user.login_type !== systemConfigService.getLoginMethod()) {
+    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
   }
 
   if (!user.sudorouter_user_id) {

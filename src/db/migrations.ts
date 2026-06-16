@@ -33,6 +33,10 @@ export function runMigrations(): void {
   addColumnIfNotExists("enterprises", "login_desp", "TEXT");
 
   createIndexIfNotExists("idx_config_items_pinyin", "config_items", "pinyin");
+
+  // 登录方式可配置:users.login_type 列 + system_config 表
+  addColumnIfNotExists("users", "login_type", "INTEGER NOT NULL DEFAULT 0");
+  createSystemConfigTable();
 }
 
 /**
@@ -55,4 +59,19 @@ function createIndexIfNotExists(indexName: string, table: string, column: string
   } catch (e) {
     // Index might already exist, ignore error
   }
+}
+
+/**
+ * Create system_config table (KV) and seed default login_method.
+ * Idempotent: CREATE TABLE IF NOT EXISTS + INSERT OR IGNORE (UNIQUE on key).
+ */
+function createSystemConfigTable(): void {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS system_config (
+      key TEXT UNIQUE NOT NULL,
+      value TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  db.run(`INSERT OR IGNORE INTO system_config(key, value) VALUES('login_method', '0')`);
 }
