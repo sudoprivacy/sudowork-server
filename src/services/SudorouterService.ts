@@ -139,13 +139,24 @@ class SudorouterService {
     };
   }
 
+  /**
+   * 保证 sudorouter 账户密码满足最小长度(≥8)。
+   * 够长原样返回(验证码方式的手机号天然满足,行为不变);
+   * 不足则用 "1" 右补齐到 8 位(仅密码方式短用户名触发)。
+   * 注:此 password 仅满足 sudorouter 建用户必填,创建后 sudowork 不再使用。
+   */
+  private ensureSudorouterPassword(value: string): string {
+    const MIN_LENGTH = 8;
+    return value.length >= MIN_LENGTH ? value : value.padEnd(MIN_LENGTH, "1");
+  }
+
   // 创建用户（返回详细结果用于日志）
   async createUserWithLog(phone: string, nickname?: string): Promise<ApiCallResult<SudorouterUser>> {
     const url = `${this.config.baseUrl}/api/user/`;
     const displayName = nickname || phone; // 如果昵称为空则使用手机号
     const body = {
       username: phone,
-      password: phone,
+      password: this.ensureSudorouterPassword(phone),
       display_name: displayName,
       role: 1,
       utm_source: "sudowork",

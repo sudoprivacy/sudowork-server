@@ -5,6 +5,7 @@
 import { Hono } from 'hono';
 import { db } from '../../db/index.js';
 import { sudorouterService } from '../../services/SudorouterService.js';
+import { systemConfigService } from '../../services/SystemConfigService.js';
 import { authMiddleware, adminMiddleware, getAuthUser } from '../../middleware/auth.js';
 import { logOperation } from '../../utils/logger.js';
 import type { User, UserWithEnterprise } from '../../types/index.js';
@@ -18,14 +19,15 @@ usersRoutes.get('/users', authMiddleware, adminMiddleware, async (c) => {
   const role = c.req.query('role');
   const keyword = c.req.query('keyword')?.trim().substring(0, 50);
 
+  const loginMethod = systemConfigService.getLoginMethod();
   let query = `
     SELECT u.*, e.name as enterprise_name, ic.code as invitation_code
     FROM users u
     LEFT JOIN enterprises e ON u.enterprise_id = e.id
     LEFT JOIN invitation_codes ic ON u.invitation_code_id = ic.id
-    WHERE 1=1
+    WHERE (u.login_type = ? OR u.role = 'SUPER_ADMIN')
   `;
-  const params: unknown[] = [];
+  const params: unknown[] = [loginMethod];
 
   if (enterpriseId) {
     query += ' AND u.enterprise_id = ?';
@@ -273,8 +275,8 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
     `INSERT INTO users (
       phone, nickname, enterprise_id, role, status,
       sudorouter_user_id, sudorouter_key, invitation_code_id,
-      quota, used_quota, balance, password_hash
-    ) VALUES (?, ?, ?, 'USER', 1, ?, ?, ?, ?, ?, ?, NULL)`,
+      quota, used_quota, balance, password_hash, login_type
+    ) VALUES (?, ?, ?, 'USER', 1, ?, ?, ?, ?, ?, ?, NULL, 0)`,
     [
       phone,
       nickname || phone,
@@ -352,6 +354,11 @@ usersRoutes.put('/users/:id', authMiddleware, adminMiddleware, async (c) => {
 
   // Get user info before update
   const oldUser = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
+
+  // 跨方式保护(验证码专属端点):非 SUPER_ADMIN 目标必须 login_type=0
+  if (oldUser && oldUser.role !== 'SUPER_ADMIN' && oldUser.login_type !== 0) {
+    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
+  }
 
   db.run(
     `UPDATE users SET nickname = COALESCE(?, nickname),
@@ -438,6 +445,11 @@ usersRoutes.post('/users/:id/role', authMiddleware, adminMiddleware, async (c) =
     );
   }
 
+  // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
+  if (targetUser.login_type !== systemConfigService.getLoginMethod()) {
+    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
+  }
+
   // SUPER_ADMIN can modify any user
   if (adminUser.role === 'SUPER_ADMIN') {
     db.run('UPDATE users SET role = ? WHERE id = ?', [role, id]);
@@ -499,6 +511,11 @@ usersRoutes.post('/users/:id/manage', authMiddleware, adminMiddleware, async (c)
   // Cannot disable super admin
   if (user.role === 'SUPER_ADMIN') {
     return c.json({ success: false, msg: '不能禁用超级管理员' }, 403);
+  }
+
+  // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
+  if (user.login_type !== systemConfigService.getLoginMethod()) {
+    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
   }
 
   // Call sudorouter management API
@@ -580,6 +597,11 @@ usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
       },
       403,
     );
+  }
+
+  // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
+  if (user.login_type !== systemConfigService.getLoginMethod()) {
+    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
   }
 
   // Step 1: Call Sudorouter delete API first

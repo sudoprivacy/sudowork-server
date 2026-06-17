@@ -5,7 +5,7 @@
 import { Hono } from "hono";
 import { sign } from "hono/jwt";
 import { db, SECRET } from "../db/index.js";
-import { hashPassword, verifyPassword } from "../utils/password.js";
+import { hashPassword, verifyPassword, validatePasswordStrength } from "../utils/password.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { rateLimiter, rateLimitPresets } from "../middleware/rateLimiter.js";
 import { redis } from "../redis.js";
@@ -148,11 +148,12 @@ adminAuthRoutes.post("/change-password", authMiddleware, async (c) => {
   }
 
   // Password strength validation
-  if (!/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/.test(newPassword)) {
+  const strength = validatePasswordStrength(newPassword);
+  if (!strength.valid) {
     return c.json(
       {
         success: false,
-        msg: "密码必须至少 8 位，包含字母和数字",
+        msg: strength.message,
       },
       400,
     );

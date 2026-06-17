@@ -21,11 +21,14 @@ import {
   PayCircleOutlined,
   UnorderedListOutlined,
   BarChartOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import EnterpriseList from "./pages/EnterpriseList";
 import UserList from "./pages/UserList";
+import UserManagement from "./pages/UserManagement";
+import SystemConfig from "./pages/SystemConfig";
 import InvitationCodeList from "./pages/InvitationCodeList";
 import OperationLogs from "./pages/OperationLogs";
 import RechargeList from "./pages/RechargeList";
@@ -113,6 +116,7 @@ const menuConfig: MenuItemConfig[] = [
   { key: "/recharge-records", icon: <PayCircleOutlined />, label: "充值记录", roles: ["SUPER_ADMIN"] },
   { key: "/invitation-codes", icon: <GiftOutlined />, label: "邀请码管理", roles: ["SUPER_ADMIN"] },
   { key: "/logs", icon: <FileTextOutlined />, label: "操作日志", roles: ["SUPER_ADMIN"] },
+  { key: "/system-config", icon: <SettingOutlined />, label: "系统配置", roles: ["SUPER_ADMIN"] },
 ];
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -259,7 +263,7 @@ const App = () => {
           <Route index element={<Dashboard />} />
           <Route path="enterprises" element={<EnterpriseList />} />
           <Route path="config-items" element={<ConfigItemList />} />
-          <Route path="users" element={<UserList />} />
+          <Route path="users" element={<UserManagement />} />
           <Route path="skills" element={<SkillsList assetType="skills" />} />
           <Route path="assistants" element={<SkillsList assetType="assistants" />} />
           <Route path="qms" element={<QmsDashboard />} />
@@ -275,6 +279,7 @@ const App = () => {
           <Route path="recharge-records" element={<RechargeRecords />} />
           <Route path="invitation-codes" element={<InvitationCodeList />} />
           <Route path="logs" element={<OperationLogs />} />
+          <Route path="system-config" element={<SystemConfig />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

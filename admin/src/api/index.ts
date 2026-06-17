@@ -300,4 +300,38 @@ export const adminApi = {
 
   deleteAssistant: (assistantId: string) =>
     api.delete(`/assistants/${assistantId}`),
+
+  // System Config APIs (登录方式可配置)
+  getSystemConfig: () => api.get("/v1/system-config"),
+
+  getAdminSystemConfig: () => api.get("/v1/admin/system-config"),
+
+  updateSystemConfig: (data: { login_method: number }) =>
+    api.put("/v1/admin/system-config", data),
+
+  // Password login user APIs (用户名密码登录方式)
+  createPasswordUser: (data: {
+    phone: string;
+    nickname?: string;
+    password?: string;
+    enterprise_id: number;
+    invitation_code_id?: number;
+  }) => api.post("/v1/admin/users-password", data),
+
+  updatePasswordUser: (
+    id: number,
+    data: {
+      nickname?: string;
+      password?: string;
+      enterprise_id?: number;
+      status?: number;
+    },
+  ) => api.put(`/v1/admin/users-password/${id}`, data),
+
+  // Unified login dispatched by system login_method
+  loginByConfig: (data: {
+    phone: string;
+    code?: string;
+    password?: string;
+  }) => api.post("/v1/auth/login-by-config", data),
 };
