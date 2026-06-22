@@ -2,6 +2,11 @@ import React, { useState, useEffect } from "react";
 import { Card, Radio, Typography, Button, Alert, Modal, message, Spin } from "antd";
 import { ExclamationCircleOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import { adminApi } from "../api";
+import SwitchConfigCard from "../components/SwitchConfigCard";
+import type {
+  SchemaField,
+  SwitchConfigCardValue,
+} from "../components/SwitchConfigCard";
 
 const { Title, Text } = Typography;
 
@@ -24,6 +29,24 @@ function getDesc(m: number): LoginDesc {
   };
 }
 
+// 模块级常量,避免父组件 re-render 时 schema 引用变化触发子组件 useEffect 重置已编辑字段。
+const LOG_REPORT_SCHEMA: SchemaField[] = [
+  { kind: "protocol", name: "protocol", label: "上报协议" },
+  { kind: "text", name: "domain", label: "上报域名", placeholder: "例如 123.com" },
+];
+const VERSION_UPDATE_SCHEMA: SchemaField[] = [
+  {
+    kind: "text",
+    name: "cos_domain",
+    label: "COS 访问域名",
+    placeholder: "例如 cos.example.com",
+  },
+];
+const PRODUCT_IMPROVEMENT_SCHEMA: SchemaField[] = [
+  { kind: "protocol", name: "protocol", label: "上报协议" },
+  { kind: "text", name: "domain", label: "上报域名", placeholder: "例如 stats.example.com" },
+];
+
 const SystemConfig: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -32,6 +55,21 @@ const SystemConfig: React.FC = () => {
   const [radioVal, setRadioVal] = useState<number>(0);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rejectMsg, setRejectMsg] = useState("");
+  const [logReport, setLogReport] = useState<SwitchConfigCardValue>({
+    enabled: 0,
+    protocol: "",
+    domain: "",
+  });
+  const [versionUpdate, setVersionUpdate] = useState<SwitchConfigCardValue>({
+    enabled: 0,
+    cos_domain: "",
+  });
+  const [productImprovement, setProductImprovement] =
+    useState<SwitchConfigCardValue>({
+      enabled: 0,
+      protocol: "",
+      domain: "",
+    });
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -41,6 +79,26 @@ const SystemConfig: React.FC = () => {
           setLoginMethod(response.data.login_method);
           setSmsConfigured(response.data.sms_configured);
           setRadioVal(response.data.login_method);
+          if (response.data.log_report) {
+            setLogReport({
+              enabled: response.data.log_report.enabled ?? 0,
+              protocol: response.data.log_report.protocol ?? "",
+              domain: response.data.log_report.domain ?? "",
+            });
+          }
+          if (response.data.version_update) {
+            setVersionUpdate({
+              enabled: response.data.version_update.enabled ?? 0,
+              cos_domain: response.data.version_update.cos_domain ?? "",
+            });
+          }
+          if (response.data.product_improvement) {
+            setProductImprovement({
+              enabled: response.data.product_improvement.enabled ?? 0,
+              protocol: response.data.product_improvement.protocol ?? "",
+              domain: response.data.product_improvement.domain ?? "",
+            });
+          }
         }
       } catch (error) {
         message.error("加载系统配置失败");
@@ -50,6 +108,45 @@ const SystemConfig: React.FC = () => {
     };
     loadConfig();
   }, []);
+
+  const saveLogReport = async (payload: SwitchConfigCardValue) => {
+    const res = (await adminApi.updateSystemConfig({
+      log_report: {
+        enabled: payload.enabled,
+        protocol: (payload.protocol as string) ?? "",
+        domain: (payload.domain as string) ?? "",
+      },
+    })) as any;
+    if (!res?.success) {
+      throw new Error(res?.msg || "保存失败");
+    }
+    setLogReport(payload);
+  };
+  const saveVersionUpdate = async (payload: SwitchConfigCardValue) => {
+    const res = (await adminApi.updateSystemConfig({
+      version_update: {
+        enabled: payload.enabled,
+        cos_domain: (payload.cos_domain as string) ?? "",
+      },
+    })) as any;
+    if (!res?.success) {
+      throw new Error(res?.msg || "保存失败");
+    }
+    setVersionUpdate(payload);
+  };
+  const saveProductImprovement = async (payload: SwitchConfigCardValue) => {
+    const res = (await adminApi.updateSystemConfig({
+      product_improvement: {
+        enabled: payload.enabled,
+        protocol: (payload.protocol as string) ?? "",
+        domain: (payload.domain as string) ?? "",
+      },
+    })) as any;
+    if (!res?.success) {
+      throw new Error(res?.msg || "保存失败");
+    }
+    setProductImprovement(payload);
+  };
 
   const handleSave = () => {
     if (radioVal === loginMethod) {
@@ -130,6 +227,28 @@ const SystemConfig: React.FC = () => {
           </Button>
         </div>
       </Card>
+
+      <SwitchConfigCard
+        title="日志上报"
+        description="开启后将向指定的上报地址(协议 + 域名)发送日志。开启时上报协议与域名必填。"
+        value={logReport}
+        schema={LOG_REPORT_SCHEMA}
+        onSave={saveLogReport}
+      />
+      <SwitchConfigCard
+        title="版本自动更新"
+        description="开启后系统将从指定的 COS 访问域名拉取版本。开启时 COS 访问域名必填。"
+        value={versionUpdate}
+        schema={VERSION_UPDATE_SCHEMA}
+        onSave={saveVersionUpdate}
+      />
+      <SwitchConfigCard
+        title="参与产品改进计划"
+        description="开启后将向指定地址(协议 + 域名)发送匿名使用统计。开启时上报协议与域名必填。"
+        value={productImprovement}
+        schema={PRODUCT_IMPROVEMENT_SCHEMA}
+        onSave={saveProductImprovement}
+      />
 
       <Modal
         title={

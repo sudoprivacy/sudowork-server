@@ -6,9 +6,14 @@
 import { Hono } from "hono";
 import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
 
+const SKILLHUB_BASE_URL = (
+  process.env.SKILLHUB_BASE_URL || "https://sudoworkhub.sudoprivacy.com"
+).replace(/\/+$/, "");
+const SKILLHUB_API_TOKEN = process.env.SKILLHUB_API_TOKEN || "sud0@sudo";
+
 const proxyRoutes = new Hono();
 const PROXY_HEADERS = {
-  Authorization: "sud0@sudo",
+  Authorization: SKILLHUB_API_TOKEN,
   "Content-Type": "application/json",
 };
 
@@ -41,12 +46,12 @@ proxyRoutes.get("/skills/cursor", authMiddleware, adminMiddleware, async (c) => 
   if (query) params.append("query", query);
   if (categories) params.append("categories", categories);
 
-  const url = `https://sudoworkhub.sudoprivacy.com/api/skills/admin/cursor?${params.toString()}`;
+  const url = `${SKILLHUB_BASE_URL}/api/skills/admin/cursor?${params.toString()}`;
 
   console.log("=== 专属技能请求 ===");
   console.log("完整URL:", url);
   console.log("请求参数:", Object.fromEntries(params));
-  console.log("Authorization: sud0@sudo, Content-Type: application/json");
+  console.log("Authorization: 已配置, Content-Type: application/json");
 
   const response = await fetch(url, {
     method: "GET",
@@ -74,12 +79,12 @@ proxyRoutes.get("/assistants/cursor", authMiddleware, adminMiddleware, async (c)
   if (query) params.append("query", query);
   if (category) params.append("category", category);
 
-  const url = `https://sudoworkhub.sudoprivacy.com/api/assistants/admin/cursor?${params.toString()}`;
+  const url = `${SKILLHUB_BASE_URL}/api/assistants/admin/cursor?${params.toString()}`;
 
   console.log("=== 专属助手请求 ===");
   console.log("完整URL:", url);
   console.log("请求参数:", Object.fromEntries(params));
-  console.log("Authorization: sud0@sudo, Content-Type: application/json");
+  console.log("Authorization: 已配置, Content-Type: application/json");
 
   const response = await fetch(url, {
     method: "GET",
@@ -95,12 +100,12 @@ proxyRoutes.get("/assistants/cursor", authMiddleware, adminMiddleware, async (c)
 // Approve skill API
 proxyRoutes.post("/skills/:skillId/approve", authMiddleware, adminMiddleware, async (c) => {
   const skillId = c.req.param("skillId");
-  const url = `https://sudoworkhub.sudoprivacy.com/api/skills/${skillId}/approve`;
+  const url = `${SKILLHUB_BASE_URL}/api/skills/${skillId}/approve`;
 
   console.log("=== 审批专属技能请求 ===");
   console.log("完整URL:", url);
   console.log("skillId:", skillId);
-  console.log("Authorization: sud0@sudo, Content-Type: application/json");
+  console.log("Authorization: 已配置, Content-Type: application/json");
 
   const response = await fetch(url, {
     method: "POST",
@@ -116,12 +121,12 @@ proxyRoutes.post("/skills/:skillId/approve", authMiddleware, adminMiddleware, as
 // Delete skill API
 proxyRoutes.delete("/skills/:skillId", authMiddleware, adminMiddleware, async (c) => {
   const skillId = c.req.param("skillId");
-  const url = `https://sudoworkhub.sudoprivacy.com/api/skills/${skillId}`;
+  const url = `${SKILLHUB_BASE_URL}/api/skills/${skillId}`;
 
   console.log("=== 删除专属技能请求 ===");
   console.log("完整URL:", url);
   console.log("skillId:", skillId);
-  console.log("Authorization: sud0@sudo, Content-Type: application/json");
+  console.log("Authorization: 已配置, Content-Type: application/json");
 
   const response = await fetch(url, {
     method: "DELETE",
@@ -137,12 +142,12 @@ proxyRoutes.delete("/skills/:skillId", authMiddleware, adminMiddleware, async (c
 // Approve assistant API
 proxyRoutes.post("/assistants/:assistantId/approve", authMiddleware, adminMiddleware, async (c) => {
   const assistantId = c.req.param("assistantId");
-  const url = `https://sudoworkhub.sudoprivacy.com/api/assistants/${assistantId}/approve`;
+  const url = `${SKILLHUB_BASE_URL}/api/assistants/${assistantId}/approve`;
 
   console.log("=== 审批专属助手请求 ===");
   console.log("完整URL:", url);
   console.log("assistantId:", assistantId);
-  console.log("Authorization: sud0@sudo, Content-Type: application/json");
+  console.log("Authorization: 已配置, Content-Type: application/json");
 
   const response = await fetch(url, {
     method: "POST",
@@ -158,12 +163,12 @@ proxyRoutes.post("/assistants/:assistantId/approve", authMiddleware, adminMiddle
 // Delete assistant API
 proxyRoutes.delete("/assistants/:assistantId", authMiddleware, adminMiddleware, async (c) => {
   const assistantId = c.req.param("assistantId");
-  const url = `https://sudoworkhub.sudoprivacy.com/api/assistants/${assistantId}`;
+  const url = `${SKILLHUB_BASE_URL}/api/assistants/${assistantId}`;
 
   console.log("=== 删除专属助手请求 ===");
   console.log("完整URL:", url);
   console.log("assistantId:", assistantId);
-  console.log("Authorization: sud0@sudo, Content-Type: application/json");
+  console.log("Authorization: 已配置, Content-Type: application/json");
 
   const response = await fetch(url, {
     method: "DELETE",
