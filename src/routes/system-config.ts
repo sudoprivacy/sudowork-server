@@ -11,8 +11,16 @@ import { systemConfigService } from "../services/SystemConfigService.js";
 import { authMiddleware, adminMiddleware, superAdminMiddleware } from "../middleware/auth.js";
 import { config } from "../qms/config/index.js";
 import { logOperation } from "../utils/logger.js";
+import { encryptGcm } from "../utils/aes-gcm.js";
 
 const systemConfigRoutes = new Hono();
+
+// credentials 接口下发数据的对称加密 key (AES-256, 32 字节, 硬编码, 不可配置)
+// 与 sudowork 客户端共享同一把; 客户端用相同 key + AES-256-GCM 解密。
+const CREDENTIAL_AES_KEY = Buffer.from(
+  "L7CbnQlwVrzWlaehCWSIiKuwBxFDh9i1AFaifYv7UXE=",
+  "base64",
+);
 
 // 对外公开配置白名单:此接口仅返回以下 system_config key;新增配置必须在此登记 key+取值函数才对外暴露
 const PUBLIC_CONFIG: Record<string, () => unknown> = {
@@ -209,7 +217,7 @@ systemConfigRoutes.put(
 systemConfigRoutes.get(
   "/system-config/credentials",
   authMiddleware,
-  (c) => {
+  async (c) => {
     const data: Record<string, unknown> = {
       skillhub: { token: process.env.SKILLHUB_API_TOKEN || "" },
     };
@@ -222,7 +230,15 @@ systemConfigRoutes.get(
       }
       data.product_improvement = pi;
     }
-    return c.json({ success: true, data });
+    const encrypted = await encryptGcm(
+      new TextEncoder().encode(JSON.stringify(data)),
+      CREDENTIAL_AES_KEY,
+    );
+    return c.json({
+      success: true,
+      nonce: encrypted.nonce,
+      ciphertext: encrypted.ciphertext,
+    });
   },
 );
 
