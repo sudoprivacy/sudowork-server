@@ -9,6 +9,8 @@
 import { Hono } from "hono";
 import { systemConfigService } from "../services/SystemConfigService.js";
 import { authMiddleware, adminMiddleware, superAdminMiddleware } from "../middleware/auth.js";
+import { config } from "../qms/config/index.js";
+import { logOperation } from "../utils/logger.js";
 
 const systemConfigRoutes = new Hono();
 
@@ -26,9 +28,9 @@ const PUBLIC_CONFIG: Record<string, () => unknown> = {
     return enabled === 1 ? { enabled: 1, cos_domain } : { enabled: 0 };
   },
   product_improvement: () => {
-    const { enabled, protocol, domain } = systemConfigService.getProductImprovement();
+    const { enabled } = systemConfigService.getProductImprovement();
     return enabled === 1
-      ? { enabled: 1, baseurl: `${protocol}://${domain}` }
+      ? { enabled: 1, encryption_required: config.encryption.encryptionRequired }
       : { enabled: 0 };
   },
   sudorouter_baseurl: () =>
@@ -73,6 +75,8 @@ systemConfigRoutes.put(
   superAdminMiddleware,
   async (c) => {
     const body = await c.req.json();
+    const operator = c.get("user");
+    const changes: Record<string, { before: unknown; after: unknown }> = {};
 
     if (body.login_method !== undefined) {
       const { login_method } = body;
@@ -98,7 +102,9 @@ systemConfigRoutes.put(
         );
       }
 
+      const before = systemConfigService.getLoginMethod();
       systemConfigService.setLoginMethod(login_method);
+      changes.login_method = { before, after: login_method };
     }
 
     if (body.log_report !== undefined) {
@@ -117,11 +123,16 @@ systemConfigRoutes.put(
           );
         }
       }
+      const before = systemConfigService.getLogReport();
       systemConfigService.setLogReport({
         enabled: enabled === 1 ? 1 : 0,
         protocol: protocol ?? "",
         domain: domain ?? "",
       });
+      changes.log_report = {
+        before,
+        after: { enabled: enabled === 1 ? 1 : 0, protocol: protocol ?? "", domain: domain ?? "" },
+      };
     }
 
     if (body.version_update !== undefined) {
@@ -134,35 +145,58 @@ systemConfigRoutes.put(
           );
         }
       }
+      const before = systemConfigService.getVersionUpdate();
       systemConfigService.setVersionUpdate({
         enabled: enabled === 1 ? 1 : 0,
         cos_domain: cos_domain ?? "",
       });
+      changes.version_update = {
+        before,
+        after: { enabled: enabled === 1 ? 1 : 0, cos_domain: cos_domain ?? "" },
+      };
     }
 
     if (body.product_improvement !== undefined) {
-      const { enabled, protocol, domain } = body.product_improvement;
+      const { enabled } = body.product_improvement;
       if (enabled === 1) {
-        if (protocol !== "http" && protocol !== "https") {
+        if (!config.auth.defaultApiKey) {
           return c.json(
-            { success: false, msg: "参与产品改进计划开启时,协议类型必须为 http 或 https" },
+            { success: false, msg: "未配置 QMS_DEFAULT_API_KEY,无法开启产品改进计划" },
             400,
           );
         }
-        if (!domain || typeof domain !== "string" || domain.trim() === "") {
-          return c.json(
-            { success: false, msg: "参与产品改进计划开启时,域名必填且非空" },
-            400,
-          );
+        if (config.encryption.encryptionRequired) {
+          if (!config.encryption.privateKeyPem) {
+            return c.json(
+              { success: false, msg: "已开启遥测加密(QMS_TELEMETRY_ENCRYPTION_REQUIRED=true),但未配置 QMS_TELEMETRY_PRIVATE_KEY" },
+              400,
+            );
+          }
+          if (!config.encryption.publicKeyPem) {
+            return c.json(
+              { success: false, msg: "已开启遥测加密(QMS_TELEMETRY_ENCRYPTION_REQUIRED=true),但未配置 QMS_TELEMETRY_PUBLIC_KEY" },
+              400,
+            );
+          }
         }
       }
-      systemConfigService.setProductImprovement({
-        enabled: enabled === 1 ? 1 : 0,
-        protocol: protocol ?? "",
-        domain: domain ?? "",
-      });
+      // ↓ 新增 before 读取 + changes 记录;setProductImprovement 改为仅传 enabled(去除 protocol/domain)
+      const before = systemConfigService.getProductImprovement();
+      systemConfigService.setProductImprovement({ enabled: enabled === 1 ? 1 : 0 });
+      changes.product_improvement = { before, after: { enabled: enabled === 1 ? 1 : 0 } };
     }
 
+    if (Object.keys(changes).length > 0) {
+      logOperation({
+        userId: operator?.id ?? 0,
+        userPhone: operator?.phone ?? "",
+        action: "SYSTEM_CONFIG_UPDATE",
+        resource: "system_config",
+        method: "PUT",
+        path: "/api/v1/admin/system-config",
+        requestData: changes,
+      });
+    }
     return c.json({
       success: true,
       msg: "系统配置更新成功",
@@ -176,12 +210,19 @@ systemConfigRoutes.get(
   "/system-config/credentials",
   authMiddleware,
   (c) => {
-    return c.json({
-      success: true,
-      data: {
-        skillhub: { token: process.env.SKILLHUB_API_TOKEN || "" },
-      },
-    });
+    const data: Record<string, unknown> = {
+      skillhub: { token: process.env.SKILLHUB_API_TOKEN || "" },
+    };
+    if (systemConfigService.getProductImprovement().enabled === 1) {
+      const pi: Record<string, string> = {
+        api_key: config.auth.defaultApiKey || "",
+      };
+      if (config.encryption.encryptionRequired) {
+        pi.public_key = config.encryption.publicKeyPem || "";
+      }
+      data.product_improvement = pi;
+    }
+    return c.json({ success: true, data });
   },
 );
 

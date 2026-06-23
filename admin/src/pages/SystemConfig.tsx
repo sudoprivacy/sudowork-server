@@ -42,10 +42,7 @@ const VERSION_UPDATE_SCHEMA: SchemaField[] = [
     placeholder: "例如 cos.example.com",
   },
 ];
-const PRODUCT_IMPROVEMENT_SCHEMA: SchemaField[] = [
-  { kind: "protocol", name: "protocol", label: "上报协议" },
-  { kind: "text", name: "domain", label: "上报域名", placeholder: "例如 stats.example.com" },
-];
+const PRODUCT_IMPROVEMENT_SCHEMA: SchemaField[] = [];
 
 const SystemConfig: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -138,8 +135,6 @@ const SystemConfig: React.FC = () => {
     const res = (await adminApi.updateSystemConfig({
       product_improvement: {
         enabled: payload.enabled,
-        protocol: (payload.protocol as string) ?? "",
-        domain: (payload.domain as string) ?? "",
       },
     })) as any;
     if (!res?.success) {

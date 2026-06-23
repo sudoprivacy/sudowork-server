@@ -76,6 +76,8 @@ export const config = {
   encryption: {
     /** RSA-2048 private key PEM for decryption */
     privateKeyPem: process.env.QMS_TELEMETRY_PRIVATE_KEY || process.env.TELEMETRY_PRIVATE_KEY,
+    /** RSA-2048 public key PEM, distributed to clients for encryption (required when encryptionRequired=true) */
+    publicKeyPem: process.env.QMS_TELEMETRY_PUBLIC_KEY || process.env.TELEMETRY_PUBLIC_KEY,
     /** Whether encryption is required for telemetry/crash endpoints */
     encryptionRequired: (process.env.QMS_TELEMETRY_ENCRYPTION_REQUIRED || process.env.TELEMETRY_ENCRYPTION_REQUIRED) === "true",
     /** Encryption algorithm version */
