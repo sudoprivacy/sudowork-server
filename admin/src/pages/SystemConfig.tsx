@@ -239,7 +239,7 @@ const SystemConfig: React.FC = () => {
       />
       <SwitchConfigCard
         title="参与产品改进计划"
-        description="开启后将向指定地址(协议 + 域名)发送匿名使用统计。开启时上报协议与域名必填。"
+        description="用于开启匿名使用统计上报，收集使用数据帮助改进产品。开启前需在服务器配置 QMS_DEFAULT_API_KEY；若启用遥测加密，还需配置 QMS_TELEMETRY 公私钥对。"
         value={productImprovement}
         schema={PRODUCT_IMPROVEMENT_SCHEMA}
         onSave={saveProductImprovement}
