@@ -55,3 +55,32 @@ export async function encryptGcm(
     ciphertext: Buffer.from(new Uint8Array(encryptedBuffer)).toString("base64"),
   };
 }
+
+/**
+ * 用 AES-256-GCM 解密 Base64 nonce/ciphertext, 与 encryptGcm 对称。
+ * 参考 src/qms/middleware/decrypt.ts:132-151 的 subtle.decrypt 模式 (importKey "raw" + as any)。
+ */
+export async function decryptGcm(
+  nonceBase64: string,
+  ciphertextBase64: string,
+  key: Uint8Array,
+): Promise<Uint8Array> {
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    key as any,
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"],
+  );
+
+  const nonce = Buffer.from(nonceBase64, "base64");
+  const ciphertext = Buffer.from(ciphertextBase64, "base64");
+
+  const decryptedBuffer = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: nonce as any },
+    cryptoKey,
+    ciphertext as any,
+  );
+
+  return new Uint8Array(decryptedBuffer);
+}

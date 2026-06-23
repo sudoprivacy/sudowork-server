@@ -11,16 +11,27 @@
  */
 
 import { db } from "../db/index.js";
+import { encryptGcm, decryptGcm } from "../utils/aes-gcm.js";
 
 const LOGIN_METHOD_KEY = "login_method";
 const LOG_REPORT_KEY = "log_report";
 const VERSION_UPDATE_KEY = "version_update";
 const PRODUCT_IMPROVEMENT_KEY = "product_improvement";
 
+// 与 src/routes/system-config.ts:20 同一把 key（用户要求复用同一密钥；
+// 独立定义以避免对路由模块的反向依赖与最小化已有代码修改）。
+const LOG_REPORT_KEY_AES_KEY = Buffer.from(
+  "L7CbnQlwVrzWlaehCWSIiKuwBxFDh9i1AFaifYv7UXE=",
+  "base64",
+);
+
 export interface LogReportConfig {
   enabled: number;
   protocol?: string;
   domain?: string;
+  key_cipher?: string;
+  key_nonce?: string;
+  key_set?: boolean;
 }
 
 export interface VersionUpdateConfig {
@@ -102,21 +113,84 @@ export class SystemConfigService {
   }
 
   /**
-   * 获取日志上报配置。enabled=0 关闭(默认), enabled=1 开启需 protocol+domain 完整。
+   * 获取日志上报配置(同步)。enabled=0 关闭(默认), enabled=1 开启需 protocol+domain+key 完整。
+   * 返回值含 key_cipher/key_nonce 持久化字段与派生 key_set, 但不含明文 key。
+   * 明文 key 仅可通过 async getLogReportKeyPlaintext() 获得。
    */
   getLogReport(): LogReportConfig {
-    return this.getJsonConfig<LogReportConfig>(LOG_REPORT_KEY, {
+    const raw = this.getJsonConfig<LogReportConfig>(LOG_REPORT_KEY, {
       enabled: 0,
       protocol: "",
       domain: "",
     });
+    return {
+      enabled: raw.enabled,
+      protocol: raw.protocol,
+      domain: raw.domain,
+      key_cipher: raw.key_cipher,
+      key_nonce: raw.key_nonce,
+      key_set: !!(raw.key_cipher && raw.key_nonce),
+    };
   }
 
   /**
-   * 设置日志上报配置。整体替换,前端约定传入完整对象。
+   * 获取日志上报凭证 key 的明文(async, 仅供 credentials 接口下发使用)。
+   * 若 cipher/nonce 任一为空返回 "" ; 否则用 LOG_REPORT_KEY_AES_KEY 解密。
    */
-  setLogReport(value: LogReportConfig): void {
-    this.setJsonConfig(LOG_REPORT_KEY, value);
+  async getLogReportKeyPlaintext(): Promise<string> {
+    const raw = this.getJsonConfig<LogReportConfig>(LOG_REPORT_KEY, {
+      enabled: 0,
+      protocol: "",
+      domain: "",
+    });
+    if (!raw.key_cipher || !raw.key_nonce) {
+      return "";
+    }
+    const plaintextBytes = await decryptGcm(
+      raw.key_nonce,
+      raw.key_cipher,
+      LOG_REPORT_KEY_AES_KEY,
+    );
+    return new TextDecoder().decode(plaintextBytes);
+  }
+
+  /**
+   * 设置日志上报配置(async, 因 key 加密走 WebCrypto)。
+   * - key 非空字符串 → encryptGcm 加密得新 cipher/nonce 入库
+   * - key 为空字符串/undefined → 取既有 cipher/nonce 沿用 (业务上"空=不动 key"语义封装在 service 内部)
+   * 明文 key 不会落库, 也不会进入 LogReportConfig 流转。
+   */
+  async setLogReport(value: {
+    enabled: number;
+    protocol?: string;
+    domain?: string;
+    key?: string;
+  }): Promise<void> {
+    let keyCipher: string | undefined;
+    let keyNonce: string | undefined;
+    if (typeof value.key === "string" && value.key.length > 0) {
+      const enc = await encryptGcm(
+        new TextEncoder().encode(value.key),
+        LOG_REPORT_KEY_AES_KEY,
+      );
+      keyCipher = enc.ciphertext;
+      keyNonce = enc.nonce;
+    } else {
+      const existing = this.getJsonConfig<LogReportConfig>(LOG_REPORT_KEY, {
+        enabled: 0,
+        protocol: "",
+        domain: "",
+      });
+      keyCipher = existing.key_cipher;
+      keyNonce = existing.key_nonce;
+    }
+    this.setJsonConfig(LOG_REPORT_KEY, {
+      enabled: value.enabled,
+      protocol: value.protocol ?? "",
+      domain: value.domain ?? "",
+      key_cipher: keyCipher,
+      key_nonce: keyNonce,
+    });
   }
 
   /**

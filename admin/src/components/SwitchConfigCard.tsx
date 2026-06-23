@@ -5,7 +5,8 @@ const { Text } = Typography;
 
 export type SchemaField =
   | { kind: "protocol"; name: string; label: string }
-  | { kind: "text"; name: string; label: string; placeholder?: string };
+  | { kind: "text"; name: string; label: string; placeholder?: string }
+  | { kind: "secret"; name: string; label: string; placeholder?: string };
 
 export interface SwitchConfigCardValue {
   enabled: number;
@@ -18,6 +19,7 @@ export interface SwitchConfigCardProps {
   value: SwitchConfigCardValue;
   schema: SchemaField[];
   onSave: (payload: SwitchConfigCardValue) => Promise<void>;
+  secretFieldsSet?: Record<string, boolean>;
 }
 
 const SwitchConfigCard: React.FC<SwitchConfigCardProps> = ({
@@ -26,6 +28,7 @@ const SwitchConfigCard: React.FC<SwitchConfigCardProps> = ({
   value,
   schema,
   onSave,
+  secretFieldsSet,
 }) => {
   const [enabled, setEnabled] = useState<boolean>(value.enabled === 1);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
@@ -59,6 +62,12 @@ const SwitchConfigCard: React.FC<SwitchConfigCardProps> = ({
           const v = fieldValues[f.name];
           if (v !== "http" && v !== "https") {
             message.error(`${f.label} 必须为 http 或 https`);
+            return;
+          }
+        } else if (f.kind === "secret") {
+          const v = (fieldValues[f.name] || "").trim();
+          if (!v && secretFieldsSet?.[f.name] !== true) {
+            message.error(`${f.label} 必填且非空`);
             return;
           }
         } else {
@@ -106,6 +115,23 @@ const SwitchConfigCard: React.FC<SwitchConfigCardProps> = ({
                   ]}
                   placeholder="选择协议类型"
                   style={{ maxWidth: 240 }}
+                />
+              </Form.Item>
+            ) : f.kind === "secret" ? (
+              <Form.Item
+                key={f.name}
+                label={f.label}
+                required={!secretFieldsSet?.[f.name]}
+              >
+                <Input.Password
+                  value={fieldValues[f.name] || ""}
+                  onChange={(e) => setField(f.name, e.target.value)}
+                  placeholder={
+                    secretFieldsSet?.[f.name]
+                      ? "已设置（留空则不修改）"
+                      : f.placeholder ?? ""
+                  }
+                  style={{ maxWidth: 420 }}
                 />
               </Form.Item>
             ) : (

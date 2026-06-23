@@ -67,7 +67,16 @@ systemConfigRoutes.get(
       data: {
         login_method: systemConfigService.getLoginMethod(),
         sms_configured: systemConfigService.isSmsChannelConfigured(),
-        log_report: systemConfigService.getLogReport(),
+        log_report: (() => {
+          const lr = systemConfigService.getLogReport();
+          return {
+            enabled: lr.enabled,
+            protocol: lr.protocol ?? "",
+            domain: lr.domain ?? "",
+            key: "",
+            key_set: !!lr.key_set,
+          };
+        })(),
         version_update: systemConfigService.getVersionUpdate(),
         product_improvement: systemConfigService.getProductImprovement(),
       },
@@ -116,7 +125,8 @@ systemConfigRoutes.put(
     }
 
     if (body.log_report !== undefined) {
-      const { enabled, protocol, domain } = body.log_report;
+      const { enabled, protocol, domain, key } = body.log_report;
+      const before = systemConfigService.getLogReport();
       if (enabled === 1) {
         if (protocol !== "http" && protocol !== "https") {
           return c.json(
@@ -130,16 +140,33 @@ systemConfigRoutes.put(
             400,
           );
         }
+        if (!((typeof key === "string" && key.length > 0) || before.key_set === true)) {
+          return c.json(
+            { success: false, msg: "日志上报开启时,Key 必填" },
+            400,
+          );
+        }
       }
-      const before = systemConfigService.getLogReport();
-      systemConfigService.setLogReport({
+      await systemConfigService.setLogReport({
         enabled: enabled === 1 ? 1 : 0,
         protocol: protocol ?? "",
         domain: domain ?? "",
+        key,
       });
+      const afterKeySet = before.key_set || (typeof key === "string" && key.length > 0);
       changes.log_report = {
-        before,
-        after: { enabled: enabled === 1 ? 1 : 0, protocol: protocol ?? "", domain: domain ?? "" },
+        before: {
+          enabled: before.enabled,
+          protocol: before.protocol,
+          domain: before.domain,
+          key_set: before.key_set,
+        },
+        after: {
+          enabled: enabled === 1 ? 1 : 0,
+          protocol: protocol ?? "",
+          domain: domain ?? "",
+          key_set: afterKeySet,
+        },
       };
     }
 
@@ -221,6 +248,11 @@ systemConfigRoutes.get(
     const data: Record<string, unknown> = {
       skillhub: { token: process.env.SKILLHUB_API_TOKEN || "" },
     };
+    const lr = systemConfigService.getLogReport();
+    if (lr.enabled === 1 && lr.key_set) {
+      const k = await systemConfigService.getLogReportKeyPlaintext();
+      if (k) data.log_report = { key: k };
+    }
     if (systemConfigService.getProductImprovement().enabled === 1) {
       const pi: Record<string, string> = {
         api_key: config.auth.defaultApiKey || "",

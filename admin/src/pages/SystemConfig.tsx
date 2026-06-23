@@ -33,6 +33,7 @@ function getDesc(m: number): LoginDesc {
 const LOG_REPORT_SCHEMA: SchemaField[] = [
   { kind: "protocol", name: "protocol", label: "上报协议" },
   { kind: "text", name: "domain", label: "上报域名", placeholder: "例如 123.com" },
+  { kind: "secret", name: "key", label: "上报 Key", placeholder: "请填写上报凭证 Key" },
 ];
 const VERSION_UPDATE_SCHEMA: SchemaField[] = [
   {
@@ -57,6 +58,7 @@ const SystemConfig: React.FC = () => {
     protocol: "",
     domain: "",
   });
+  const [logReportKeySet, setLogReportKeySet] = useState<boolean>(false);
   const [versionUpdate, setVersionUpdate] = useState<SwitchConfigCardValue>({
     enabled: 0,
     cos_domain: "",
@@ -81,7 +83,9 @@ const SystemConfig: React.FC = () => {
               enabled: response.data.log_report.enabled ?? 0,
               protocol: response.data.log_report.protocol ?? "",
               domain: response.data.log_report.domain ?? "",
+              key: "",
             });
+            setLogReportKeySet(!!response.data.log_report.key_set);
           }
           if (response.data.version_update) {
             setVersionUpdate({
@@ -112,6 +116,7 @@ const SystemConfig: React.FC = () => {
         enabled: payload.enabled,
         protocol: (payload.protocol as string) ?? "",
         domain: (payload.domain as string) ?? "",
+        key: (payload.key as string) ?? "",
       },
     })) as any;
     if (!res?.success) {
@@ -229,6 +234,7 @@ const SystemConfig: React.FC = () => {
         value={logReport}
         schema={LOG_REPORT_SCHEMA}
         onSave={saveLogReport}
+        secretFieldsSet={{ key: logReportKeySet }}
       />
       <SwitchConfigCard
         title="版本自动更新"
