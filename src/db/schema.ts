@@ -322,4 +322,91 @@ export function initSchema(): void {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // ============================================
+  // Dify 整合相关表 (Dify Integration)
+  // ============================================
+
+  // 企业 → Dify Tenant 绑定
+  // 每个企业最多一行; api_key 为 Dify Service API key 明文。
+  // 不加密的原因：sudowork-server SQLite 自身已是后端机密文件，再加 AES 只增加运维复杂度
+  // （额外的 KMS 备份/轮换），不会增强真正的安全边界。防止外泄靠把 api_key 永远不暴露给客户端。
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dify_tenant_binding (
+      enterprise_id INTEGER PRIMARY KEY,
+      dify_tenant_id TEXT NOT NULL UNIQUE,
+      dify_system_account_id TEXT,
+      api_key TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id)
+    );
+  `);
+
+  // 助手 ↔ Dify App 绑定
+  // app_api_key 是 Dify api_tokens 表里 type=app 的 token；只能用来调
+  // /v1/chat-messages 和 /v1/workflows/run。在 createAgent 时直接 INSERT 一行
+  // 进 Dify 的 api_tokens 表（通过系统端点），把 token 回填到这里。
+  // 与 dify_tenant_binding.api_key (type=dataset) 不同，那条仅用于
+  // /v1/datasets/{id}/queries（RAG-only 模式）。
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dify_app_binding (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      enterprise_id INTEGER NOT NULL,
+      assistant_id TEXT NOT NULL,
+      dify_tenant_id TEXT NOT NULL,
+      dify_app_id TEXT NOT NULL,
+      app_api_key TEXT,
+      -- dify_app_mode：Dify App 的原生模式，1:1 反映 Dify 侧的 mode。
+      --   值域：'chat' | 'agent-chat' | 'agent' | 'workflow' | 'advanced-chat' | 'completion'
+      --
+      -- 2026-06-22 P2.5.1：原"增强子模式" 'rag-only' 已废弃。纯 RAG 助手不再写本表，
+      -- 改写 dify_dataset_binding。详见 2026-06-17-dify-integration-design.md
+      -- 「知识增强：两个维度」。历史 'rag-only' 行由迁移脚本清理。
+      dify_app_mode TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(enterprise_id, assistant_id),
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id)
+    );
+  `);
+
+  // 助手可见性 ACL
+  // subject_type='all' 时 subject_id 为 NULL — 表示企业内全员可见
+  db.run(`
+    CREATE TABLE IF NOT EXISTS assistant_acl (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      enterprise_id INTEGER NOT NULL,
+      assistant_id TEXT NOT NULL,
+      subject_type TEXT NOT NULL CHECK(subject_type IN ('user','department','role','all')),
+      subject_id TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id)
+    );
+  `);
+
+  // 助手 → 数据集绑定（一对多）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dify_dataset_binding (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      enterprise_id INTEGER NOT NULL,
+      assistant_id TEXT NOT NULL,
+      dify_tenant_id TEXT NOT NULL,
+      dify_dataset_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(enterprise_id, assistant_id, dify_dataset_id),
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id)
+    );
+  `);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dify_app_binding_app_id ON dify_app_binding(dify_app_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_assistant_acl_assistant_id ON assistant_acl(assistant_id)`);
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_acl_unique
+       ON assistant_acl(enterprise_id, assistant_id, subject_type, COALESCE(subject_id, ''))`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_dify_dataset_binding_assistant
+       ON dify_dataset_binding(enterprise_id, assistant_id)`,
+  );
 }

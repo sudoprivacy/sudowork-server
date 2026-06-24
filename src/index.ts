@@ -21,6 +21,9 @@ import { miscRoutes } from "./routes/misc.js";
 import { rechargeRoutes } from "./routes/recharge.js";
 import { proxyRoutes } from "./routes/external-proxy.js";
 import { systemConfigRoutes } from "./routes/system-config.js";
+import { adminDifyRoutes } from "./routes/admin-dify.js";
+import { adminDatasetsRoutes } from "./routes/admin-datasets.js";
+import { agentsRoutes } from "./routes/agents.js";
 import { loginByConfigRoutes } from "./routes/auth-login-by-config.js";
 import { authChangePasswordRoutes } from "./routes/auth-change-password.js";
 import { authRegisterPasswordRoutes } from "./routes/auth-register-password.js";
@@ -74,6 +77,9 @@ app.get("/", async (c) => {
 // External proxy routes first
 app.route("/api", proxyRoutes);
 app.route("/api/v1/admin", adminRoutes);
+app.route("/api/v1/admin/dify", adminDifyRoutes);
+app.route("/api/v1/admin", adminDatasetsRoutes);
+app.route("/api/v1/agents", agentsRoutes);
 app.route("/api/v1/auth", authRoutes);
 app.route("/api/v1/auth", loginByConfigRoutes);
 app.route("/api/v1/auth", authChangePasswordRoutes);

@@ -37,6 +37,12 @@ export function runMigrations(): void {
   // 登录方式可配置:users.login_type 列 + system_config 表
   addColumnIfNotExists("users", "login_type", "INTEGER NOT NULL DEFAULT 0");
   createSystemConfigTable();
+
+  // Dify integration: per-app service api key, lives alongside the binding so
+  // runtime calls to /v1/chat-messages and /v1/workflows/run can use a
+  // properly-scoped 'app' type token instead of the tenant-wide 'dataset'
+  // token (which Dify rejects with 401 for app endpoints).
+  addColumnIfNotExists("dify_app_binding", "app_api_key", "TEXT");
 }
 
 /**
