@@ -74,4 +74,7 @@ function createSystemConfigTable(): void {
     );
   `);
   db.run(`INSERT OR IGNORE INTO system_config(key, value) VALUES('login_method', '0')`);
+  db.run(`INSERT OR IGNORE INTO system_config(key, value) VALUES('log_report', '{"enabled":0,"protocol":"","domain":""}')`);
+  db.run(`INSERT OR IGNORE INTO system_config(key, value) VALUES('version_update', '{"enabled":0,"cos_domain":""}')`);
+  db.run(`INSERT OR IGNORE INTO system_config(key, value) VALUES('product_improvement', '{"enabled":0,"protocol":"","domain":""}')`);
 }

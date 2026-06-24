@@ -306,8 +306,12 @@ export const adminApi = {
 
   getAdminSystemConfig: () => api.get("/v1/admin/system-config"),
 
-  updateSystemConfig: (data: { login_method: number }) =>
-    api.put("/v1/admin/system-config", data),
+  updateSystemConfig: (data: {
+    login_method?: number;
+    log_report?: { enabled: number; protocol?: string; domain?: string; key?: string };
+    version_update?: { enabled: number; cos_domain?: string };
+    product_improvement?: { enabled: number; protocol?: string; domain?: string };
+  }) => api.put("/v1/admin/system-config", data),
 
   // Password login user APIs (用户名密码登录方式)
   createPasswordUser: (data: {
