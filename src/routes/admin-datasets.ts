@@ -45,6 +45,7 @@ import {
   updateDataset,
   DifyClientError,
 } from "../services/DifyClient.js";
+import { ensureTenantBinding } from "../services/DifyTenantService.js";
 
 const adminDatasetsRoutes = new Hono();
 
@@ -58,25 +59,35 @@ function resolveOrFail(c: Context, r: ResolveResult): number | Response {
 }
 
 /**
- * Pull the tenant-scoped api key. If the enterprise has never been
- * provisioned (i.e. nobody ever opened the Dify Studio link), bubble up
- * a helpful 409 instead of a generic 500 — the admin needs to know they
- * have to bootstrap first.
+ * Pull the tenant-scoped api key. If the enterprise has never been provisioned
+ * yet, fall through to `ensureTenantBinding` so the admin's first visit to
+ * 知识库管理 self-heals — matches what /admin/dify/datasets already does and
+ * removes a 409 dead-end that previously forced admins to open Dify Studio
+ * once before any RAG operation would work.
+ *
+ * First-call latency: 1–3s for Dify tenant + system account + default plugin
+ * declarations. Subsequent calls hit the cached binding row and return
+ * synchronously.
  */
-function loadApiKeyOrFail(c: Context, enterpriseId: number): { apiKey: string } | Response {
+async function loadApiKeyOrFail(
+  c: Context,
+  enterpriseId: number,
+): Promise<{ apiKey: string } | Response> {
   try {
     return { apiKey: loadServiceApiKey(enterpriseId).apiKey };
-  } catch (err) {
-    return c.json(
-      {
-        success: false,
-        msg:
-          "enterprise has no Dify tenant binding yet; open Dify Studio once " +
-          "to provision the tenant before managing datasets",
-        detail: (err as Error).message,
-      },
-      409,
-    );
+  } catch {
+    try {
+      const binding = await ensureTenantBinding(enterpriseId);
+      return { apiKey: binding.api_key };
+    } catch (err) {
+      return c.json(
+        {
+          success: false,
+          msg: `Dify tenant provisioning failed: ${(err as Error).message}`,
+        },
+        500,
+      );
+    }
   }
 }
 
@@ -94,7 +105,7 @@ function difyErrorResponse(c: Context, err: unknown): Response {
 adminDatasetsRoutes.get("/datasets", async (c) => {
   const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+  const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
   if (keyOrResp instanceof Response) return keyOrResp;
 
   const url = new URL(c.req.url);
@@ -124,7 +135,7 @@ adminDatasetsRoutes.post("/datasets", async (c) => {
 
   const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+  const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
   if (keyOrResp instanceof Response) return keyOrResp;
 
   try {
@@ -143,7 +154,7 @@ adminDatasetsRoutes.post("/datasets", async (c) => {
 adminDatasetsRoutes.get("/datasets/:datasetId", async (c) => {
   const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+  const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
   if (keyOrResp instanceof Response) return keyOrResp;
 
   try {
@@ -167,7 +178,7 @@ adminDatasetsRoutes.patch("/datasets/:datasetId", async (c) => {
 
   const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+  const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
   if (keyOrResp instanceof Response) return keyOrResp;
 
   try {
@@ -185,7 +196,7 @@ adminDatasetsRoutes.patch("/datasets/:datasetId", async (c) => {
 adminDatasetsRoutes.delete("/datasets/:datasetId", async (c) => {
   const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+  const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
   if (keyOrResp instanceof Response) return keyOrResp;
 
   try {
@@ -203,7 +214,7 @@ adminDatasetsRoutes.delete("/datasets/:datasetId", async (c) => {
 adminDatasetsRoutes.get("/datasets/:datasetId/documents", async (c) => {
   const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+  const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
   if (keyOrResp instanceof Response) return keyOrResp;
 
   const url = new URL(c.req.url);
@@ -247,7 +258,7 @@ adminDatasetsRoutes.post("/datasets/:datasetId/documents", async (c) => {
       }),
     );
     if (typeof enterpriseId !== "number") return enterpriseId;
-    const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+    const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
     if (keyOrResp instanceof Response) return keyOrResp;
 
     const file = form.get("file");
@@ -286,7 +297,7 @@ adminDatasetsRoutes.post("/datasets/:datasetId/documents", async (c) => {
 
   const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+  const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
   if (keyOrResp instanceof Response) return keyOrResp;
 
   try {
@@ -304,7 +315,7 @@ adminDatasetsRoutes.post("/datasets/:datasetId/documents", async (c) => {
 adminDatasetsRoutes.delete("/datasets/:datasetId/documents/:documentId", async (c) => {
   const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+  const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
   if (keyOrResp instanceof Response) return keyOrResp;
 
   try {
@@ -335,7 +346,7 @@ adminDatasetsRoutes.post("/datasets/:datasetId/retrieve", async (c) => {
 
   const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const keyOrResp = loadApiKeyOrFail(c, enterpriseId);
+  const keyOrResp = await loadApiKeyOrFail(c, enterpriseId);
   if (keyOrResp instanceof Response) return keyOrResp;
 
   try {
