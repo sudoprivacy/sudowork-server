@@ -169,35 +169,6 @@ function SectionTitle(props: {
   );
 }
 
-/**
- * Shown beneath the `agent-chat` mode selector to address an UX confusion:
- * admins expect the prompt.md they wrote to also drive the Dify Agent, but the
- * two prompts live in different processes (local ACP vs. Dify sub-agent) and
- * are independent. See "TODO-1" in 2026-06-17-dify-integration-design.md.
- */
-const AGENT_CHAT_PROMPT_NOTICE = (
-  <div
-    style={{
-      padding: "8px 12px",
-      borderRadius: 6,
-      background: "var(--ant-color-warning-bg, #fff7e6)",
-      border: "1px solid var(--ant-color-warning-border, #ffe7ba)",
-      fontSize: 12,
-      lineHeight: 1.6,
-      color: "var(--ant-color-text-secondary, #595959)",
-      marginTop: -4,
-      marginBottom: 8,
-    }}
-  >
-    <div style={{ fontWeight: 600, color: "var(--ant-color-warning, #d48806)", marginBottom: 4 }}>
-      Agent 模式提示
-    </div>
-    上方填写的「提示词 (.md)」是<b>本地助手主大脑</b>的人格与对话指令。点击「Dify Studio」跳转后看到的「提示词」框是<b>Dify 子大脑（检索代理）</b>的指令，与 .md 内容相互独立、各自约束不同的 LLM 调用——
-    <b>不冲突，但也不会自动同步</b>。子大脑提示词留空时 Dify 会用默认人格回答，建议在 Dify Studio 中明确写出"作为
-    XXX 助手的知识检索代理，输出简洁可引用的事实片段"等指令。
-  </div>
-);
-
 /** Server returns this annotated row for each sudohub assistant. */
 interface EnhancementInfo {
   enabled: boolean;
@@ -1827,20 +1798,6 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                 return null;
               }}
             </Form.Item>
-            <Form.Item
-              noStyle
-              shouldUpdate={(p, c) =>
-                p.knowledge_mode !== c.knowledge_mode ||
-                p.enhancement_mode !== c.enhancement_mode
-              }
-            >
-              {({ getFieldValue }) =>
-                getFieldValue("knowledge_mode") === "enhancement" &&
-                getFieldValue("enhancement_mode") === "agent-chat"
-                  ? AGENT_CHAT_PROMPT_NOTICE
-                  : null
-              }
-            </Form.Item>
           </Form>
         </Modal>
       )}
@@ -1932,16 +1889,6 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                               { label: ENH_MODE_LABEL.workflow, value: "workflow" },
                             ]}
                           />
-                        </Form.Item>
-                        <Form.Item
-                          noStyle
-                          shouldUpdate={(p, c) => p.enhancement_mode !== c.enhancement_mode}
-                        >
-                          {({ getFieldValue: getInner }) =>
-                            getInner("enhancement_mode") === "agent-chat"
-                              ? AGENT_CHAT_PROMPT_NOTICE
-                              : null
-                          }
                         </Form.Item>
                         {enhancementMap[editingRow.id]?.dify_app_id && (
                           <Button
