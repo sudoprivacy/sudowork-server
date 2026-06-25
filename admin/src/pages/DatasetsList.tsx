@@ -20,6 +20,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
+  Alert,
   Button,
   Card,
   Drawer,
@@ -52,6 +53,7 @@ import {
   UploadOutlined,
 } from "@ant-design/icons";
 import { adminApi } from "../api";
+import { useDifyFeatureFlag } from "../hooks/useDifyFeatureFlag";
 
 const { Text, Title } = Typography;
 
@@ -116,6 +118,12 @@ const DatasetsList: React.FC = () => {
   }
   const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
 
+  // Dataset endpoints all proxy to Dify Service API. When sudowork-server
+  // isn't configured with DIFY_* env vars we short-circuit the whole page
+  // to a "未开启" notice instead of letting every action burst into 503s.
+  const difyFlag = useDifyFeatureFlag();
+  const difyDisabled = !difyFlag.loading && !difyFlag.enabled;
+
   const [enterprises, setEnterprises] = useState<EnterpriseSummary[]>([]);
   const [selectedEnterpriseCode, setSelectedEnterpriseCode] = useState<string | null>(null);
 
@@ -136,6 +144,11 @@ const DatasetsList: React.FC = () => {
   const [total, setTotal] = useState(0);
 
   const reload = useCallback(async () => {
+    if (difyDisabled) {
+      setDatasets([]);
+      setTotal(0);
+      return;
+    }
     if (!selectedEnterpriseId) {
       setDatasets([]);
       setTotal(0);
@@ -161,9 +174,10 @@ const DatasetsList: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedEnterpriseId, page, pageSize, keyword]);
+  }, [difyDisabled, selectedEnterpriseId, page, pageSize, keyword]);
 
   useEffect(() => {
+    if (difyDisabled) return;
     if (isSuperAdmin) {
       adminApi
         .getEnterprises()
@@ -172,7 +186,7 @@ const DatasetsList: React.FC = () => {
         })
         .catch(() => undefined);
     }
-  }, [isSuperAdmin]);
+  }, [difyDisabled, isSuperAdmin]);
 
   useEffect(() => {
     void reload();
@@ -374,6 +388,35 @@ const DatasetsList: React.FC = () => {
       ),
     },
   ];
+
+  if (difyDisabled) {
+    return (
+      <div>
+        <Title level={3} style={{ marginTop: 0 }}>
+          <DatabaseOutlined /> 知识库管理
+        </Title>
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginTop: 16 }}
+          message="知识库功能未开启"
+          description={
+            <>
+              知识库 CRUD 全部走 Dify Service API，需要先在 sudowork-server 配置
+              {" "}
+              <Text code>{difyFlag.missingEnv.join(", ") || "DIFY_*"}</Text>
+              {" "}并重启服务。补齐后该页面会自动恢复全部功能（列表 / 创建 / 编辑 /
+              删除 / 文档管理 / 测试查询）。
+            </>
+          }
+        />
+        <Empty
+          description="Dify 集成未配置 - 知识库管理暂不可用"
+          style={{ marginTop: 32 }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div>

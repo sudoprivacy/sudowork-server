@@ -31,6 +31,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 
 import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
+import { requireDifyConfigured } from "../middleware/dify-feature.js";
 import {
   createAgent,
   deleteAgent,
@@ -66,6 +67,7 @@ const adminDifyRoutes = new Hono();
 
 adminDifyRoutes.use("*", authMiddleware);
 adminDifyRoutes.use("*", adminMiddleware);
+adminDifyRoutes.use("*", requireDifyConfigured);
 
 /** Tiny adapter so handlers can either get `enterpriseId` or short-circuit. */
 function resolveOrFail(c: Context, r: ResolveResult): number | Response {

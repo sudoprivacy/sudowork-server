@@ -340,6 +340,13 @@ export const adminApi = {
   // ============================================
 
   /**
+   * Probe capability flags. Currently exposes `dify.enabled` so the SPA can
+   * render "disabled" banners on assistant / dataset pages when the operator
+   * hasn't filled in DIFY_* env vars on sudowork-server.
+   */
+  getFeatures: () => api.get("/v1/admin/features"),
+
+  /**
    * List sudohub assistants in the (resolved) enterprise, annotated with
    * binding + ACL. SUPER_ADMIN must pass `enterprise_id`; ENTERPRISE_ADMIN
    * may omit it (auto-scoped to their own).

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
+  Alert,
   Card,
   Input,
   Button,
@@ -35,6 +36,7 @@ import {
 } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import { adminApi } from "../api";
+import { useDifyFeatureFlag } from "../hooks/useDifyFeatureFlag";
 
 /** Display labels for Dify enhancement modes (2026-06-22 P2.5.1: rag-only retired). */
 const ENH_MODE_LABEL: Record<"agent-chat" | "workflow", string> = {
@@ -352,6 +354,13 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   const isSkillsPage = assetType === "skills";
   const pageTitle = isSkillsPage ? "专属技能" : "专属助手";
 
+  // Dify integration may be off (operator hasn't set DIFY_* env). When it's
+  // off in the assistants tab, we still render the sudohub-backed table but
+  // hide the Dify-derived columns / buttons and surface a warning banner.
+  // The skills tab doesn't touch Dify and is unaffected.
+  const difyFlag = useDifyFeatureFlag();
+  const difyDisabled = !isSkillsPage && !difyFlag.loading && !difyFlag.enabled;
+
   /**
    * Server endpoints under `/admin/dify/*` use the numeric enterprise id, not
    * the sudohub tenant code. Super admin selects a tenant code from the
@@ -392,6 +401,13 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   // degrade to "未启用 / 企业全员" without blocking the list.
   useEffect(() => {
     if (isSkillsPage) return;
+    // Dify off → no annotations to fetch; columns degrade naturally.
+    if (difyDisabled) {
+      setEnhancementMap({});
+      setAclMap({});
+      setDatasetMap({});
+      return;
+    }
     if (!selectedEnterpriseId) {
       setEnhancementMap({});
       setAclMap({});
@@ -435,7 +451,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     return () => {
       cancelled = true;
     };
-  }, [isSkillsPage, selectedEnterpriseId, assetType, annotationsTick]);
+  }, [isSkillsPage, difyDisabled, selectedEnterpriseId, assetType, annotationsTick]);
 
   // Load users (for the ACL "specific users" picker). One pass per tenant
   // change. Failure here is non-fatal — admin can still pick "全员可见".
@@ -467,6 +483,10 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   // Load Dify datasets for the binding picker. Same lifecycle as users.
   useEffect(() => {
     if (isSkillsPage) return;
+    if (difyDisabled) {
+      setDatasets([]);
+      return;
+    }
     if (!selectedEnterpriseId) {
       setDatasets([]);
       return;
@@ -488,7 +508,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     return () => {
       cancelled = true;
     };
-  }, [isSkillsPage, selectedEnterpriseId]);
+  }, [isSkillsPage, difyDisabled, selectedEnterpriseId]);
 
   const userOptions = useMemo(
     () =>
@@ -1190,6 +1210,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
             type="link"
             size="small"
             icon={<SettingOutlined />}
+            disabled={difyDisabled}
             onClick={() => openEditDrawer(record)}
           >
             编辑
@@ -1198,7 +1219,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
             type="link"
             size="small"
             icon={<LinkOutlined />}
-            disabled={!enhancementMap[record.id]?.enabled}
+            disabled={difyDisabled || !enhancementMap[record.id]?.enabled}
             onClick={() => openInStudio(record)}
           >
             Dify Studio
@@ -1308,17 +1329,44 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           {pageTitle}
         </Title>
         {!isSkillsPage && (
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            // Super admin must pick a tenant first; enterprise admin always can.
-            disabled={isSuperAdmin && !selectedEnterprise}
-            onClick={openCreateModal}
+          <Tooltip
+            title={
+              difyDisabled
+                ? `Dify 集成未配置：缺少 ${difyFlag.missingEnv.join(", ")}`
+                : ""
+            }
           >
-            新建助手
-          </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              // Super admin must pick a tenant first; enterprise admin always can.
+              disabled={difyDisabled || (isSuperAdmin && !selectedEnterprise)}
+              onClick={openCreateModal}
+            >
+              新建助手
+            </Button>
+          </Tooltip>
         )}
       </div>
+
+      {difyDisabled && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Dify 增强未开启"
+          description={
+            <>
+              专属助手的「Dify 增强 / 知识库挂载 / Studio 跳转」功能依赖 Dify 集成，
+              当前 sudowork-server 缺少以下环境变量：
+              {" "}
+              <Text code>{difyFlag.missingEnv.join(", ") || "(unknown)"}</Text>
+              。补齐 <Text code>.env</Text> 并重启服务后即可启用。基础的 sudohub
+              助手元数据浏览不受影响。
+            </>
+          }
+        />
+      )}
 
       <Card style={{ marginBottom: 12 }} styles={{ body: { padding: 12 } }}>
         <Form form={filterForm} layout="inline">
@@ -1370,7 +1418,13 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               <Table<Assistant>
                 rowKey="id"
                 dataSource={assistants}
-                columns={assistantColumns}
+                columns={
+                  difyDisabled
+                    ? assistantColumns.filter(
+                        (c) => c.key !== "knowledge" && c.key !== "acl",
+                      )
+                    : assistantColumns
+                }
                 loading={loading}
                 pagination={false}
                 // Fixed-column widths now total ~1640 (name 220 + version 100

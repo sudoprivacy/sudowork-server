@@ -23,6 +23,7 @@
 import { Hono } from "hono";
 
 import { authMiddleware } from "../middleware/auth.js";
+import { requireDifyConfigured } from "../middleware/dify-feature.js";
 import { db } from "../db/index.js";
 import {
   findAgent,
@@ -46,6 +47,7 @@ import * as sudohub from "../services/SudohubClient.js";
 const agentsRoutes = new Hono();
 
 agentsRoutes.use("*", authMiddleware);
+agentsRoutes.use("*", requireDifyConfigured);
 
 /**
  * Build the EndUser identifier passed in the `user` field of Dify Service API

@@ -24,6 +24,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 
 import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
+import { requireDifyConfigured } from "../middleware/dify-feature.js";
 import {
   resolveAdminEnterpriseId,
   resolveFromQuery,
@@ -49,6 +50,7 @@ const adminDatasetsRoutes = new Hono();
 
 adminDatasetsRoutes.use("*", authMiddleware);
 adminDatasetsRoutes.use("*", adminMiddleware);
+adminDatasetsRoutes.use("*", requireDifyConfigured);
 
 function resolveOrFail(c: Context, r: ResolveResult): number | Response {
   if (r.ok) return r.enterpriseId;
