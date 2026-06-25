@@ -286,11 +286,11 @@ export function listAcl(enterpriseId: number, assistantId: string): AclEntry[] {
  *     从 `dify_tenant_binding` 拿。
  *   - 互斥校验在 service 层做：若该助手已有 `dify_app_binding`，拒绝写入。
  */
-export function replaceDatasets(
+export async function replaceDatasets(
   enterpriseId: number,
   assistantId: string,
   datasetIds: string[],
-): string[] {
+): Promise<string[]> {
   const hasDifyApp = db
     .prepare(
       `SELECT 1 FROM dify_app_binding WHERE enterprise_id = ? AND assistant_id = ?`,
@@ -301,11 +301,13 @@ export function replaceDatasets(
       `assistant ${assistantId} has Dify enhancement; dataset attachment is exclusive — clear enhancement first`,
     );
   }
-  const tenant = getTenantBinding(enterpriseId);
+  // Self-heal the tenant binding on first attachment so the admin doesn't
+  // hit a dead-end the first time they touch RAG for a fresh enterprise.
+  // Pure-clear calls (datasetIds = []) skip provisioning — no point spinning
+  // up a Dify tenant just to delete zero rows.
+  let tenant = getTenantBinding(enterpriseId);
   if (!tenant && datasetIds.length > 0) {
-    throw new Error(
-      `enterprise ${enterpriseId} has no Dify tenant binding; cannot attach datasets`,
-    );
+    tenant = await ensureTenantBinding(enterpriseId);
   }
   const tx = db.transaction(() => {
     db.prepare(
