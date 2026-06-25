@@ -26,10 +26,19 @@
  * evolves on their side. Callers receive whatever JSON sudohub returned.
  */
 
+// Env names: SudohubClient was introduced after `external-proxy.ts`, which
+// had already shipped using `SKILLHUB_BASE_URL` / `SKILLHUB_API_TOKEN`.
+// Deployments configured against the original names would silently fall back
+// to the public `sudoworkhub.sudoprivacy.com` (unreachable in airgapped
+// customer sites) and hit a 10s socket timeout. Accept either name to keep
+// existing .env files working without forcing every customer to rename.
 const SUDOHUB_BASE_URL = (
-  process.env.SUDOHUB_BASE_URL || "https://sudoworkhub.sudoprivacy.com"
+  process.env.SUDOHUB_BASE_URL ||
+  process.env.SKILLHUB_BASE_URL ||
+  "https://sudoworkhub.sudoprivacy.com"
 ).replace(/\/+$/, "");
-const SUDOHUB_AUTH = process.env.SUDOHUB_AUTH_TOKEN || "sud0@sudo";
+const SUDOHUB_AUTH =
+  process.env.SUDOHUB_AUTH_TOKEN || process.env.SKILLHUB_API_TOKEN || "sud0@sudo";
 
 export class SudohubClientError extends Error {
   status: number;
