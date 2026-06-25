@@ -696,7 +696,7 @@ SUDOWORK_ALLOWED_IPS=10.0.0.0/8
 | **P2.7+ renderer 接入** | 0.5 周 | `sessionBinding.ts` helper（读 token / 解析 sudohub UUID / bind / unbind）；`useGuidSend` 两个创建分支注入 bind；`useGuidAgentSelection` 用 visibility 变体加载助手列表；`conversation/index.tsx` mount 时 rebind；`useConversationActions` 删除时 unbind；`assistantAdapter.fetchVisibleAssistantsAsConfigs` |
 | **P3 RAG 挂载** | 1 周 | **2026-06-23 完成**。admin 新增「知识库」菜单（列表 / 新建 / 编辑 / 删除 / 文档管理 Drawer / 测试查询 Drawer）；后端 `routes/admin-datasets.ts` 9 个端点透传 Dify Service API（**未新增 Inner API**，Service API 完整覆盖）；`DifyClient` 扩展 `createDataset` / `updateDataset` / `deleteDataset` / `getDataset` / `listDatasetsServiceApi` / `listDocuments` / `createDocumentByText` / `createDocumentByFile` / `deleteDocument` / `retrieveDataset` 10 个方法；admin SPA 加 `DatasetsList.tsx` + 「知识库」侧栏菜单（DatabaseOutlined） |
 | **P3.5 数据源插件** | 2 周（与 P4 并行） | UE / 代码 等格式做 Dify datasource plugin |
-| **P3.5b 默认模型 provider 预装** | 1 天 | **2026-06-23 完成**。`dify/docker/sudowork-patches/default-plugins.json` 列 44 个主流 LLM provider；`seed-plugins.sh` 一次性下载 `.difypkg` 到 `volumes/plugin_daemon/plugin_packages/langgenius/` 并产出 `default-plugins.lock.json`；`tenant_provisioning_service.py` 创建 tenant 之后自动 install_from_marketplace_pkg。新企业 provision 即装好 44 个 provider，admin SSO 进 Dify Studio 不需要再点"安装"。详见后文「P3.5b：模型 provider 预装」一节 |
+| **P3.5b 默认模型 provider 预装** | 1 天 | **2026-06-23 完成**。`dify/docker/sudowork-patches/default-plugins.json` 列 44 个主流 LLM provider；`seed-plugins.sh` 一次性下载 `.difypkg` 到 `volumes/plugin_daemon/plugin_packages/langgenius/` 并产出 `default-plugins.lock.json`；`tenant_provisioning_service.py` 创建 tenant 之后自动 install_from_local_pkg。新企业 provision 即装好 44 个 provider，admin SSO 进 Dify Studio 不需要再点"安装"。详见后文「P3.5b：模型 provider 预装」一节 |
 | **P4 sudorouter 接入** | 1 周 | Dify Model Provider 接 sudorouter 统一计费/限流 |
 | **P5 强化** | 1–2 周 | 审计、报表、token 轮换、备份、灰度开关、文档 |
 
@@ -733,12 +733,13 @@ dify/docker/sudowork-patches/seed-plugins.sh
 
 **方案 B — tenant provisioning 自动批量装**
 
-`dify/api/services/sudowork/tenant_provisioning_service.py` 在 Tenant + Account + ApiToken 创建完之后，**自动**调 `PluginService.install_from_marketplace_pkg`，给新 tenant 装上 lockfile 里的所有 provider。
+`dify/api/services/sudowork/tenant_provisioning_service.py` 在 Tenant + Account + ApiToken 创建完之后，**自动**调 `PluginService.install_from_local_pkg`，给新 tenant 装上 lockfile 里的所有 provider。
 
 设计点：
-- **逐个安装**：批量调一次 install_from_marketplace_pkg([uid₁, uid₂, …]) 时，任何一个 plugin manifest enum 不兼容（如 `feature: polling` 这种 1.14.2 不认的值）整批就 abort。改成 `for uid in identifiers: install([uid])`，单个失败 log + skip，其他继续
+- **逐个安装**：批量调一次 install_from_local_pkg([uid₁, uid₂, …]) 时，任何一个 plugin manifest enum 不兼容（如 `feature: polling` 这种 1.14.2 不认的值）整批就 abort。改成 `for uid in identifiers: install([uid])`，单个失败 log + skip，其他继续
+- **本地包安装（关键）**：必须用 `install_from_local_pkg`，不要用同名近邻的 `install_from_marketplace_pkg`。后者会去 `marketplace.dify.ai` 现下载，离线环境必败；前者从 `volumes/plugin_daemon/plugin_packages/langgenius/<id>@<sha>/` 直接读 P3.5b 缓存，air-gapped 也能跑
 - **best-effort**：plugin install 失败不阻塞 tenant 创建——一个没装好 plugin 的 tenant 可以让 admin 后续手动补，但一个半成品 tenant 极难清理
-- **lazy import**：`from services.plugin.plugin_service import PluginService` 写在函数体内而不是模块顶端，避免 provisioning 模块加载时被某个 plugin_service 的 transitive failure 拖死
+- **lazy import**：`from core.plugin.plugin_service import PluginService` 写在函数体内而不是模块顶端，避免 provisioning 模块加载时被某个 plugin_service 的 transitive failure 拖死。注意 PluginService 类在 `core.plugin.plugin_service`，不是 `services.plugin.plugin_service`（后者在历史版本曾存在，已被移除）
 
 ### 默认套餐（44 个，2026-06-23）
 
