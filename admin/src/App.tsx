@@ -16,6 +16,7 @@ import {
   UserOutlined,
   LogoutOutlined,
   RobotOutlined,
+  DatabaseOutlined,
   GiftOutlined,
   FileTextOutlined,
   PayCircleOutlined,
@@ -35,6 +36,7 @@ import RechargeList from "./pages/RechargeList";
 import RechargeRecords from "./pages/RechargeRecords";
 import ConfigItemList from "./pages/ConfigItemList";
 import SkillsList from "./pages/SkillsList";
+import DatasetsList from "./pages/DatasetsList";
 import { TenantSelector as QmsTenantSelector } from "./components/qms";
 import QmsDashboard from "./pages/qms/Dashboard";
 import QmsPerformance from "./pages/qms/Performance";
@@ -101,6 +103,7 @@ const menuConfig: MenuItemConfig[] = [
   { key: "/users", icon: <UserOutlined />, label: "用户管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "/skills", icon: <AppstoreOutlined />, label: "专属技能", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "/assistants", icon: <RobotOutlined />, label: "专属助手", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+  { key: "/datasets", icon: <DatabaseOutlined />, label: "知识库管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "qms-mgmt", icon: <BarChartOutlined />, label: "质量管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"], children: [
     { key: "/qms", label: "总览", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
     { key: "/qms/user-stats", label: "用户统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
@@ -266,6 +269,7 @@ const App = () => {
           <Route path="users" element={<UserManagement />} />
           <Route path="skills" element={<SkillsList assetType="skills" />} />
           <Route path="assistants" element={<SkillsList assetType="assistants" />} />
+          <Route path="datasets" element={<DatasetsList />} />
           <Route path="qms" element={<QmsDashboard />} />
           <Route path="qms/user-stats" element={<QmsUserStats />} />
           <Route path="qms/conversations" element={<QmsConversations />} />

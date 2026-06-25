@@ -338,4 +338,159 @@ export const adminApi = {
     code?: string;
     password?: string;
   }) => api.post("/v1/auth/login-by-config", data),
+
+  // ============================================
+  // Dify integration (enterprise assistants + datasets + enhancement)
+  // ============================================
+
+  /**
+   * Probe capability flags. Currently exposes `dify.enabled` so the SPA can
+   * render "disabled" banners on assistant / dataset pages when the operator
+   * hasn't filled in DIFY_* env vars on sudowork-server.
+   */
+  getFeatures: () => api.get("/v1/admin/features"),
+
+  /**
+   * List sudohub assistants in the (resolved) enterprise, annotated with
+   * binding + ACL. SUPER_ADMIN must pass `enterprise_id`; ENTERPRISE_ADMIN
+   * may omit it (auto-scoped to their own).
+   */
+  getEnterpriseAssistants: (params?: { enterprise_id?: number }) =>
+    api.get("/v1/admin/dify/enterprise-assistants", { params }),
+
+  /** Get datasets visible to the (resolved) tenant. */
+  getDifyDatasets: (params?: { enterprise_id?: number }) =>
+    api.get("/v1/admin/dify/datasets", { params }),
+
+  /**
+   * Create an enterprise assistant (sudohub + optional Dify enhancement + ACL).
+   * Multipart because sudohub wants the prompt.md and avatar as files. The
+   * caller (form builder) must append `enterprise_id` as a form field when
+   * acting as super admin.
+   */
+  createEnterpriseAssistant: (form: FormData) =>
+    api.post("/v1/admin/dify/enterprise-assistants", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+
+  /** Toggle Dify enhancement on an existing assistant. */
+  setEnterpriseAssistantEnhancement: (
+    assistantId: string,
+    data: {
+      enable: boolean;
+      mode?: "agent-chat" | "workflow" | "rag-only";
+      app_name?: string;
+      enterprise_id?: number;
+    },
+  ) => api.put(`/v1/admin/dify/enterprise-assistants/${assistantId}/enhancement`, data),
+
+  getEnterpriseAssistantEnhancement: (
+    assistantId: string,
+    params?: { enterprise_id?: number },
+  ) =>
+    api.get(`/v1/admin/dify/enterprise-assistants/${assistantId}/enhancement`, {
+      params,
+    }),
+
+  /** Replace the assistant's ACL entries. Empty list = enterprise-wide visible. */
+  setAgentAcl: (
+    assistantId: string,
+    entries: Array<{ subject_type: "user" | "all" | "department" | "role"; subject_id?: string | null }>,
+    enterprise_id?: number,
+  ) => api.put(`/v1/admin/dify/agents/${assistantId}/acl`, { entries, enterprise_id }),
+
+  /** Read the assistant's current dataset bindings. */
+  getAgentDatasets: (assistantId: string, params?: { enterprise_id?: number }) =>
+    api.get(`/v1/admin/dify/agents/${assistantId}/datasets`, { params }),
+
+  /** Replace the assistant's dataset bindings. */
+  setAgentDatasets: (assistantId: string, datasetIds: string[], enterprise_id?: number) =>
+    api.put(`/v1/admin/dify/agents/${assistantId}/datasets`, {
+      dataset_ids: datasetIds,
+      enterprise_id,
+    }),
+
+  /** Delete an enterprise assistant (cascades sudohub + Dify App + local rows). */
+  deleteEnterpriseAssistant: (assistantId: string, params?: { enterprise_id?: number }) =>
+    api.delete(`/v1/admin/dify/agents/${assistantId}`, { params }),
+
+  /** Get an SSO link to Dify Studio. */
+  getDifyStudioLink: (next?: string, enterprise_id?: number) =>
+    api.get("/v1/admin/dify/sso", { params: { next, enterprise_id } }),
+
+  // ==========================================================================
+  // P3 RAG 挂载: knowledge base (dataset) management. Proxies to Dify Service
+  // API via the sudowork-server admin layer. See 2026-06-17 design doc P3.
+  // ==========================================================================
+
+  /** Page-list datasets in the (resolved) enterprise's Dify tenant. */
+  listDatasetsAdmin: (params: { enterprise_id?: number; page?: number; limit?: number; keyword?: string }) =>
+    api.get("/v1/admin/datasets", { params }),
+
+  /** Create a new dataset (knowledge base). */
+  createDataset: (data: {
+    enterprise_id?: number;
+    name: string;
+    description?: string;
+    indexing_technique?: "high_quality" | "economy";
+    permission?: "only_me" | "all_team_members" | "partial_members";
+  }) => api.post("/v1/admin/datasets", data),
+
+  /** Get a single dataset's full detail (counts, embedding model, etc.). */
+  getDataset: (datasetId: string, params?: { enterprise_id?: number }) =>
+    api.get(`/v1/admin/datasets/${datasetId}`, { params }),
+
+  /** Rename / re-describe / change visibility of a dataset. */
+  updateDataset: (datasetId: string, data: {
+    enterprise_id?: number;
+    name?: string;
+    description?: string;
+    permission?: "only_me" | "all_team_members" | "partial_members";
+  }) => api.patch(`/v1/admin/datasets/${datasetId}`, data),
+
+  /** Permanently delete a dataset (drops vectors + docs). */
+  deleteDataset: (datasetId: string, params?: { enterprise_id?: number }) =>
+    api.delete(`/v1/admin/datasets/${datasetId}`, { params }),
+
+  /** Page-list documents inside a dataset. */
+  listDatasetDocuments: (
+    datasetId: string,
+    params: { enterprise_id?: number; page?: number; limit?: number; keyword?: string },
+  ) => api.get(`/v1/admin/datasets/${datasetId}/documents`, { params }),
+
+  /** Create a text-only document (no file upload). */
+  createDatasetDocumentByText: (
+    datasetId: string,
+    data: {
+      enterprise_id?: number;
+      name: string;
+      text: string;
+      indexing_technique?: "high_quality" | "economy";
+    },
+  ) => api.post(`/v1/admin/datasets/${datasetId}/documents`, data),
+
+  /**
+   * Upload a document file (.txt/.md/.pdf/.docx/.csv/etc.). The caller must
+   * provide a FormData with `file` (and optionally `enterprise_id`,
+   * `indexing_technique`).
+   */
+  createDatasetDocumentByFile: (datasetId: string, form: FormData) =>
+    api.post(`/v1/admin/datasets/${datasetId}/documents`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+
+  /** Delete a single document from a dataset. */
+  deleteDatasetDocument: (
+    datasetId: string,
+    documentId: string,
+    params?: { enterprise_id?: number },
+  ) =>
+    api.delete(`/v1/admin/datasets/${datasetId}/documents/${documentId}`, { params }),
+
+  /** Run a test query (hit-testing) against a dataset. */
+  retrieveDataset: (datasetId: string, data: {
+    enterprise_id?: number;
+    query: string;
+    retrieval_model?: Record<string, unknown>;
+  }) => api.post(`/v1/admin/datasets/${datasetId}/retrieve`, data),
 };

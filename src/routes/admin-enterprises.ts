@@ -5,6 +5,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.js";
 import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
+import { system as difySystem } from "../services/DifyClient.js";
 
 const adminEnterpriseRoutes = new Hono();
 
@@ -100,10 +101,37 @@ adminEnterpriseRoutes.put(
       );
     }
 
+    // Snapshot the previous name + the bound Dify tenant id BEFORE the
+    // UPDATE so we can decide whether to push the rename to Dify and avoid
+    // a redundant API call when the admin only edits other fields.
+    const before = db
+      .prepare(
+        `SELECT e.name AS prev_name, b.dify_tenant_id AS dify_tenant_id
+           FROM enterprises e
+           LEFT JOIN dify_tenant_binding b ON b.enterprise_id = e.id
+          WHERE e.id = ?`,
+      )
+      .get(id) as { prev_name: string | null; dify_tenant_id: string | null } | undefined;
+
     db.run(
       "UPDATE enterprises SET name = ?, credit_pool = ?, logo = ?, app_name = ?, top_name = ?, about_name = ?, app_company_name = ?, login_desp = ? WHERE id = ?",
       [name, credit_pool ?? 10000, logo || null, app_name || null, top_name || null, about_name || null, app_company_name || null, login_desp || null, id],
     );
+
+    // Mirror the rename to Dify so the workspace title in the upper-left
+    // of Dify Studio stays in sync. Best-effort: if Dify is unreachable or
+    // the tenant is gone we log + continue — the local rename is the
+    // source of truth and admins can retry later by editing again.
+    if (before?.dify_tenant_id && before.prev_name !== name) {
+      try {
+        await difySystem.renameTenant(before.dify_tenant_id, name);
+      } catch (err) {
+        console.warn(
+          `[admin/enterprises] dify renameTenant failed for tenant ${before.dify_tenant_id}:`,
+          (err as Error).message,
+        );
+      }
+    }
 
     return c.json({
       success: true,

@@ -293,6 +293,7 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
           nickname: user.nickname,
           role: user.role,
           status: user.status,
+          enterprise_id: user.enterprise_id,
           enterprise_code: enterprise.code,
           sudorouter_key: user.sudorouter_key
             ? `sk-${user.sudorouter_key}`
@@ -695,6 +696,7 @@ authRoutes.post(
           nickname: nickname,
           role: "USER",
           status: 1,
+          enterprise_id: enterprise.id,
           enterprise_code: enterprise.code,
           sudorouter_key: `sk-${sudorouterKey}`,
           model_service_url: modelServiceUrl,
