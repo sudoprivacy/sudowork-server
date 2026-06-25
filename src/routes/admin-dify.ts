@@ -572,7 +572,11 @@ adminDifyRoutes.put("/agents/:assistantId/datasets", async (c) => {
     return c.json({ success: false, msg: "dataset_ids is required" }, 400);
   }
   try {
-    const stored = replaceDatasets(enterpriseId, c.req.param("assistantId"), body.dataset_ids);
+    const stored = await replaceDatasets(
+      enterpriseId,
+      c.req.param("assistantId"),
+      body.dataset_ids,
+    );
     return c.json({ success: true, data: stored });
   } catch (err: any) {
     return c.json({ success: false, msg: err?.message || "bind failed" }, 400);
