@@ -1355,16 +1355,6 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           showIcon
           style={{ marginBottom: 12 }}
           message="Dify 增强未开启"
-          description={
-            <>
-              专属助手的「Dify 增强 / 知识库挂载 / Studio 跳转」功能依赖 Dify 集成，
-              当前 sudowork-server 缺少以下环境变量：
-              {" "}
-              <Text code>{difyFlag.missingEnv.join(", ") || "(unknown)"}</Text>
-              。补齐 <Text code>.env</Text> 并重启服务后即可启用。基础的 sudohub
-              助手元数据浏览不受影响。
-            </>
-          }
         />
       )}
 

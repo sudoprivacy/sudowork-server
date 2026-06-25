@@ -400,19 +400,6 @@ const DatasetsList: React.FC = () => {
           showIcon
           style={{ marginTop: 16 }}
           message="知识库功能未开启"
-          description={
-            <>
-              知识库 CRUD 全部走 Dify Service API，需要先在 sudowork-server 配置
-              {" "}
-              <Text code>{difyFlag.missingEnv.join(", ") || "DIFY_*"}</Text>
-              {" "}并重启服务。补齐后该页面会自动恢复全部功能（列表 / 创建 / 编辑 /
-              删除 / 文档管理 / 测试查询）。
-            </>
-          }
-        />
-        <Empty
-          description="Dify 集成未配置 - 知识库管理暂不可用"
-          style={{ marginTop: 32 }}
         />
       </div>
     );
