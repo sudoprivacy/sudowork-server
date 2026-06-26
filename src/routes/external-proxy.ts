@@ -81,7 +81,7 @@ proxyRoutes.get("/assistants/cursor", authMiddleware, adminMiddleware, async (c)
 
   const url = `${SKILLHUB_BASE_URL}/api/assistants/admin/cursor?${params.toString()}`;
 
-  console.log("=== 专属助手请求 ===");
+  console.log("=== 专属智能体请求 ===");
   console.log("完整URL:", url);
   console.log("请求参数:", Object.fromEntries(params));
   console.log("Authorization: 已配置, Content-Type: application/json");
@@ -144,7 +144,7 @@ proxyRoutes.post("/assistants/:assistantId/approve", authMiddleware, adminMiddle
   const assistantId = c.req.param("assistantId");
   const url = `${SKILLHUB_BASE_URL}/api/assistants/${assistantId}/approve`;
 
-  console.log("=== 审批专属助手请求 ===");
+  console.log("=== 审批专属智能体请求 ===");
   console.log("完整URL:", url);
   console.log("assistantId:", assistantId);
   console.log("Authorization: 已配置, Content-Type: application/json");
@@ -165,7 +165,7 @@ proxyRoutes.delete("/assistants/:assistantId", authMiddleware, adminMiddleware, 
   const assistantId = c.req.param("assistantId");
   const url = `${SKILLHUB_BASE_URL}/api/assistants/${assistantId}`;
 
-  console.log("=== 删除专属助手请求 ===");
+  console.log("=== 删除专属智能体请求 ===");
   console.log("完整URL:", url);
   console.log("assistantId:", assistantId);
   console.log("Authorization: 已配置, Content-Type: application/json");

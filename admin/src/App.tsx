@@ -102,7 +102,7 @@ const menuConfig: MenuItemConfig[] = [
   ]},
   { key: "/users", icon: <UserOutlined />, label: "用户管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "/skills", icon: <AppstoreOutlined />, label: "专属技能", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
-  { key: "/assistants", icon: <RobotOutlined />, label: "专属助手", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+  { key: "/assistants", icon: <RobotOutlined />, label: "专属智能体", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "/datasets", icon: <DatabaseOutlined />, label: "知识库管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
   { key: "qms-mgmt", icon: <BarChartOutlined />, label: "质量管理", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"], children: [
     { key: "/qms", label: "总览", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },

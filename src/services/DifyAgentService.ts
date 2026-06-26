@@ -275,16 +275,16 @@ export function listAcl(enterpriseId: number, assistantId: string): AclEntry[] {
  * full set atomically.
  *
  * Two callers shapes the contract:
- *   - "纯知识库" 助手：本表是关联关系的唯一所有者；运行时由
+ *   - "纯知识库" 智能体：本表是关联关系的唯一所有者；运行时由
  *     `EnhancementInvocationService.ragOnlyAnswer` 读取并触发 Dify dataset
  *     retrieve。
- *   - "Dify 增强" 助手：禁止往这里写（互斥语义，详见
+ *   - "Dify 增强" 智能体：禁止往这里写（互斥语义，详见
  *     `2026-06-17-dify-integration-design.md`「知识增强：两个维度」）。
  *
  * Implementation notes:
- *   - 不再依赖 `dify_app_binding`（纯知识库助手没有 App 记录）。dify_tenant_id
+ *   - 不再依赖 `dify_app_binding`（纯知识库智能体没有 App 记录）。dify_tenant_id
  *     从 `dify_tenant_binding` 拿。
- *   - 互斥校验在 service 层做：若该助手已有 `dify_app_binding`，拒绝写入。
+ *   - 互斥校验在 service 层做：若该智能体已有 `dify_app_binding`，拒绝写入。
  */
 export async function replaceDatasets(
   enterpriseId: number,
