@@ -343,7 +343,7 @@ export function initSchema(): void {
     );
   `);
 
-  // 助手 ↔ Dify App 绑定
+  // 智能体 ↔ Dify App 绑定
   // app_api_key 是 Dify api_tokens 表里 type=app 的 token；只能用来调
   // /v1/chat-messages 和 /v1/workflows/run。在 createAgent 时直接 INSERT 一行
   // 进 Dify 的 api_tokens 表（通过系统端点），把 token 回填到这里。
@@ -360,7 +360,7 @@ export function initSchema(): void {
       -- dify_app_mode：Dify App 的原生模式，1:1 反映 Dify 侧的 mode。
       --   值域：'chat' | 'agent-chat' | 'agent' | 'workflow' | 'advanced-chat' | 'completion'
       --
-      -- 2026-06-22 P2.5.1：原"增强子模式" 'rag-only' 已废弃。纯 RAG 助手不再写本表，
+      -- 2026-06-22 P2.5.1：原"增强子模式" 'rag-only' 已废弃。纯 RAG 智能体不再写本表，
       -- 改写 dify_dataset_binding。详见 2026-06-17-dify-integration-design.md
       -- 「知识增强：两个维度」。历史 'rag-only' 行由迁移脚本清理。
       dify_app_mode TEXT NOT NULL,
@@ -371,7 +371,7 @@ export function initSchema(): void {
     );
   `);
 
-  // 助手可见性 ACL
+  // 智能体可见性 ACL
   // subject_type='all' 时 subject_id 为 NULL — 表示企业内全员可见
   db.run(`
     CREATE TABLE IF NOT EXISTS assistant_acl (
@@ -385,7 +385,7 @@ export function initSchema(): void {
     );
   `);
 
-  // 助手 → 数据集绑定（一对多）
+  // 智能体 → 数据集绑定（一对多）
   db.run(`
     CREATE TABLE IF NOT EXISTS dify_dataset_binding (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

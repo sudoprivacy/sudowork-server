@@ -125,7 +125,7 @@ function renderPromptTemplate(
   vars: { name?: string; profession?: string; description?: string },
 ): string {
   return PROMPT_TEMPLATES[key].body
-    .replaceAll("{{name}}", vars.name?.trim() || "<助手名称>")
+    .replaceAll("{{name}}", vars.name?.trim() || "<智能体名称>")
     .replaceAll("{{profession}}", vars.profession?.trim() || "<职业/角色>")
     .replaceAll("{{description}}", vars.description?.trim() || "");
 }
@@ -323,7 +323,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
   const currentTenantId = currentUser.enterprise_code || currentUser.tenant_id;
   const isSkillsPage = assetType === "skills";
-  const pageTitle = isSkillsPage ? "专属技能" : "专属助手";
+  const pageTitle = isSkillsPage ? "专属技能" : "专属智能体";
 
   // Dify integration may be off (operator hasn't set DIFY_* env). When it's
   // off in the assistants tab, we still render the sudohub-backed table but
@@ -564,10 +564,10 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           setNextCursor(data.next_cursor);
           setHasMore(data.has_more);
         } else {
-          message.error((response as any).message || "加载助手列表失败");
+          message.error((response as any).message || "加载智能体列表失败");
         }
       } catch (error: any) {
-        message.error(error?.response?.data?.message || error?.message || "加载助手列表失败，请刷新重试");
+        message.error(error?.response?.data?.message || error?.message || "加载智能体列表失败，请刷新重试");
       } finally {
         setLoading(false);
       }
@@ -841,7 +841,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   const openInStudio = async (record: Assistant) => {
     const enh = enhancementMap[record.id];
     if (!enh?.enabled || !enh.dify_app_id) {
-      message.info("该助手未启用 Dify 增强");
+      message.info("该智能体未启用 Dify 增强");
       return;
     }
     const next = `/app/${enh.dify_app_id}/configuration`;
@@ -918,7 +918,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   const handleApproveAssistant = (record: Assistant) => {
     Modal.confirm({
       title: "确认审批发布",
-      content: `确定将助手“${record.name}”从审核中改为已发布吗？`,
+      content: `确定将智能体“${record.name}”从审核中改为已发布吗？`,
       okText: "确认发布",
       cancelText: "取消",
       onOk: async () => {
@@ -945,8 +945,8 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
 
   const handleDeleteAssistant = (record: Assistant) => {
     Modal.confirm({
-      title: "确认删除助手",
-      content: `确定删除助手“${record.name}”吗？删除后不可恢复。`,
+      title: "确认删除智能体",
+      content: `确定删除智能体“${record.name}”吗？删除后不可恢复。`,
       okText: "确认删除",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -1314,7 +1314,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               disabled={difyDisabled || (isSuperAdmin && !selectedEnterprise)}
               onClick={openCreateModal}
             >
-              新建助手
+              新建智能体
             </Button>
           </Tooltip>
         )}
@@ -1349,7 +1349,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           )}
           <Form.Item>
             <Search
-              placeholder={`搜索${isSkillsPage ? "技能" : "助手"}名称或描述`}
+              placeholder={`搜索${isSkillsPage ? "技能" : "智能体"}名称或描述`}
               allowClear
               enterButton={<SearchOutlined />}
               style={{ width: 320 }}
@@ -1507,7 +1507,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       {/* ====================== Create modal (assistants tab) ====================== */}
       {!isSkillsPage && (
         <Modal
-          title="新建专属助手"
+          title="新建专属智能体"
           open={createOpen}
           onCancel={() => setCreateOpen(false)}
           onOk={handleCreate}
@@ -1519,7 +1519,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         >
           <Form form={createForm} layout="vertical">
             <SectionTitle icon={<ProfileOutlined />} text="基础信息" />
-            <Form.Item name="name" label="助手名称" rules={[{ required: true }]}>
+            <Form.Item name="name" label="智能体名称" rules={[{ required: true }]}>
               <Input placeholder="例如 recruitment_expert" />
             </Form.Item>
             <Form.Item name="profession" label="职业 / 角色" rules={[{ required: true }]}>
@@ -1878,7 +1878,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                           rules={[{ required: true }]}
                           tooltip={
                             modeLocked
-                              ? "已创建的 Dify 增强助手不允许直接切换 Agent / Workflow（两者在 Dify 中是不同应用类型，无法直接转换）。"
+                              ? "已创建的 Dify 增强智能体不允许直接切换 Agent / Workflow（两者在 Dify 中是不同应用类型，无法直接转换）。"
                               : undefined
                           }
                         >

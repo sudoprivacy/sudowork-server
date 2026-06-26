@@ -284,7 +284,7 @@ adminDifyRoutes.put("/agents/:assistantId/acl", async (c) => {
 /**
  * List sudohub assistants for the (resolved) enterprise, annotated with
  * binding + ACL summary. This is the data source for the admin UI's
- * "专属助手" page (assistants tab).
+ * "专属智能体" page (assistants tab).
  */
 adminDifyRoutes.get("/enterprise-assistants", async (c) => {
   const enterpriseId = resolveOrFail(c, resolveFromQuery(c));

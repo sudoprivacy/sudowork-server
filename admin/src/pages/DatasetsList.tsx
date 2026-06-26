@@ -411,7 +411,7 @@ const DatasetsList: React.FC = () => {
         <DatabaseOutlined /> 知识库管理
       </Title>
       <Text type="secondary">
-        管理企业 Dify 租户内的知识库（dataset）。这些知识库可在「专属助手 → 新建/编辑 →
+        管理企业 Dify 租户内的知识库（dataset）。这些知识库可在「专属智能体 → 新建/编辑 →
         启用知识库」分支里被关联使用。
       </Text>
 

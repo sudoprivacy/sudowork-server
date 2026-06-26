@@ -35,7 +35,22 @@ import { system as difySystem } from "./DifyClient.js";
 import { ensureTenantBinding } from "./DifyTenantService.js";
 import { replaceAcl, type AclEntry } from "./DifyAgentService.js";
 
+/**
+ * Mode the admin actively selects when enabling Dify enhancement on an
+ * assistant. Restricted to Dify-App-backed modes because rag-only assistants
+ * are created via a separate flow (attaching datasets directly, no Dify App
+ * is provisioned).
+ */
 export type EnhancementMode = "agent-chat" | "workflow";
+
+/**
+ * Mode the client / probe sees. Extends `EnhancementMode` with `rag-only` —
+ * which is what `getEnhancement` returns when an assistant has dataset
+ * bindings but no Dify App binding. The runtime enhancement invocation
+ * (`EnhancementInvocationService`) routes `rag-only` to the dataset retrieval
+ * path; setEnhancement / Dify App creation never produce this mode.
+ */
+export type EnhancementProbeMode = EnhancementMode | "rag-only";
 
 export interface CreateEnterpriseAssistantInput {
   enterpriseId: number;
@@ -198,7 +213,7 @@ export async function createEnterpriseAssistant(
     // Synthesize a minimal source.zip from the prompt when the admin didn't
     // upload one. Without this, sudohub records source_url=null and the
     // sudowork client suppresses the install button on the personal-mode
-    // 专属助手 tab.
+    // 专属智能体 tab.
     const sourceZip = await ensureSourceZip(input);
 
     // Step 1: sudohub
@@ -462,13 +477,28 @@ export async function setEnhancement(args: {
 
 export interface EnhancementInfo {
   enabled: boolean;
-  mode?: EnhancementMode;
+  mode?: EnhancementProbeMode;
   difyAppId?: string;
   difyTenantId?: string;
 }
 
+/**
+ * Probe enhancement state for an assistant. Three outcomes:
+ *
+ *   1. `dify_app_binding` exists  → `{enabled: true, mode: 'agent-chat' | 'workflow'}` (Dify-App-backed)
+ *   2. only `dify_dataset_binding` → `{enabled: true, mode: 'rag-only'}`           (纯知识库 path)
+ *   3. neither                    → `{enabled: false}`
+ *
+ * Outcome (2) used to be reported as `enabled: false` — which silently
+ * disabled the entire RAG-only feature on the client side because the
+ * client's `augmentUserContent` short-circuits on `!enabled`. The runtime
+ * dataset retrieval path (`invokeBlocking` fall-through to `ragOnlyAnswer`)
+ * was therefore unreachable end-to-end. We now report `rag-only` explicitly
+ * so the client invokes `/enhancement/invoke` and the server's RAG branch
+ * fires.
+ */
 export function getEnhancement(enterpriseId: number, assistantId: string): EnhancementInfo {
-  const row = db
+  const appRow = db
     .prepare(
       `SELECT dify_tenant_id, dify_app_id, dify_app_mode
          FROM dify_app_binding
@@ -477,16 +507,28 @@ export function getEnhancement(enterpriseId: number, assistantId: string): Enhan
     .get(enterpriseId, assistantId) as
     | { dify_tenant_id: string; dify_app_id: string; dify_app_mode: string }
     | undefined;
-  if (!row) return { enabled: false };
-  const stored = row.dify_app_mode;
-  // Defensive: legacy rows may still carry `rag-only` if the migration script
-  // hasn't run yet. Treat them as agent-chat so callers don't crash; the
-  // migration will rewrite them later.
-  const mode: EnhancementMode = stored === "workflow" ? "workflow" : "agent-chat";
-  return {
-    enabled: true,
-    mode,
-    difyAppId: row.dify_app_id,
-    difyTenantId: row.dify_tenant_id,
-  };
+  if (appRow) {
+    const stored = appRow.dify_app_mode;
+    // Defensive: legacy rows may still carry `rag-only` if the migration
+    // script hasn't run yet. Treat them as agent-chat so callers don't
+    // crash; the migration will rewrite them later.
+    const mode: EnhancementProbeMode = stored === "workflow" ? "workflow" : "agent-chat";
+    return {
+      enabled: true,
+      mode,
+      difyAppId: appRow.dify_app_id,
+      difyTenantId: appRow.dify_tenant_id,
+    };
+  }
+  const hasDatasets = db
+    .prepare(
+      `SELECT 1 FROM dify_dataset_binding
+        WHERE enterprise_id = ? AND assistant_id = ?
+        LIMIT 1`,
+    )
+    .get(enterpriseId, assistantId);
+  if (hasDatasets) {
+    return { enabled: true, mode: "rag-only" };
+  }
+  return { enabled: false };
 }

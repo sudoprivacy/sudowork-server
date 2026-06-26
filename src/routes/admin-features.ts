@@ -6,7 +6,7 @@
 
 /**
  * Admin-only feature-flag inventory. The SPA reads this once on page mount
- * (专属助手 / 知识库管理) to decide whether to render the active UI or a
+ * (专属智能体 / 知识库管理) to decide whether to render the active UI or a
  * disabled-state banner.
  *
  * Kept separate from /admin/system-config because that endpoint is about
