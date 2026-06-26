@@ -11,12 +11,18 @@
  * synchronously before forwarding the user's message to its local ACP. The
  * route delegates here.
  *
- * 2026-06-22 P2.5.1: "rag-only" is no longer an enhancement mode. Knowledge
- * attachment is an independent dimension, mutually exclusive with Dify
- * enhancement. Three paths now:
- *   - `dify_app_binding` present (mode = agent-chat | workflow) → call Dify App
- *   - `dify_dataset_binding` present                              → query datasets
- *   - both absent                                                 → 404
+ * Three paths now (mutually exclusive — enforced at admin write time in
+ * `EnterpriseAssistantService.setEnhancement` / `DifyAgentService.replaceDatasets`):
+ *   - `dify_app_binding` present, mode = agent-chat   → call Dify Agent App
+ *   - `dify_app_binding` present, mode = workflow     → call Dify Workflow App
+ *   - `dify_dataset_binding` present (no app binding) → query datasets directly
+ *   - none of the above                               → 404
+ *
+ * 2026-06-26: the dataset path is now explicitly reported as
+ * `mode: 'rag-only'` by `getEnhancement` so the client probe triggers
+ * `augmentUserContent` and `/enhancement/invoke` actually fires. The earlier
+ * design that left it as `enabled: false` plus a server-side fall-through
+ * was end-to-end dead code on the client side.
  *
  * For the streaming workflow path we forward Dify's SSE bytes upstream so
  * the client can render `node_started/node_finished` progress; for blocking
@@ -113,6 +119,22 @@ export async function invokeBlocking(ctx: InvokeContext): Promise<EnhancementBlo
           raw: result.raw,
         };
       }
+      case "rag-only": {
+        // Pure-RAG path: getEnhancement reported `rag-only` because the
+        // assistant has dataset bindings but no Dify App binding. Skip
+        // app-key lookup entirely and go straight to dataset retrieval.
+        const datasetIds = listDatasets(ctx.enterpriseId, ctx.assistantId);
+        if (datasetIds.length === 0) {
+          // Race: dataset binding was deleted between probe and invoke.
+          throw new DifyClientError(
+            404,
+            "rag-only assistant lost its dataset bindings between probe and invoke",
+          );
+        }
+        const { apiKey } = loadServiceApiKey(ctx.enterpriseId);
+        const text = await ragOnlyAnswer(ctx, apiKey, datasetIds);
+        return { text, mode: "dataset", elapsedMs: Date.now() - start };
+      }
       case "agent-chat":
       default: {
         const appKey = loadAppApiKey(ctx.enterpriseId, ctx.assistantId);
@@ -138,17 +160,14 @@ export async function invokeBlocking(ctx: InvokeContext): Promise<EnhancementBlo
     }
   }
 
-  // No Dify enhancement → fall through to pure-RAG path if datasets attached.
-  const datasetIds = listDatasets(ctx.enterpriseId, ctx.assistantId);
-  if (datasetIds.length === 0) {
-    throw new DifyClientError(
-      404,
-      "assistant has no Dify enhancement and no datasets attached",
-    );
-  }
-  const { apiKey } = loadServiceApiKey(ctx.enterpriseId);
-  const text = await ragOnlyAnswer(ctx, apiKey, datasetIds);
-  return { text, mode: "dataset", elapsedMs: Date.now() - start };
+  // Defensive fall-through: `getEnhancement` now reports `rag-only` for
+  // dataset-bound assistants, so reaching here means *neither* App nor
+  // dataset binding exists. Kept as a 404 instead of silently 200-empty so
+  // an admin-side data drift surfaces as a real error.
+  throw new DifyClientError(
+    404,
+    "assistant has no Dify enhancement and no datasets attached",
+  );
 }
 
 /**
@@ -178,7 +197,7 @@ export async function* invokeStreaming(
   const enhancement = getEnhancement(ctx.enterpriseId, ctx.assistantId);
   const start = Date.now();
 
-  // Branch 1: Dify enhancement active.
+  // Branch 1: Dify enhancement active (one of agent-chat / workflow / rag-only).
   if (enhancement.enabled) {
     if (enhancement.mode === "workflow") {
       const appKey = loadAppApiKey(ctx.enterpriseId, ctx.assistantId);
@@ -191,6 +210,29 @@ export async function* invokeStreaming(
         return;
       }
       yield* invokeWorkflowStream(ctx, appKey, start);
+      return;
+    }
+
+    if (enhancement.mode === "rag-only") {
+      // Pure-RAG path is one-shot retrieval; no per-step progress to stream.
+      // Emit a single `result` event after the dataset query completes so the
+      // SSE consumer sees the same shape as workflow's final event.
+      const datasetIds = listDatasets(ctx.enterpriseId, ctx.assistantId);
+      if (datasetIds.length === 0) {
+        yield {
+          kind: "error",
+          message: "rag-only assistant lost its dataset bindings between probe and invoke",
+          status: 404,
+        };
+        return;
+      }
+      try {
+        const { apiKey } = loadServiceApiKey(ctx.enterpriseId);
+        const text = await ragOnlyAnswer(ctx, apiKey, datasetIds);
+        yield { kind: "result", text, mode: "dataset", elapsedMs: Date.now() - start };
+      } catch (err) {
+        yield { kind: "error", message: (err as Error).message };
+      }
       return;
     }
 
@@ -208,23 +250,14 @@ export async function* invokeStreaming(
     return;
   }
 
-  // Branch 2: pure-RAG path.
-  const datasetIds = listDatasets(ctx.enterpriseId, ctx.assistantId);
-  if (datasetIds.length === 0) {
-    yield {
-      kind: "error",
-      message: "assistant has no Dify enhancement and no datasets attached",
-      status: 404,
-    };
-    return;
-  }
-  try {
-    const { apiKey } = loadServiceApiKey(ctx.enterpriseId);
-    const text = await ragOnlyAnswer(ctx, apiKey, datasetIds);
-    yield { kind: "result", text, mode: "dataset", elapsedMs: Date.now() - start };
-  } catch (err) {
-    yield { kind: "error", message: (err as Error).message };
-  }
+  // Defensive: `getEnhancement` now reports `rag-only` for dataset-bound
+  // assistants, so reaching here means neither App nor dataset binding
+  // exists. Surface as 404 instead of silently emitting an empty result.
+  yield {
+    kind: "error",
+    message: "assistant has no Dify enhancement and no datasets attached",
+    status: 404,
+  };
 }
 
 async function* invokeAgentChatStream(
