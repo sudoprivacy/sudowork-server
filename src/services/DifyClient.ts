@@ -217,6 +217,20 @@ export function loadServiceApiKey(enterpriseId: number): { difyTenantId: string;
 }
 
 /**
+ * Defense-in-depth deadline for the full Dify chat-messages SSE stream.
+ * The caller's `signal` (if any) still wins; this is a backstop so a wedged
+ * Dify never leaves the client/admin staring at an indefinite spinner.
+ *
+ * Sized to comfortably outlive the client-side `SUDOWORK_SERVER_CALL_TIMEOUT_MS`
+ * (currently 300 s in fix-sudowork/sudowork/src/process/bridge/difyBridge.ts)
+ * by 30 s so the client always sees a clean timeout error before this signal
+ * fires — keeps error attribution on the client (where we have UI to surface
+ * a degradation prompt) rather than us silently aborting mid-stream. Bump
+ * this if you bump the client deadline.
+ */
+const STREAM_CHAT_TIMEOUT_MS = 330000;
+
+/**
  * Pass-through chat invocation. Returns the raw Response so the caller can
  * stream SSE bytes directly back to the client. Caller MUST consume the
  * response or risk a leaked socket.
@@ -224,7 +238,12 @@ export function loadServiceApiKey(enterpriseId: number): { difyTenantId: string;
 export async function streamChat(args: {
   apiKey: string;
   body: Record<string, unknown>;
+  signal?: AbortSignal;
 }): Promise<Response> {
+  const timeoutSignal = AbortSignal.timeout(STREAM_CHAT_TIMEOUT_MS);
+  const signal = args.signal
+    ? AbortSignal.any([args.signal, timeoutSignal])
+    : timeoutSignal;
   return fetch(`${DIFY_BASE_URL}/v1/chat-messages`, {
     method: "POST",
     headers: {
@@ -232,6 +251,7 @@ export async function streamChat(args: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ ...args.body, response_mode: "streaming" }),
+    signal,
   });
 }
 
@@ -512,26 +532,12 @@ export const service = {
     }),
 };
 
-/**
- * Synchronous query against a dataset using the Service API.
- */
-export async function queryDataset(args: {
-  apiKey: string;
-  datasetId: string;
-  body: Record<string, unknown>;
-}): Promise<unknown> {
-  const resp = await fetch(`${DIFY_BASE_URL}/v1/datasets/${args.datasetId}/queries`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${args.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(args.body),
-  });
-  const data = await readJson(resp);
-  if (!resp.ok) throw new DifyClientError(resp.status, "dataset query failed", data);
-  return data;
-}
+// 2026-06-26: removed `queryDataset()` which hit `/v1/datasets/{id}/queries`.
+// That endpoint never existed in Dify 1.x — calls 404'd silently because the
+// only caller wrapped them in `.catch(() => null)` to degrade gracefully.
+// The replacement is `retrieveDataset()` below, which calls the proper
+// `/v1/datasets/{id}/retrieve` (a.k.a. `/hit-testing`) handler. See
+// `services/EnhancementInvocationService.ragOnlyAnswer` for the migration.
 
 // ============================================================================
 // Dataset CRUD via Service API

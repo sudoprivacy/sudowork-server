@@ -27,7 +27,7 @@ import {
   blockingChat,
   blockingWorkflow,
   loadServiceApiKey,
-  queryDataset,
+  retrieveDataset,
   streamChat,
   streamWorkflow,
   DifyClientError,
@@ -439,13 +439,23 @@ async function ragOnlyAnswer(
 ): Promise<string> {
   if (datasetIds.length === 0) return "";
 
+  // Use `/v1/datasets/{id}/retrieve` — the same endpoint Dify Studio's "召回测试"
+  // hit-testing UI calls. The older `/queries` route was removed upstream and
+  // now 404s on current Dify builds, which silently emptied this code path
+  // (the .catch below turned the 404 into `null` → empty passages → no
+  // <knowledge_context> injection → user got plain LLM response).
   const calls = datasetIds.map((id) =>
-    queryDataset({
-      apiKey,
-      datasetId: id,
-      body: { query: ctx.query, retrieval_model: { top_k: 5, score_threshold: 0.3 } },
+    retrieveDataset(apiKey, id, {
+      query: ctx.query,
+      retrieval_model: {
+        top_k: 5,
+        score_threshold: 0.3,
+        // /retrieve ignores `score_threshold` unless `score_threshold_enabled`
+        // is true (see DifyClient.retrieveDataset's rmDefaults note).
+        score_threshold_enabled: true,
+      },
     }).catch((err) => {
-      console.warn(`dataset query failed for ${id}:`, err);
+      console.warn(`dataset retrieve failed for ${id}:`, err);
       return null;
     }),
   );
@@ -465,18 +475,50 @@ async function ragOnlyAnswer(
 
 /**
  * Workflows can output anything; we collapse `outputs` into a single string
- * for injection. Convention:
- *   - if there's a single key called `text`, `answer`, `result`, or
- *     `output`, use its value verbatim;
- *   - otherwise JSON-stringify the whole outputs dict so the local ACP can
- *     still reason about it.
+ * for injection. Resolution order:
+ *   1. Single string key under `text` / `answer` / `result` / `output` —
+ *      use verbatim. Covers Q&A / completion / summarization workflows that
+ *      end with an LLM node piping to a String output variable.
+ *   2. Array under `result` / `output` — assumed to be a Knowledge
+ *      Retrieval node's chunks (`{ content | text | body, metadata, score }`
+ *      shape). Concatenate every chunk's text content with `---` separators
+ *      and drop the `metadata.dataset_id`/`_source` noise that confuses the
+ *      downstream LLM. This is the common RAG-via-workflow shape: 开始 →
+ *      知识检索 → 输出(result=知识检索.result Array[object]).
+ *   3. Fallback: JSON-stringify the whole outputs dict. Worst case the local
+ *      ACP still gets a structured blob it can reason about, just noisier.
  */
 function flattenWorkflowOutputs(outputs: Record<string, unknown>): string {
   if (!outputs || typeof outputs !== "object") return "";
+
+  // (1) single-string convenience keys
   for (const key of ["text", "answer", "result", "output"]) {
     const v = outputs[key];
     if (typeof v === "string") return v;
   }
+
+  // (2) array-of-chunks (Knowledge Retrieval node output)
+  for (const key of ["result", "output"]) {
+    const v = outputs[key];
+    if (!Array.isArray(v)) continue;
+    const chunks: string[] = [];
+    for (const item of v) {
+      if (!item || typeof item !== "object") continue;
+      const obj = item as Record<string, unknown>;
+      // Dify chunk shape: most retrievers expose `content`; a few legacy
+      // ones use `text` or `body`. Take the first non-empty string.
+      const candidates = [obj.content, obj.text, obj.body];
+      for (const c of candidates) {
+        if (typeof c === "string" && c.trim().length > 0) {
+          chunks.push(c.trim());
+          break;
+        }
+      }
+    }
+    if (chunks.length > 0) return chunks.join("\n\n---\n\n");
+  }
+
+  // (3) fallback
   try {
     return JSON.stringify(outputs, null, 2);
   } catch {
