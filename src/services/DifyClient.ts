@@ -235,15 +235,6 @@ const STREAM_CHAT_TIMEOUT_MS = 330000;
  * stream SSE bytes directly back to the client. Caller MUST consume the
  * response or risk a leaked socket.
  */
-/**
- * Soft cap on how long we wait for the first byte of a Dify chat-messages SSE
- * stream. The caller's `signal` (if any) still wins; this is a defense-in-
- * depth deadline so a wedged Dify never leaves the client/admin staring at
- * an indefinite spinner. 45 s comfortably covers slow first-token even on
- * cold-start Dify apps; anything beyond is almost certainly a stuck upstream.
- */
-const STREAM_CHAT_TIMEOUT_MS = 45000;
-
 export async function streamChat(args: {
   apiKey: string;
   body: Record<string, unknown>;
