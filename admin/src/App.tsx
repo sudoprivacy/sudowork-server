@@ -110,7 +110,7 @@ const menuConfig: MenuItemConfig[] = [
     { key: "/qms/conversations", label: "会话质量", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
     { key: "/qms/performance", label: "性能指标", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"], hidden: true },
     { key: "/qms/installs", label: "安装统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
-    { key: "/qms/crash-stats", label: "崩溃统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"] },
+    { key: "/qms/crash-stats", label: "崩溃统计", roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"], hidden: true },
     { key: "/qms/crash-issues", label: "崩溃问题", roles: ["SUPER_ADMIN"], hidden: true },
     { key: "/qms/alerts", label: "告警配置", roles: ["SUPER_ADMIN"], hidden: true },
     { key: "/qms/system", label: "配置", roles: ["SUPER_ADMIN"] },

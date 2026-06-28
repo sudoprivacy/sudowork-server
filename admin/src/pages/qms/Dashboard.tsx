@@ -77,91 +77,7 @@ export default function Dashboard() {
     },
   ];
 
-  // Crash columns
-  const crashTypeColumns = [
-    {
-      title: "崩溃类型",
-      dataIndex: "type",
-      key: "type",
-      render: (type: string) => {
-        const colorMap: Record<string, string> = {
-          native_crash: "red",
-          renderer_crash: "red",
-          js_exception: "orange",
-        };
-        const labelMap: Record<string, string> = {
-          native_crash: "原生崩溃",
-          renderer_crash: "渲染崩溃",
-          js_exception: "JS异常",
-        };
-        return <Tag color={colorMap[type] || "default"}>{labelMap[type] || type}</Tag>;
-      },
-    },
-    {
-      title: "次数",
-      dataIndex: "count",
-      key: "count",
-    },
-  ];
-
-  const crashPlatformColumns = [
-    {
-      title: "平台",
-      dataIndex: "platform",
-      key: "platform",
-      render: (platform: string) => {
-        const colorMap: Record<string, string> = {
-          darwin: "blue",
-          win32: "green",
-          linux: "orange",
-        };
-        return <Tag color={colorMap[platform] || "default"}>{platform}</Tag>;
-      },
-    },
-    {
-      title: "次数",
-      dataIndex: "count",
-      key: "count",
-    },
-  ];
-
-  const crashVersionColumns = [
-    {
-      title: "版本",
-      dataIndex: "version",
-      key: "version",
-      render: (version: string) => <Tag color="blue">{version}</Tag>,
-    },
-    {
-      title: "次数",
-      dataIndex: "count",
-      key: "count",
-    },
-  ];
-
-  const crashProcessColumns = [
-    {
-      title: "进程类型",
-      dataIndex: "process_type",
-      key: "process_type",
-      render: (processType: string) => {
-        const colorMap: Record<string, string> = {
-          main: "purple",
-          renderer: "cyan",
-        };
-        const labelMap: Record<string, string> = {
-          main: "主进程",
-          renderer: "渲染进程",
-        };
-        return <Tag color={colorMap[processType] || "default"}>{labelMap[processType] || processType}</Tag>;
-      },
-    },
-    {
-      title: "次数",
-      dataIndex: "count",
-      key: "count",
-    },
-  ];
+  // Crash columns 已随总览 Crash 统计区块一同移除
 
   // Conditional returns AFTER all hooks are defined
   if (loading) {
@@ -339,63 +255,7 @@ export default function Dashboard() {
         </Row>
       </Card>
 
-      {/* Crash Stats */}
-      <Card title="Crash 统计" style={{ marginTop: 16 }} extra={<a onClick={() => navigate("/qms/crash-stats")}>查看详情</a>}>
-        <Row gutter={16}>
-          <Col span={6}>
-            <StatCard
-              title="崩溃总数"
-              value={data.crashes?.total ?? 0}
-              trend={data.crashes?.trend ?? 0}
-              color="error"
-              freshness="realtime"
-            />
-          </Col>
-        </Row>
-
-        <Row gutter={16} style={{ marginTop: 16 }}>
-          <Col span={6}>
-            <h4 style={{ marginBottom: 8 }}>按崩溃类型</h4>
-            <Table
-              dataSource={data.crashes?.by_type || []}
-              columns={crashTypeColumns}
-              rowKey="type"
-              pagination={false}
-              size="small"
-            />
-          </Col>
-          <Col span={6}>
-            <h4 style={{ marginBottom: 8 }}>按进程</h4>
-            <Table
-              dataSource={data.crashes?.by_process || []}
-              columns={crashProcessColumns}
-              rowKey="process_type"
-              pagination={false}
-              size="small"
-            />
-          </Col>
-          <Col span={6}>
-            <h4 style={{ marginBottom: 8 }}>按平台</h4>
-            <Table
-              dataSource={data.crashes?.by_platform || []}
-              columns={crashPlatformColumns}
-              rowKey="platform"
-              pagination={false}
-              size="small"
-            />
-          </Col>
-          <Col span={6}>
-            <h4 style={{ marginBottom: 8 }}>按版本</h4>
-            <Table
-              dataSource={data.crashes?.by_version || []}
-              columns={crashVersionColumns}
-              rowKey="version"
-              pagination={false}
-              size="small"
-            />
-          </Col>
-        </Row>
-      </Card>
+      {/* Crash Stats — 隐藏：与侧栏 "/qms/crash-stats" 一致暂不对外展示 */}
     </div>
   );
 }
