@@ -7,8 +7,16 @@
  */
 
 import { Hono } from "hono";
-import { systemConfigService } from "../services/SystemConfigService.js";
-import { authMiddleware, adminMiddleware, superAdminMiddleware } from "../middleware/auth.js";
+import { db } from "../db/index.js";
+import {
+  systemConfigService,
+  type ThirdPartyAuthConfig,
+} from "../services/SystemConfigService.js";
+import {
+  authMiddleware,
+  adminMiddleware,
+  superAdminMiddleware,
+} from "../middleware/auth.js";
 import { config } from "../qms/config/index.js";
 import { logOperation } from "../utils/logger.js";
 import { encryptGcm } from "../utils/aes-gcm.js";
@@ -38,14 +46,67 @@ const PUBLIC_CONFIG: Record<string, () => unknown> = {
   product_improvement: () => {
     const { enabled } = systemConfigService.getProductImprovement();
     return enabled === 1
-      ? { enabled: 1, encryption_required: config.encryption.encryptionRequired }
+      ? {
+          enabled: 1,
+          encryption_required: config.encryption.encryptionRequired,
+        }
       : { enabled: 0 };
   },
   sudorouter_baseurl: () =>
     (process.env.SUDOROUTER_BASE_URL || "").replace(/\/+$/, ""),
   skillhub_baseurl: () =>
     (process.env.SKILLHUB_BASE_URL || "").replace(/\/+$/, ""),
+  third_party_auth: () => systemConfigService.getPublicThirdPartyAuth(),
 };
+
+function validateThirdPartyAuthConfig(
+  configValue: ThirdPartyAuthConfig,
+): string | null {
+  if (configValue.enabled !== 1) {
+    return "三方认证配置未启用";
+  }
+
+  const provider = configValue.providers.find(
+    (item) => item.id === configValue.default_provider && item.enabled === 1,
+  );
+  if (!provider) {
+    return "默认三方认证 Provider 不存在或未启用";
+  }
+
+  if (provider.type !== "cas") {
+    return "当前仅支持 CAS 类型 Provider";
+  }
+
+  try {
+    const url = new URL(provider.cas_url);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return "CAS URL 必须使用 http 或 https";
+    }
+  } catch {
+    return "CAS URL 格式不正确";
+  }
+
+  if (
+    !provider.login_path ||
+    !provider.validate_path ||
+    !provider.service_param
+  ) {
+    return "CAS 登录地址、校验地址和 service 参数名不能为空";
+  }
+
+  if (!provider.enterprise_code) {
+    return "Provider 绑定企业码不能为空";
+  }
+
+  const enterprise = db
+    .prepare("SELECT id FROM enterprises WHERE code = ?")
+    .get(provider.enterprise_code);
+  if (!enterprise) {
+    return `Provider 绑定企业码 ${provider.enterprise_code} 不存在`;
+  }
+
+  return null;
+}
 
 // GET /api/v1/system-config — 公开,登录页/第三方在登录前读取(白名单驱动)
 systemConfigRoutes.get("/system-config", (c) => {
@@ -67,6 +128,7 @@ systemConfigRoutes.get(
       data: {
         login_method: systemConfigService.getLoginMethod(),
         sms_configured: systemConfigService.isSmsChannelConfigured(),
+        third_party_auth: systemConfigService.getThirdPartyAuth(),
         log_report: (() => {
           const lr = systemConfigService.getLogReport();
           return {
@@ -95,21 +157,32 @@ systemConfigRoutes.put(
     const operator = c.get("user");
     const changes: Record<string, { before: unknown; after: unknown }> = {};
 
+    let nextThirdPartyAuth = systemConfigService.getThirdPartyAuth();
+    if (body.third_party_auth !== undefined) {
+      const before = systemConfigService.getThirdPartyAuth();
+      nextThirdPartyAuth = systemConfigService.normalizeThirdPartyAuth(
+        body.third_party_auth,
+      );
+      const validationError =
+        nextThirdPartyAuth.enabled === 1
+          ? validateThirdPartyAuthConfig(nextThirdPartyAuth)
+          : null;
+      if (validationError) {
+        return c.json({ success: false, msg: validationError }, 400);
+      }
+      systemConfigService.setThirdPartyAuth(nextThirdPartyAuth);
+      changes.third_party_auth = { before, after: nextThirdPartyAuth };
+    }
+
     if (body.login_method !== undefined) {
       const { login_method } = body;
 
-      if (login_method !== 0 && login_method !== 1) {
-        return c.json(
-          { success: false, msg: "无效的登录方式" },
-          400,
-        );
+      if (login_method !== 0 && login_method !== 1 && login_method !== 2) {
+        return c.json({ success: false, msg: "无效的登录方式" }, 400);
       }
 
       // 切到手机验证码(0)前必须校验短信通道已真正配置
-      if (
-        login_method === 0 &&
-        !systemConfigService.isSmsChannelConfigured()
-      ) {
+      if (login_method === 0 && !systemConfigService.isSmsChannelConfigured()) {
         return c.json(
           {
             success: false,
@@ -117,6 +190,14 @@ systemConfigRoutes.put(
           },
           400,
         );
+      }
+
+      if (login_method === 2) {
+        const validationError =
+          validateThirdPartyAuthConfig(nextThirdPartyAuth);
+        if (validationError) {
+          return c.json({ success: false, msg: validationError }, 400);
+        }
       }
 
       const before = systemConfigService.getLoginMethod();
@@ -130,7 +211,10 @@ systemConfigRoutes.put(
       if (enabled === 1) {
         if (protocol !== "http" && protocol !== "https") {
           return c.json(
-            { success: false, msg: "日志上报开启时,协议类型必须为 http 或 https" },
+            {
+              success: false,
+              msg: "日志上报开启时,协议类型必须为 http 或 https",
+            },
             400,
           );
         }
@@ -140,7 +224,10 @@ systemConfigRoutes.put(
             400,
           );
         }
-        if (!((typeof key === "string" && key.length > 0) || before.key_set === true)) {
+        if (!(
+          (typeof key === "string" && key.length > 0) ||
+          before.key_set === true
+        )) {
           return c.json(
             { success: false, msg: "日志上报开启时,Key 必填" },
             400,
@@ -153,7 +240,8 @@ systemConfigRoutes.put(
         domain: domain ?? "",
         key,
       });
-      const afterKeySet = before.key_set || (typeof key === "string" && key.length > 0);
+      const afterKeySet =
+        before.key_set || (typeof key === "string" && key.length > 0);
       changes.log_report = {
         before: {
           enabled: before.enabled,
@@ -173,9 +261,16 @@ systemConfigRoutes.put(
     if (body.version_update !== undefined) {
       const { enabled, cos_domain } = body.version_update;
       if (enabled === 1) {
-        if (!cos_domain || typeof cos_domain !== "string" || cos_domain.trim() === "") {
+        if (
+          !cos_domain ||
+          typeof cos_domain !== "string" ||
+          cos_domain.trim() === ""
+        ) {
           return c.json(
-            { success: false, msg: "版本自动更新开启时,COS 访问域名必填且非空" },
+            {
+              success: false,
+              msg: "版本自动更新开启时,COS 访问域名必填且非空",
+            },
             400,
           );
         }
@@ -196,20 +291,29 @@ systemConfigRoutes.put(
       if (enabled === 1) {
         if (!config.auth.defaultApiKey) {
           return c.json(
-            { success: false, msg: "未配置 QMS_DEFAULT_API_KEY,无法开启产品改进计划" },
+            {
+              success: false,
+              msg: "未配置 QMS_DEFAULT_API_KEY,无法开启产品改进计划",
+            },
             400,
           );
         }
         if (config.encryption.encryptionRequired) {
           if (!config.encryption.privateKeyPem) {
             return c.json(
-              { success: false, msg: "已开启遥测加密(QMS_TELEMETRY_ENCRYPTION_REQUIRED=true),但未配置 QMS_TELEMETRY_PRIVATE_KEY" },
+              {
+                success: false,
+                msg: "已开启遥测加密(QMS_TELEMETRY_ENCRYPTION_REQUIRED=true),但未配置 QMS_TELEMETRY_PRIVATE_KEY",
+              },
               400,
             );
           }
           if (!config.encryption.publicKeyPem) {
             return c.json(
-              { success: false, msg: "已开启遥测加密(QMS_TELEMETRY_ENCRYPTION_REQUIRED=true),但未配置 QMS_TELEMETRY_PUBLIC_KEY" },
+              {
+                success: false,
+                msg: "已开启遥测加密(QMS_TELEMETRY_ENCRYPTION_REQUIRED=true),但未配置 QMS_TELEMETRY_PUBLIC_KEY",
+              },
               400,
             );
           }
@@ -217,8 +321,13 @@ systemConfigRoutes.put(
       }
       // ↓ 新增 before 读取 + changes 记录;setProductImprovement 改为仅传 enabled(去除 protocol/domain)
       const before = systemConfigService.getProductImprovement();
-      systemConfigService.setProductImprovement({ enabled: enabled === 1 ? 1 : 0 });
-      changes.product_improvement = { before, after: { enabled: enabled === 1 ? 1 : 0 } };
+      systemConfigService.setProductImprovement({
+        enabled: enabled === 1 ? 1 : 0,
+      });
+      changes.product_improvement = {
+        before,
+        after: { enabled: enabled === 1 ? 1 : 0 },
+      };
     }
 
     if (Object.keys(changes).length > 0) {

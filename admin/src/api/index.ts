@@ -44,8 +44,7 @@ export const adminApi = {
     api.post("/v1/admin/login", data),
 
   // User Auth APIs (SMS login)
-  sendCode: (phone: string) =>
-    api.post("/v1/auth/send-code", { phone }),
+  sendCode: (phone: string) => api.post("/v1/auth/send-code", { phone }),
 
   userLogin: (data: { phone: string; code: string }) =>
     api.post("/v1/auth/login", data),
@@ -70,17 +69,19 @@ export const adminApi = {
     login_desp?: string;
   }) => api.post("/v1/admin/enterprises", data),
 
-  updateEnterprise: (id: number, data: {
-    name: string;
-    credit_pool?: number;
-    logo?: string;
-    app_name?: string;
-    top_name?: string;
-    about_name?: string;
-    app_company_name?: string;
-    login_desp?: string;
-  }) =>
-    api.put(`/v1/admin/enterprises/${id}`, data),
+  updateEnterprise: (
+    id: number,
+    data: {
+      name: string;
+      credit_pool?: number;
+      logo?: string;
+      app_name?: string;
+      top_name?: string;
+      about_name?: string;
+      app_company_name?: string;
+      login_desp?: string;
+    },
+  ) => api.put(`/v1/admin/enterprises/${id}`, data),
 
   deleteEnterprise: (id: number) => api.delete(`/v1/admin/enterprises/${id}`),
 
@@ -111,7 +112,9 @@ export const adminApi = {
   deleteUser: (id: number) => api.delete(`/v1/admin/users/${id}`),
 
   getAvailableInvitationCodes: (enterpriseId: number) =>
-    api.get(`/v1/admin/invitation-codes/available`, { params: { enterprise_id: enterpriseId } }),
+    api.get(`/v1/admin/invitation-codes/available`, {
+      params: { enterprise_id: enterpriseId },
+    }),
 
   setUserRole: (id: number, role: string) =>
     api.post(`/v1/admin/users/${id}/role`, { role }),
@@ -124,17 +127,24 @@ export const adminApi = {
   manageUser: (id: number, action: "enable" | "disable") =>
     api.post(`/v1/admin/users/${id}/manage`, { action }),
 
-  syncUserQuota: (id: number) =>
-    api.post(`/v1/admin/members/${id}/sync-quota`),
+  syncUserQuota: (id: number) => api.post(`/v1/admin/members/${id}/sync-quota`),
 
   getUserLedger: (id: number, limit?: number) =>
     api.get(`/v1/admin/users/${id}/ledger`, { params: { limit } }),
 
   // Invitation Code APIs
-  getInvitationCodes: (params?: { status?: number; enterprise_id?: number; page?: number; page_size?: number }) =>
-    api.get("/v1/admin/invitation-codes", { params }),
+  getInvitationCodes: (params?: {
+    status?: number;
+    enterprise_id?: number;
+    page?: number;
+    page_size?: number;
+  }) => api.get("/v1/admin/invitation-codes", { params }),
 
-  createInvitationCodes: (enterpriseId: number, count: number, initialQuotaUsd?: number | null) =>
+  createInvitationCodes: (
+    enterpriseId: number,
+    count: number,
+    initialQuotaUsd?: number | null,
+  ) =>
     api.post("/v1/admin/invitation-codes", {
       enterprise_id: enterpriseId,
       count,
@@ -155,8 +165,7 @@ export const adminApi = {
   }) => api.get("/v1/admin/logs", { params }),
 
   // Recharge APIs
-  getRechargeStats: () =>
-    api.get("/v1/admin/recharge/stats"),
+  getRechargeStats: () => api.get("/v1/admin/recharge/stats"),
 
   getRechargeOrders: (params?: {
     order_no?: string;
@@ -192,26 +201,30 @@ export const adminApi = {
   }) => api.get("/v1/admin/recharge-records", { params }),
 
   // Sync pending orders
-  syncPendingOrders: () =>
-    api.post("/v1/admin/recharge/sync"),
+  syncPendingOrders: () => api.post("/v1/admin/recharge/sync"),
 
   syncOrderStatus: (orderNo: string) =>
     api.post(`/v1/admin/recharge/orders/${orderNo}/sync`),
 
   // Admin Recharge (后台给用户充值)
-  adminRecharge: (userId: number, data: {
-    points: number;
-    reason: string;
-    payment_reference?: string;
-  }) => api.post(`/v1/admin/users/${userId}/recharge`, data),
+  adminRecharge: (
+    userId: number,
+    data: {
+      points: number;
+      reason: string;
+      payment_reference?: string;
+    },
+  ) => api.post(`/v1/admin/users/${userId}/recharge`, data),
 
   // Sync user quota
   syncUserQuotaNew: (userId: number) =>
     api.post(`/v1/admin/users/${userId}/sync-quota`),
 
   // Get user recharge records
-  getUserRecharges: (userId: number, params?: { page?: number; page_size?: number }) =>
-    api.get(`/v1/admin/users/${userId}/recharges`, { params }),
+  getUserRecharges: (
+    userId: number,
+    params?: { page?: number; page_size?: number },
+  ) => api.get(`/v1/admin/users/${userId}/recharges`, { params }),
 
   // Config Items APIs
   getConfigItems: (params?: {
@@ -222,14 +235,31 @@ export const adminApi = {
     page_size?: number;
   }) => api.get("/v1/admin/config-items", { params }),
 
-  createConfigItem: (data: { name: string; description?: string; icon?: string; url_pattern?: string; scheme?: string; bearer_prefix?: string; visible_to_all?: number }) =>
-    api.post("/v1/admin/config-items", data),
+  createConfigItem: (data: {
+    name: string;
+    description?: string;
+    icon?: string;
+    url_pattern?: string;
+    scheme?: string;
+    bearer_prefix?: string;
+    visible_to_all?: number;
+  }) => api.post("/v1/admin/config-items", data),
 
-  getConfigItemDetail: (id: number) =>
-    api.get(`/v1/admin/config-items/${id}`),
+  getConfigItemDetail: (id: number) => api.get(`/v1/admin/config-items/${id}`),
 
-  updateConfigItem: (id: number, data: { name?: string; description?: string; icon?: string; pinyin?: string; url_pattern?: string; scheme?: string; bearer_prefix?: string; visible_to_all?: number }) =>
-    api.put(`/v1/admin/config-items/${id}`, data),
+  updateConfigItem: (
+    id: number,
+    data: {
+      name?: string;
+      description?: string;
+      icon?: string;
+      pinyin?: string;
+      url_pattern?: string;
+      scheme?: string;
+      bearer_prefix?: string;
+      visible_to_all?: number;
+    },
+  ) => api.put(`/v1/admin/config-items/${id}`, data),
 
   updateConfigItemStatus: (id: number, status: number) =>
     api.put(`/v1/admin/config-items/${id}/status`, { status }),
@@ -237,37 +267,51 @@ export const adminApi = {
   getConfigEntries: (id: number) =>
     api.get(`/v1/admin/config-items/${id}/entries`),
 
-  saveConfigEntries: (id: number, entries: { config_key: string; name: string; config_desc?: string; required?: number }[]) =>
-    api.put(`/v1/admin/config-items/${id}/entries`, { entries }),
+  saveConfigEntries: (
+    id: number,
+    entries: {
+      config_key: string;
+      name: string;
+      config_desc?: string;
+      required?: number;
+    }[],
+  ) => api.put(`/v1/admin/config-items/${id}/entries`, { entries }),
 
-  getConfigEnterprises: (id: number, params?: {
-    enterprise_name?: string;
-    enterprise_id?: number;
-    page?: number;
-    page_size?: number;
-  }) => api.get(`/v1/admin/config-items/${id}/enterprises`, { params }),
+  getConfigEnterprises: (
+    id: number,
+    params?: {
+      enterprise_name?: string;
+      enterprise_id?: number;
+      page?: number;
+      page_size?: number;
+    },
+  ) => api.get(`/v1/admin/config-items/${id}/enterprises`, { params }),
 
   addConfigEnterprise: (configItemId: number, enterpriseId: number) =>
-    api.post(`/v1/admin/config-items/${configItemId}/enterprises/${enterpriseId}`),
+    api.post(
+      `/v1/admin/config-items/${configItemId}/enterprises/${enterpriseId}`,
+    ),
 
   removeConfigEnterprise: (configItemId: number, enterpriseId: number) =>
-    api.delete(`/v1/admin/config-items/${configItemId}/enterprises/${enterpriseId}`),
+    api.delete(
+      `/v1/admin/config-items/${configItemId}/enterprises/${enterpriseId}`,
+    ),
 
   // Upload config item icon
   uploadConfigItemIcon: (file: File) => {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
     return api.post("/v1/admin/upload/config-item-icon", formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      headers: { "Content-Type": "multipart/form-data" },
     });
   },
 
   // Upload enterprise logo
   uploadEnterpriseLogo: (file: File) => {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
     return api.post("/v1/admin/upload/enterprise-logo", formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      headers: { "Content-Type": "multipart/form-data" },
     });
   },
 
@@ -280,11 +324,9 @@ export const adminApi = {
     tenant_id?: string;
   }) => api.get("/skills/cursor", { params }),
 
-  approveSkill: (skillId: string) =>
-    api.post(`/skills/${skillId}/approve`),
+  approveSkill: (skillId: string) => api.post(`/skills/${skillId}/approve`),
 
-  deleteSkill: (skillId: string) =>
-    api.delete(`/skills/${skillId}`),
+  deleteSkill: (skillId: string) => api.delete(`/skills/${skillId}`),
 
   // Assistants APIs
   getAssistantsByCursor: (params?: {
@@ -308,9 +350,35 @@ export const adminApi = {
 
   updateSystemConfig: (data: {
     login_method?: number;
-    log_report?: { enabled: number; protocol?: string; domain?: string; key?: string };
+    third_party_auth?: {
+      enabled: number;
+      default_provider: string;
+      providers: Array<{
+        id: string;
+        name: string;
+        type: "cas";
+        enabled: number;
+        cas_url: string;
+        login_path: string;
+        validate_path: string;
+        logout_path: string;
+        service_param: string;
+        enterprise_code: string;
+        auto_provision: number;
+      }>;
+    };
+    log_report?: {
+      enabled: number;
+      protocol?: string;
+      domain?: string;
+      key?: string;
+    };
     version_update?: { enabled: number; cos_domain?: string };
-    product_improvement?: { enabled: number; protocol?: string; domain?: string };
+    product_improvement?: {
+      enabled: number;
+      protocol?: string;
+      domain?: string;
+    };
   }) => api.put("/v1/admin/system-config", data),
 
   // Password login user APIs (用户名密码登录方式)
@@ -333,11 +401,8 @@ export const adminApi = {
   ) => api.put(`/v1/admin/users-password/${id}`, data),
 
   // Unified login dispatched by system login_method
-  loginByConfig: (data: {
-    phone: string;
-    code?: string;
-    password?: string;
-  }) => api.post("/v1/auth/login-by-config", data),
+  loginByConfig: (data: { phone: string; code?: string; password?: string }) =>
+    api.post("/v1/auth/login-by-config", data),
 
   // ============================================
   // Dify integration (enterprise assistants + datasets + enhancement)
@@ -382,7 +447,11 @@ export const adminApi = {
       app_name?: string;
       enterprise_id?: number;
     },
-  ) => api.put(`/v1/admin/dify/enterprise-assistants/${assistantId}/enhancement`, data),
+  ) =>
+    api.put(
+      `/v1/admin/dify/enterprise-assistants/${assistantId}/enhancement`,
+      data,
+    ),
 
   getEnterpriseAssistantEnhancement: (
     assistantId: string,
@@ -395,24 +464,39 @@ export const adminApi = {
   /** Replace the assistant's ACL entries. Empty list = enterprise-wide visible. */
   setAgentAcl: (
     assistantId: string,
-    entries: Array<{ subject_type: "user" | "all" | "department" | "role"; subject_id?: string | null }>,
+    entries: Array<{
+      subject_type: "user" | "all" | "department" | "role";
+      subject_id?: string | null;
+    }>,
     enterprise_id?: number,
-  ) => api.put(`/v1/admin/dify/agents/${assistantId}/acl`, { entries, enterprise_id }),
+  ) =>
+    api.put(`/v1/admin/dify/agents/${assistantId}/acl`, {
+      entries,
+      enterprise_id,
+    }),
 
   /** Read the assistant's current dataset bindings. */
-  getAgentDatasets: (assistantId: string, params?: { enterprise_id?: number }) =>
-    api.get(`/v1/admin/dify/agents/${assistantId}/datasets`, { params }),
+  getAgentDatasets: (
+    assistantId: string,
+    params?: { enterprise_id?: number },
+  ) => api.get(`/v1/admin/dify/agents/${assistantId}/datasets`, { params }),
 
   /** Replace the assistant's dataset bindings. */
-  setAgentDatasets: (assistantId: string, datasetIds: string[], enterprise_id?: number) =>
+  setAgentDatasets: (
+    assistantId: string,
+    datasetIds: string[],
+    enterprise_id?: number,
+  ) =>
     api.put(`/v1/admin/dify/agents/${assistantId}/datasets`, {
       dataset_ids: datasetIds,
       enterprise_id,
     }),
 
   /** Delete an enterprise assistant (cascades sudohub + Dify App + local rows). */
-  deleteEnterpriseAssistant: (assistantId: string, params?: { enterprise_id?: number }) =>
-    api.delete(`/v1/admin/dify/agents/${assistantId}`, { params }),
+  deleteEnterpriseAssistant: (
+    assistantId: string,
+    params?: { enterprise_id?: number },
+  ) => api.delete(`/v1/admin/dify/agents/${assistantId}`, { params }),
 
   /** Get an SSO link to Dify Studio. */
   getDifyStudioLink: (next?: string, enterprise_id?: number) =>
@@ -424,8 +508,12 @@ export const adminApi = {
   // ==========================================================================
 
   /** Page-list datasets in the (resolved) enterprise's Dify tenant. */
-  listDatasetsAdmin: (params: { enterprise_id?: number; page?: number; limit?: number; keyword?: string }) =>
-    api.get("/v1/admin/datasets", { params }),
+  listDatasetsAdmin: (params: {
+    enterprise_id?: number;
+    page?: number;
+    limit?: number;
+    keyword?: string;
+  }) => api.get("/v1/admin/datasets", { params }),
 
   /** Create a new dataset (knowledge base). */
   createDataset: (data: {
@@ -441,12 +529,15 @@ export const adminApi = {
     api.get(`/v1/admin/datasets/${datasetId}`, { params }),
 
   /** Rename / re-describe / change visibility of a dataset. */
-  updateDataset: (datasetId: string, data: {
-    enterprise_id?: number;
-    name?: string;
-    description?: string;
-    permission?: "only_me" | "all_team_members" | "partial_members";
-  }) => api.patch(`/v1/admin/datasets/${datasetId}`, data),
+  updateDataset: (
+    datasetId: string,
+    data: {
+      enterprise_id?: number;
+      name?: string;
+      description?: string;
+      permission?: "only_me" | "all_team_members" | "partial_members";
+    },
+  ) => api.patch(`/v1/admin/datasets/${datasetId}`, data),
 
   /** Permanently delete a dataset (drops vectors + docs). */
   deleteDataset: (datasetId: string, params?: { enterprise_id?: number }) =>
@@ -455,7 +546,12 @@ export const adminApi = {
   /** Page-list documents inside a dataset. */
   listDatasetDocuments: (
     datasetId: string,
-    params: { enterprise_id?: number; page?: number; limit?: number; keyword?: string },
+    params: {
+      enterprise_id?: number;
+      page?: number;
+      limit?: number;
+      keyword?: string;
+    },
   ) => api.get(`/v1/admin/datasets/${datasetId}/documents`, { params }),
 
   /** Create a text-only document (no file upload). */
@@ -485,12 +581,17 @@ export const adminApi = {
     documentId: string,
     params?: { enterprise_id?: number },
   ) =>
-    api.delete(`/v1/admin/datasets/${datasetId}/documents/${documentId}`, { params }),
+    api.delete(`/v1/admin/datasets/${datasetId}/documents/${documentId}`, {
+      params,
+    }),
 
   /** Run a test query (hit-testing) against a dataset. */
-  retrieveDataset: (datasetId: string, data: {
-    enterprise_id?: number;
-    query: string;
-    retrieval_model?: Record<string, unknown>;
-  }) => api.post(`/v1/admin/datasets/${datasetId}/retrieve`, data),
+  retrieveDataset: (
+    datasetId: string,
+    data: {
+      enterprise_id?: number;
+      query: string;
+      retrieval_model?: Record<string, unknown>;
+    },
+  ) => api.post(`/v1/admin/datasets/${datasetId}/retrieve`, data),
 };

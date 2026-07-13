@@ -38,6 +38,7 @@ interface OperationLog {
 
 const actionLabels: Record<string, string> = {
   AUTH_LOGIN: "用户登录",
+  AUTH_THIRD_PARTY_LOGIN: "三方认证登录",
   AUTH_LOGOUT: "用户登出",
   AUTH_SEND_CODE: "发送验证码",
   INVITATION_CODE_CREATE: "创建邀请码",
@@ -71,6 +72,7 @@ const actionColors: Record<string, string> = {
   USER_UPDATE: "blue",
   INVITATION_CODE_CREATE: "cyan",
   INVITATION_CODE_DELETE: "red",
+  AUTH_THIRD_PARTY_LOGIN: "geekblue",
 };
 
 const OperationLogs: React.FC = () => {
@@ -172,7 +174,17 @@ const OperationLogs: React.FC = () => {
       key: "method",
       width: 80,
       render: (_: any, record: OperationLog) => (
-        <Tag color={record.method === "GET" ? "blue" : record.method === "POST" ? "green" : record.method === "DELETE" ? "red" : "orange"}>
+        <Tag
+          color={
+            record.method === "GET"
+              ? "blue"
+              : record.method === "POST"
+                ? "green"
+                : record.method === "DELETE"
+                  ? "red"
+                  : "orange"
+          }
+        >
           {record.method}
         </Tag>
       ),
@@ -248,11 +260,13 @@ const OperationLogs: React.FC = () => {
               查询
             </Button>
 
-            <Button onClick={() => {
-              setActionFilter(undefined);
-              setDateRange([dayjs().subtract(7, "day"), dayjs()]);
-              setPage(1);
-            }}>
+            <Button
+              onClick={() => {
+                setActionFilter(undefined);
+                setDateRange([dayjs().subtract(7, "day"), dayjs()]);
+                setPage(1);
+              }}
+            >
               重置
             </Button>
           </Space>
@@ -303,7 +317,15 @@ const OperationLogs: React.FC = () => {
               {selectedLog.resource_id ? ` #${selectedLog.resource_id}` : ""}
             </Descriptions.Item>
             <Descriptions.Item label="请求方法">
-              <Tag color={selectedLog.method === "GET" ? "blue" : selectedLog.method === "POST" ? "green" : "orange"}>
+              <Tag
+                color={
+                  selectedLog.method === "GET"
+                    ? "blue"
+                    : selectedLog.method === "POST"
+                      ? "green"
+                      : "orange"
+                }
+              >
                 {selectedLog.method}
               </Tag>
             </Descriptions.Item>
@@ -311,7 +333,14 @@ const OperationLogs: React.FC = () => {
               <code style={{ wordBreak: "break-all" }}>{selectedLog.path}</code>
             </Descriptions.Item>
             <Descriptions.Item label="响应状态">
-              <Tag color={selectedLog.response_status && selectedLog.response_status < 400 ? "green" : "red"}>
+              <Tag
+                color={
+                  selectedLog.response_status &&
+                  selectedLog.response_status < 400
+                    ? "green"
+                    : "red"
+                }
+              >
                 {selectedLog.response_status || "-"}
               </Tag>
             </Descriptions.Item>
@@ -321,17 +350,19 @@ const OperationLogs: React.FC = () => {
 
             {selectedLog.request_data && (
               <Descriptions.Item label="请求数据" span={2}>
-                <pre style={{
-                  margin: 0,
-                  padding: 8,
-                  background: "#f5f5f5",
-                  borderRadius: 4,
-                  maxHeight: 200,
-                  overflow: "auto",
-                  fontSize: 12,
-                  wordBreak: "break-all",
-                  whiteSpace: "pre-wrap",
-                }}>
+                <pre
+                  style={{
+                    margin: 0,
+                    padding: 8,
+                    background: "#f5f5f5",
+                    borderRadius: 4,
+                    maxHeight: 200,
+                    overflow: "auto",
+                    fontSize: 12,
+                    wordBreak: "break-all",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
                   {JSON.stringify(parseJson(selectedLog.request_data), null, 2)}
                 </pre>
               </Descriptions.Item>
@@ -339,25 +370,33 @@ const OperationLogs: React.FC = () => {
 
             {selectedLog.response_data && (
               <Descriptions.Item label="响应数据" span={2}>
-                <pre style={{
-                  margin: 0,
-                  padding: 8,
-                  background: "#f5f5f5",
-                  borderRadius: 4,
-                  maxHeight: 200,
-                  overflow: "auto",
-                  fontSize: 12,
-                  wordBreak: "break-all",
-                  whiteSpace: "pre-wrap",
-                }}>
-                  {JSON.stringify(parseJson(selectedLog.response_data), null, 2)}
+                <pre
+                  style={{
+                    margin: 0,
+                    padding: 8,
+                    background: "#f5f5f5",
+                    borderRadius: 4,
+                    maxHeight: 200,
+                    overflow: "auto",
+                    fontSize: 12,
+                    wordBreak: "break-all",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {JSON.stringify(
+                    parseJson(selectedLog.response_data),
+                    null,
+                    2,
+                  )}
                 </pre>
               </Descriptions.Item>
             )}
 
             {selectedLog.error_message && (
               <Descriptions.Item label="错误信息" span={2}>
-                <span style={{ color: "#ff4d4f" }}>{selectedLog.error_message}</span>
+                <span style={{ color: "#ff4d4f" }}>
+                  {selectedLog.error_message}
+                </span>
               </Descriptions.Item>
             )}
 

@@ -15,7 +15,14 @@ import {
   Alert,
   Spin,
 } from "antd";
-import { PlusOutlined, DeleteOutlined, EditOutlined, SyncOutlined, DollarOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
+import {
+  PlusOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  SyncOutlined,
+  DollarOutlined,
+  ExclamationCircleOutlined,
+} from "@ant-design/icons";
 import { adminApi } from "../api";
 
 const { Title } = Typography;
@@ -47,7 +54,12 @@ interface InvitationCode {
   code: string;
 }
 
-const UserList: React.FC = () => {
+interface UserListProps {
+  mode?: "sms" | "thirdParty";
+}
+
+const UserList: React.FC<UserListProps> = ({ mode = "sms" }) => {
+  const isThirdPartyMode = mode === "thirdParty";
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [enterprises, setEnterprises] = useState<Enterprise[]>([]);
@@ -81,7 +93,11 @@ const UserList: React.FC = () => {
     loadEnterprises();
   }, []);
 
-  const loadUsers = async (params?: { keyword?: string; enterprise_id?: number; status?: number }) => {
+  const loadUsers = async (params?: {
+    keyword?: string;
+    enterprise_id?: number;
+    status?: number;
+  }) => {
     setLoading(true);
     try {
       const response = await adminApi.getUsers(params);
@@ -151,7 +167,10 @@ const UserList: React.FC = () => {
         message.error((response as any).msg || "创建失败");
       }
     } catch (error: any) {
-      const errorMsg = error.response?.data?.msg || error.message || "创建失败，请检查网络连接";
+      const errorMsg =
+        error.response?.data?.msg ||
+        error.message ||
+        "创建失败，请检查网络连接";
       message.error(errorMsg);
     }
   };
@@ -160,10 +179,13 @@ const UserList: React.FC = () => {
     if (!editingId) return;
     try {
       // Check if role changed
-      const currentUser = users.find(u => u.id === editingId);
+      const currentUser = users.find((u) => u.id === editingId);
       if (currentUser && values.role && values.role !== currentUser.role) {
         try {
-          const roleResponse = await adminApi.setUserRole(editingId, values.role);
+          const roleResponse = await adminApi.setUserRole(
+            editingId,
+            values.role,
+          );
           if (!(roleResponse as any).success) {
             message.error((roleResponse as any).msg || "角色更新失败");
             return;
@@ -211,14 +233,26 @@ const UserList: React.FC = () => {
   const handleDelete = (user: User) => {
     Modal.confirm({
       title: "⚠️ 删除用户确认",
-      icon: <ExclamationCircleOutlined style={{ color: '#faad14' }} />,
+      icon: <ExclamationCircleOutlined style={{ color: "#faad14" }} />,
       content: (
         <div>
           <p style={{ marginBottom: 12 }}>
-            您确定要删除用户「<strong>{user.nickname || user.phone}</strong>」(<strong>{user.phone}</strong>) 吗？
+            您确定要删除用户「<strong>{user.nickname || user.phone}</strong>」(
+            <strong>{user.phone}</strong>) 吗？
           </p>
-          <div style={{ background: '#fffbe6', padding: 12, borderRadius: 4, border: '1px solid #ffe58f' }}>
-            <p style={{ color: '#d48806', fontWeight: 'bold', marginBottom: 8 }}>⚠️ 删除后以下数据将被永久清除，无法恢复：</p>
+          <div
+            style={{
+              background: "#fffbe6",
+              padding: 12,
+              borderRadius: 4,
+              border: "1px solid #ffe58f",
+            }}
+          >
+            <p
+              style={{ color: "#d48806", fontWeight: "bold", marginBottom: 8 }}
+            >
+              ⚠️ 删除后以下数据将被永久清除，无法恢复：
+            </p>
             <ul style={{ marginLeft: 20, marginBottom: 0 }}>
               <li>用户账号信息</li>
               <li>积分余额和历史流水</li>
@@ -227,7 +261,7 @@ const UserList: React.FC = () => {
               <li>已使用的邀请码</li>
             </ul>
           </div>
-          <p style={{ color: '#ff4d4f', marginTop: 12 }}>请谨慎操作！</p>
+          <p style={{ color: "#ff4d4f", marginTop: 12 }}>请谨慎操作！</p>
         </div>
       ),
       okText: "确认删除",
@@ -337,7 +371,7 @@ const UserList: React.FC = () => {
 
   const columns = [
     {
-      title: "手机号",
+      title: isThirdPartyMode ? "三方账号" : "手机号",
       dataIndex: "phone",
       key: "phone",
       width: 120,
@@ -354,7 +388,8 @@ const UserList: React.FC = () => {
       dataIndex: "invitation_code",
       key: "invitation_code",
       width: 90,
-      render: (val: string) => val ? <code className="font-mono text-xs">{val}</code> : "-",
+      render: (val: string) =>
+        val ? <code className="font-mono text-xs">{val}</code> : "-",
     },
     {
       title: "API Key",
@@ -362,19 +397,22 @@ const UserList: React.FC = () => {
       key: "sudorouter_key",
       width: 120,
       ellipsis: true,
-      render: (val: string) => val ? (
-        <code
-          className="font-mono text-xs"
-          style={{ color: "#1890ff", cursor: "pointer" }}
-          onClick={() => {
-            navigator.clipboard.writeText(`sk-${val}`);
-            message.success("API Key 已复制");
-          }}
-          title="点击复制完整 Key"
-        >
-          sk-{val.substring(0, 15)}...
-        </code>
-      ) : "-",
+      render: (val: string) =>
+        val ? (
+          <code
+            className="font-mono text-xs"
+            style={{ color: "#1890ff", cursor: "pointer" }}
+            onClick={() => {
+              navigator.clipboard.writeText(`sk-${val}`);
+              message.success("API Key 已复制");
+            }}
+            title="点击复制完整 Key"
+          >
+            sk-{val.substring(0, 15)}...
+          </code>
+        ) : (
+          "-"
+        ),
     },
     {
       title: "积分",
@@ -513,12 +551,22 @@ const UserList: React.FC = () => {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
         <Title level={2} style={{ margin: 0 }}>
           用户管理
         </Title>
-        {isSuperAdmin && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+        {isSuperAdmin && !isThirdPartyMode && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={openCreateModal}
+          >
             新建用户
           </Button>
         )}
@@ -527,7 +575,11 @@ const UserList: React.FC = () => {
       <Card style={{ marginBottom: 12 }} styles={{ body: { padding: 12 } }}>
         <Form form={filterForm} layout="inline">
           <Form.Item name="keyword">
-            <Input placeholder="手机号/昵称" allowClear style={{ width: 160 }} />
+            <Input
+              placeholder={isThirdPartyMode ? "三方账号/昵称" : "手机号/昵称"}
+              allowClear
+              style={{ width: 160 }}
+            />
           </Form.Item>
           <Form.Item name="enterprise_id">
             <Select placeholder="所属企业" allowClear style={{ width: 140 }}>
@@ -563,7 +615,11 @@ const UserList: React.FC = () => {
           loading={loading}
           rowKey="id"
           scroll={{ x: 900 }}
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+          pagination={{
+            pageSize: 20,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 条`,
+          }}
         />
       </Card>
 
@@ -583,14 +639,28 @@ const UserList: React.FC = () => {
           onFinish={editingId ? handleUpdate : handleCreate}
         >
           <Form.Item
-            label="手机号"
+            label={isThirdPartyMode ? "三方账号" : "手机号"}
             name="phone"
-            rules={[{ required: true, message: "请输入手机号" }]}
+            rules={[
+              {
+                required: true,
+                message: isThirdPartyMode ? "请输入三方账号" : "请输入手机号",
+              },
+            ]}
           >
-            <Input placeholder="请输入手机号" disabled={!!editingId} />
+            <Input
+              placeholder={isThirdPartyMode ? "请输入三方账号" : "请输入手机号"}
+              disabled={!!editingId}
+            />
           </Form.Item>
           <Form.Item label="昵称" name="nickname">
-            <Input placeholder="请输入昵称（默认使用手机号）" />
+            <Input
+              placeholder={
+                isThirdPartyMode
+                  ? "请输入昵称（默认使用三方账号）"
+                  : "请输入昵称（默认使用手机号）"
+              }
+            />
           </Form.Item>
           <Form.Item
             label="所属企业"
@@ -643,7 +713,9 @@ const UserList: React.FC = () => {
             <Form.Item label="角色" name="role">
               <Select placeholder="选择用户角色">
                 <Select.Option value="USER">普通用户</Select.Option>
-                <Select.Option value="ENTERPRISE_ADMIN">企业管理员</Select.Option>
+                <Select.Option value="ENTERPRISE_ADMIN">
+                  企业管理员
+                </Select.Option>
               </Select>
             </Form.Item>
           )}
@@ -652,7 +724,7 @@ const UserList: React.FC = () => {
 
       {/* Recharge Modal */}
       <Modal
-        title={`后台充值 - ${users.find(u => u.id === rechargingUserId)?.nickname || users.find(u => u.id === rechargingUserId)?.phone}`}
+        title={`后台充值 - ${users.find((u) => u.id === rechargingUserId)?.nickname || users.find((u) => u.id === rechargingUserId)?.phone}`}
         open={rechargeVisible}
         onOk={() => rechargeForm.submit()}
         onCancel={() => {
@@ -668,10 +740,14 @@ const UserList: React.FC = () => {
         {rechargingUserId && (
           <>
             <div style={{ marginBottom: 16, color: "#86909c" }}>
-              当前余额：{(() => {
-                const user = users.find(u => u.id === rechargingUserId);
-                return user ? Math.round((user.quota || 0) * 0.002).toLocaleString() : 0;
-              })()} 积分
+              当前余额：
+              {(() => {
+                const user = users.find((u) => u.id === rechargingUserId);
+                return user
+                  ? Math.round((user.quota || 0) * 0.002).toLocaleString()
+                  : 0;
+              })()}{" "}
+              积分
             </div>
 
             <Form
@@ -699,7 +775,9 @@ const UserList: React.FC = () => {
               </Form.Item>
 
               <div style={{ marginBottom: 16 }}>
-                <span style={{ color: "#86909c", fontSize: 13 }}>快捷金额：</span>
+                <span style={{ color: "#86909c", fontSize: 13 }}>
+                  快捷金额：
+                </span>
                 <Space size="small" style={{ marginLeft: 8 }}>
                   {quickAmounts.map((amount) => (
                     <Button
@@ -717,21 +795,33 @@ const UserList: React.FC = () => {
               </div>
 
               {rechargeAmount > 0 && (
-                <div style={{ marginBottom: 16, padding: 12, background: "#f7f8fa", borderRadius: 8 }}>
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: 12,
+                    background: "#f7f8fa",
+                    borderRadius: 8,
+                  }}
+                >
                   <div style={{ color: "#86909c", fontSize: 13 }}>
-                    充值金额：${rechargeAmount.toFixed(2)} = ¥{(rechargeAmount * EXCHANGE_RATE).toFixed(2)}
+                    充值金额：${rechargeAmount.toFixed(2)} = ¥
+                    {(rechargeAmount * EXCHANGE_RATE).toFixed(2)}
                   </div>
                   <div style={{ color: "#86909c", fontSize: 13, marginTop: 4 }}>
-                    充值积分：{(() => {
-                      const user = users.find(u => u.id === rechargingUserId);
-                      const currentPoints = user ? Math.round((user.quota || 0) * 0.002) : 0;
+                    充值积分：
+                    {(() => {
+                      const user = users.find((u) => u.id === rechargingUserId);
+                      const currentPoints = user
+                        ? Math.round((user.quota || 0) * 0.002)
+                        : 0;
                       const addedPoints = rechargeAmount * 1000; // $1 = 1000 points
                       return `${currentPoints.toLocaleString()} + ${addedPoints.toLocaleString()} = ${(currentPoints + addedPoints).toLocaleString()} 积分`;
                     })()}
                   </div>
                   <div style={{ color: "#86909c", fontSize: 13, marginTop: 4 }}>
-                    充值后额度：{(() => {
-                      const user = users.find(u => u.id === rechargingUserId);
+                    充值后额度：
+                    {(() => {
+                      const user = users.find((u) => u.id === rechargingUserId);
                       const currentQuota = user?.quota || 0;
                       const addedQuota = rechargeAmount * 1000 * 500; // $1 = 1000 points, 1 point = 500 quota
                       return `${currentQuota.toLocaleString()} + ${addedQuota.toLocaleString()} = ${(currentQuota + addedQuota).toLocaleString()}`;
@@ -750,15 +840,17 @@ const UserList: React.FC = () => {
 
               <div style={{ marginBottom: 16 }}>
                 <Space size="small">
-                  {["线下支付", "活动赠送", "补偿充值", "其他"].map((reason) => (
-                    <Button
-                      key={reason}
-                      size="small"
-                      onClick={() => rechargeForm.setFieldsValue({ reason })}
-                    >
-                      {reason}
-                    </Button>
-                  ))}
+                  {["线下支付", "活动赠送", "补偿充值", "其他"].map(
+                    (reason) => (
+                      <Button
+                        key={reason}
+                        size="small"
+                        onClick={() => rechargeForm.setFieldsValue({ reason })}
+                      >
+                        {reason}
+                      </Button>
+                    ),
+                  )}
                 </Space>
               </div>
 

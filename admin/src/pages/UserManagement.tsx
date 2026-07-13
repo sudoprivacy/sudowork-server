@@ -6,7 +6,7 @@ import UserListPassword from "./UserListPassword";
 
 /**
  * 用户管理路由分流 wrapper。
- * 挂载时调 GET /system-config,按 login_method 渲染验证码(UserList)或密码(UserListPassword)组件。
+ * 挂载时调 GET /system-config,按 login_method 渲染验证码/三方(UserList)或密码(UserListPassword)组件。
  */
 const UserManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -35,6 +35,9 @@ const UserManagement: React.FC = () => {
   }
   if (loginMethod === 1) {
     return <UserListPassword />;
+  }
+  if (loginMethod === 2) {
+    return <UserList mode="thirdParty" />;
   }
   return <UserList />;
 };

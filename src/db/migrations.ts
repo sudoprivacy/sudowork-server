@@ -37,6 +37,7 @@ export function runMigrations(): void {
   // 登录方式可配置:users.login_type 列 + system_config 表
   addColumnIfNotExists("users", "login_type", "INTEGER NOT NULL DEFAULT 0");
   createSystemConfigTable();
+  createThirdPartyAuthTables();
 
   // Dify integration: per-app service api key, lives alongside the binding so
   // runtime calls to /v1/chat-messages and /v1/workflows/run can use a
@@ -48,7 +49,11 @@ export function runMigrations(): void {
 /**
  * Add a column to a table if it doesn't already exist
  */
-function addColumnIfNotExists(table: string, column: string, type: string): void {
+function addColumnIfNotExists(
+  table: string,
+  column: string,
+  type: string,
+): void {
   try {
     const columns = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
     if (!columns.find((c) => c.name === column)) {
@@ -59,9 +64,15 @@ function addColumnIfNotExists(table: string, column: string, type: string): void
   }
 }
 
-function createIndexIfNotExists(indexName: string, table: string, column: string): void {
+function createIndexIfNotExists(
+  indexName: string,
+  table: string,
+  column: string,
+): void {
   try {
-    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table}(${column})`);
+    db.run(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${table}(${column})`,
+    );
   } catch (e) {
     // Index might already exist, ignore error
   }
@@ -79,8 +90,70 @@ function createSystemConfigTable(): void {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
-  db.run(`INSERT OR IGNORE INTO system_config(key, value) VALUES('login_method', '0')`);
-  db.run(`INSERT OR IGNORE INTO system_config(key, value) VALUES('log_report', '{"enabled":0,"protocol":"","domain":""}')`);
-  db.run(`INSERT OR IGNORE INTO system_config(key, value) VALUES('version_update', '{"enabled":0,"cos_domain":""}')`);
-  db.run(`INSERT OR IGNORE INTO system_config(key, value) VALUES('product_improvement', '{"enabled":0,"protocol":"","domain":""}')`);
+  insertSystemConfigIfMissing("login_method", "0");
+  insertSystemConfigIfMissing(
+    "log_report",
+    '{"enabled":0,"protocol":"","domain":""}',
+  );
+  insertSystemConfigIfMissing(
+    "version_update",
+    '{"enabled":0,"cos_domain":""}',
+  );
+  insertSystemConfigIfMissing(
+    "product_improvement",
+    '{"enabled":0,"protocol":"","domain":""}',
+  );
+  insertSystemConfigIfMissing(
+    "third_party_auth",
+    '{"enabled":1,"default_provider":"comac_cas","providers":[{"id":"comac_cas","name":"中国商飞","type":"cas","enabled":1,"cas_url":"http://cas.cvtol.com/","login_path":"/cas/login/","validate_path":"/cas/p3/serviceValidate","logout_path":"/cas/logout","service_param":"service","enterprise_code":"sudo","auto_provision":1}]}',
+  );
+}
+
+function insertSystemConfigIfMissing(key: string, value: string): void {
+  const existing = db
+    .prepare("SELECT key FROM system_config WHERE key = ?")
+    .get(key);
+  if (existing) {
+    return;
+  }
+
+  const columns = db.prepare("PRAGMA table_info(system_config)").all() as {
+    name: string;
+  }[];
+  const hasDescription = columns.some((column) => column.name === "description");
+  const hasUpdatedAt = columns.some((column) => column.name === "updated_at");
+
+  if (hasDescription && hasUpdatedAt) {
+    db.run(
+      "INSERT INTO system_config(key, value, description, updated_at) VALUES(?, ?, ?, ?)",
+      [key, value, "", Math.floor(Date.now() / 1000)],
+    );
+    return;
+  }
+
+  db.run("INSERT INTO system_config(key, value) VALUES(?, ?)", [key, value]);
+}
+
+function createThirdPartyAuthTables(): void {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS third_party_auth_identities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider_id TEXT NOT NULL,
+      external_user_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      enterprise_id INTEGER NOT NULL,
+      raw_profile TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(provider_id, external_user_id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id)
+    );
+  `);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_user_id ON third_party_auth_identities(user_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_enterprise_id ON third_party_auth_identities(enterprise_id)`,
+  );
 }
