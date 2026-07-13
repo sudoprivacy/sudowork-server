@@ -105,7 +105,7 @@ function createSystemConfigTable(): void {
   );
   insertSystemConfigIfMissing(
     "third_party_auth",
-    '{"enabled":1,"default_provider":"comac_cas","providers":[{"id":"comac_cas","name":"中国商飞","type":"cas","enabled":1,"cas_url":"http://cas.cvtol.com/","login_path":"/cas/login/","validate_path":"/cas/p3/serviceValidate","logout_path":"/cas/logout","service_param":"service","enterprise_code":"sudo","auto_provision":1}]}',
+    '{"enabled":1,"default_provider":"comac_cas","providers":[{"id":"comac_cas","name":"中国商飞","type":"cas","enabled":1,"cas_url":"http://cas.cvtol.com/","login_path":"/cas/login/","validate_path":"/cas/p3/serviceValidate","logout_path":"/cas/logout","logout_service_url":"","service_param":"service","service_encode_mode":"component","callback_mode":"server_callback","server_callback_url":"","app_callback_url":"sudowork://cas-callback/comac_cas/callback","enterprise_code":"sudo","auto_provision":1}]}',
   );
 }
 
@@ -120,7 +120,9 @@ function insertSystemConfigIfMissing(key: string, value: string): void {
   const columns = db.prepare("PRAGMA table_info(system_config)").all() as {
     name: string;
   }[];
-  const hasDescription = columns.some((column) => column.name === "description");
+  const hasDescription = columns.some(
+    (column) => column.name === "description",
+  );
   const hasUpdatedAt = columns.some((column) => column.name === "updated_at");
 
   if (hasDescription && hasUpdatedAt) {
@@ -155,5 +157,24 @@ function createThirdPartyAuthTables(): void {
   );
   db.run(
     `CREATE INDEX IF NOT EXISTS idx_third_party_auth_enterprise_id ON third_party_auth_identities(enterprise_id)`,
+  );
+  db.run(`
+    CREATE TABLE IF NOT EXISTS third_party_auth_handoffs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code_hash TEXT UNIQUE NOT NULL,
+      provider_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      external_user_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_handoffs_provider ON third_party_auth_handoffs(provider_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_handoffs_expires_at ON third_party_auth_handoffs(expires_at)`,
   );
 }

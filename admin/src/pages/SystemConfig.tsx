@@ -41,7 +41,12 @@ interface ThirdPartyProviderConfig {
   login_path: string;
   validate_path: string;
   logout_path: string;
+  logout_service_url: string;
   service_param: string;
+  service_encode_mode: "component" | "raw";
+  callback_mode: "direct_app" | "server_callback";
+  server_callback_url: string;
+  app_callback_url: string;
   enterprise_code: string;
   auto_provision: number;
 }
@@ -65,7 +70,12 @@ const DEFAULT_THIRD_PARTY_AUTH: ThirdPartyAuthConfig = {
       login_path: "/cas/login/",
       validate_path: "/cas/p3/serviceValidate",
       logout_path: "/cas/logout",
+      logout_service_url: "",
       service_param: "service",
+      service_encode_mode: "component",
+      callback_mode: "server_callback",
+      server_callback_url: "",
+      app_callback_url: "sudowork://cas-callback/comac_cas/callback",
       enterprise_code: "sudo",
       auto_provision: 1,
     },
@@ -105,6 +115,22 @@ function normalizeThirdPartyAuthConfig(value: any): ThirdPartyAuthConfig {
       ...provider,
       enabled: provider.enabled === 0 ? 0 : 1,
       auto_provision: provider.auto_provision === 0 ? 0 : 1,
+      service_encode_mode:
+        provider.service_encode_mode === "raw" ? "raw" : "component",
+      callback_mode:
+        provider.callback_mode === "direct_app"
+          ? "direct_app"
+          : "server_callback",
+      server_callback_url: provider.server_callback_url || "",
+      logout_service_url:
+        provider.logout_service_url ||
+        buildLogoutServiceUrl(
+          provider.server_callback_url || "",
+          provider.id || "comac_cas",
+        ),
+      app_callback_url:
+        provider.app_callback_url ||
+        `sudowork://cas-callback/${provider.id || "comac_cas"}/callback`,
       type: "cas",
     })),
   };
@@ -112,6 +138,26 @@ function normalizeThirdPartyAuthConfig(value: any): ThirdPartyAuthConfig {
 
 function getInputValue(event: any): string {
   return event?.target?.value ?? "";
+}
+
+function buildLogoutServiceUrl(
+  serverCallbackUrl: string,
+  providerId: string,
+): string {
+  if (!serverCallbackUrl) {
+    return "";
+  }
+  try {
+    const url = new URL(serverCallbackUrl);
+    url.pathname = url.pathname.replace(
+      /\/callback\/[^/]+\/?$/,
+      `/logout/callback/${encodeURIComponent(providerId)}`,
+    );
+    url.search = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 // 模块级常量,避免父组件 re-render 时 schema 引用变化触发子组件 useEffect 重置已编辑字段。
@@ -283,11 +329,27 @@ const SystemConfig: React.FC = () => {
   const updateSelectedProvider = (patch: Partial<ThirdPartyProviderConfig>) => {
     setThirdPartyAuth((prev) => ({
       ...prev,
-      providers: prev.providers.map((provider) =>
-        provider.id === selectedProviderId
-          ? { ...provider, ...patch }
-          : provider,
-      ),
+      providers: prev.providers.map((provider) => {
+        if (provider.id !== selectedProviderId) {
+          return provider;
+        }
+        const previousDefaultLogoutServiceUrl = buildLogoutServiceUrl(
+          provider.server_callback_url,
+          provider.id,
+        );
+        const nextProvider = { ...provider, ...patch };
+        if (
+          patch.server_callback_url !== undefined &&
+          (!provider.logout_service_url ||
+            provider.logout_service_url === previousDefaultLogoutServiceUrl)
+        ) {
+          nextProvider.logout_service_url = buildLogoutServiceUrl(
+            patch.server_callback_url,
+            provider.id,
+          );
+        }
+        return nextProvider;
+      }),
     }));
   };
 
@@ -378,8 +440,9 @@ const SystemConfig: React.FC = () => {
       {(radioVal === 2 || loginMethod === 2) && selectedProvider && (
         <Card title="三方认证登录配置" style={{ maxWidth: 760, marginTop: 16 }}>
           <Text type="secondary">
-            当前 Provider 使用客户 CAS
-            协议。用户首次认证成功后会在绑定企业下自动创建普通用户，并补齐邀请码、初始积分和
+            当前 Provider 使用客户 CAS 协议。默认通过服务端 HTTP 回调完成 CAS
+            ticket 校验，再使用一次性短码唤起
+            Sudowork。用户首次认证成功后会在绑定企业下自动创建普通用户，并补齐邀请码、初始积分和
             Sudorouter Token。
           </Text>
           <Form layout="vertical" style={{ marginTop: 20 }}>
@@ -428,6 +491,45 @@ const SystemConfig: React.FC = () => {
                 }
               />
             </Form.Item>
+            <Form.Item label="回调模式">
+              <Select
+                value={selectedProvider.callback_mode}
+                onChange={(value) =>
+                  updateSelectedProvider({
+                    callback_mode: value as "direct_app" | "server_callback",
+                  })
+                }
+              >
+                <Select.Option value="server_callback">
+                  服务端 HTTP 回调
+                </Select.Option>
+                <Select.Option value="direct_app">App 直连回调</Select.Option>
+              </Select>
+            </Form.Item>
+            {selectedProvider.callback_mode === "server_callback" && (
+              <Form.Item label="服务端回调 URL">
+                <Input
+                  value={selectedProvider.server_callback_url}
+                  placeholder="https://server.example.com/api/v1/auth/third-party/cas/callback/comac_cas"
+                  onChange={(e) =>
+                    updateSelectedProvider({
+                      server_callback_url: getInputValue(e),
+                    })
+                  }
+                />
+              </Form.Item>
+            )}
+            <Form.Item label="App 回调 URL">
+              <Input
+                value={selectedProvider.app_callback_url}
+                placeholder="sudowork://cas-callback/comac_cas/callback"
+                onChange={(e) =>
+                  updateSelectedProvider({
+                    app_callback_url: getInputValue(e),
+                  })
+                }
+              />
+            </Form.Item>
             <Space size={12} style={{ width: "100%" }} align="start">
               <Form.Item label="登录 Path" style={{ flex: 1 }}>
                 <Input
@@ -464,6 +566,33 @@ const SystemConfig: React.FC = () => {
                 />
               </Form.Item>
             </Space>
+            <Form.Item label="登出回跳 URL">
+              <Input
+                value={selectedProvider.logout_service_url}
+                placeholder={buildLogoutServiceUrl(
+                  selectedProvider.server_callback_url,
+                  selectedProvider.id,
+                )}
+                onChange={(e) =>
+                  updateSelectedProvider({
+                    logout_service_url: getInputValue(e),
+                  })
+                }
+              />
+            </Form.Item>
+            <Form.Item label="Service 编码方式">
+              <Select
+                value={selectedProvider.service_encode_mode}
+                onChange={(value) =>
+                  updateSelectedProvider({
+                    service_encode_mode: value as "component" | "raw",
+                  })
+                }
+              >
+                <Select.Option value="component">标准 URL 编码</Select.Option>
+                <Select.Option value="raw">不编码</Select.Option>
+              </Select>
+            </Form.Item>
             <Space size={12} style={{ width: "100%" }} align="start">
               <Form.Item label="绑定企业码" style={{ flex: 1 }}>
                 <Input

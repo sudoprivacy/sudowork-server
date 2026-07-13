@@ -55,7 +55,12 @@ export interface ThirdPartyAuthProviderConfig {
   login_path: string;
   validate_path: string;
   logout_path: string;
+  logout_service_url: string;
   service_param: string;
+  service_encode_mode: "component" | "raw";
+  callback_mode: "direct_app" | "server_callback";
+  server_callback_url: string;
+  app_callback_url: string;
   enterprise_code: string;
   auto_provision: number;
 }
@@ -79,7 +84,12 @@ const DEFAULT_THIRD_PARTY_AUTH_CONFIG: ThirdPartyAuthConfig = {
       login_path: "/cas/login/",
       validate_path: "/cas/p3/serviceValidate",
       logout_path: "/cas/logout",
+      logout_service_url: "",
       service_param: "service",
+      service_encode_mode: "component",
+      callback_mode: "server_callback",
+      server_callback_url: "",
+      app_callback_url: "sudowork://cas-callback/comac_cas/callback",
       enterprise_code: "sudo",
       auto_provision: 1,
     },
@@ -151,7 +161,9 @@ export class SystemConfigService {
     const columns = db.prepare("PRAGMA table_info(system_config)").all() as {
       name: string;
     }[];
-    const hasDescription = columns.some((column) => column.name === "description");
+    const hasDescription = columns.some(
+      (column) => column.name === "description",
+    );
     const hasUpdatedAt = columns.some((column) => column.name === "updated_at");
 
     if (hasDescription && hasUpdatedAt) {
@@ -345,7 +357,12 @@ export class SystemConfigService {
           login_path: provider.login_path,
           validate_path: provider.validate_path,
           logout_path: provider.logout_path,
+          logout_service_url: provider.logout_service_url,
           service_param: provider.service_param,
+          service_encode_mode: provider.service_encode_mode,
+          callback_mode: provider.callback_mode,
+          server_callback_url: provider.server_callback_url,
+          app_callback_url: provider.app_callback_url,
           enterprise_code: "",
           auto_provision: 0,
         })),
@@ -409,6 +426,23 @@ export class SystemConfigService {
         value?.service_param,
         fallback.service_param,
       ),
+      service_encode_mode:
+        value?.service_encode_mode === "raw" ? "raw" : "component",
+      callback_mode:
+        value?.callback_mode === "direct_app" ||
+        value?.callback_mode === "server_callback"
+          ? value.callback_mode
+          : fallback.callback_mode,
+      server_callback_url:
+        typeof value?.server_callback_url === "string"
+          ? value.server_callback_url.trim()
+          : fallback.server_callback_url,
+      app_callback_url: this.cleanString(
+        value?.app_callback_url,
+        fallback.app_callback_url ||
+          `sudowork://cas-callback/${this.cleanString(value?.id, fallback.id)}/callback`,
+      ),
+      logout_service_url: this.resolveLogoutServiceUrl(value, fallback),
       enterprise_code: this.cleanString(
         value?.enterprise_code,
         fallback.enterprise_code,
@@ -418,6 +452,46 @@ export class SystemConfigService {
         fallback.auto_provision,
       ),
     };
+  }
+
+  private resolveLogoutServiceUrl(
+    value: Partial<ThirdPartyAuthProviderConfig> | undefined,
+    fallback: ThirdPartyAuthProviderConfig,
+  ): string {
+    const configured =
+      typeof value?.logout_service_url === "string"
+        ? value.logout_service_url.trim()
+        : "";
+    if (configured) {
+      return configured;
+    }
+
+    const providerId = this.cleanString(value?.id, fallback.id);
+    const callbackMode =
+      value?.callback_mode === "direct_app" ||
+      value?.callback_mode === "server_callback"
+        ? value.callback_mode
+        : fallback.callback_mode;
+    const serverCallbackUrl =
+      typeof value?.server_callback_url === "string"
+        ? value.server_callback_url.trim()
+        : fallback.server_callback_url;
+
+    if (callbackMode !== "server_callback" || !serverCallbackUrl) {
+      return fallback.logout_service_url || "";
+    }
+
+    try {
+      const url = new URL(serverCallbackUrl);
+      url.pathname = url.pathname.replace(
+        /\/callback\/[^/]+\/?$/,
+        `/logout/callback/${encodeURIComponent(providerId)}`,
+      );
+      url.search = "";
+      return url.toString();
+    } catch {
+      return fallback.logout_service_url || "";
+    }
   }
 
   private normalizeFlag(value: unknown, fallback: number): number {

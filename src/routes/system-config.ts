@@ -89,9 +89,49 @@ function validateThirdPartyAuthConfig(
   if (
     !provider.login_path ||
     !provider.validate_path ||
+    !provider.logout_path ||
     !provider.service_param
   ) {
-    return "CAS 登录地址、校验地址和 service 参数名不能为空";
+    return "CAS 登录地址、校验地址、登出地址和 service 参数名不能为空";
+  }
+
+  if (provider.logout_service_url) {
+    try {
+      const logoutServiceUrl = new URL(provider.logout_service_url);
+      if (
+        logoutServiceUrl.protocol !== "http:" &&
+        logoutServiceUrl.protocol !== "https:"
+      ) {
+        return "登出回跳 URL 必须使用 http 或 https";
+      }
+    } catch {
+      return "登出回跳 URL 格式不正确";
+    }
+  }
+
+  if (
+    provider.callback_mode !== "direct_app" &&
+    provider.callback_mode !== "server_callback"
+  ) {
+    return "三方认证回调模式不正确";
+  }
+
+  if (provider.callback_mode === "server_callback") {
+    try {
+      const callbackUrl = new URL(provider.server_callback_url);
+      if (
+        callbackUrl.protocol !== "http:" &&
+        callbackUrl.protocol !== "https:"
+      ) {
+        return "服务端回调 URL 必须使用 http 或 https";
+      }
+    } catch {
+      return "服务端回调 URL 格式不正确";
+    }
+  }
+
+  if (!provider.app_callback_url) {
+    return "App 回调 URL 不能为空";
   }
 
   if (!provider.enterprise_code) {

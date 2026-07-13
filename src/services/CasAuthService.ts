@@ -44,6 +44,10 @@ class CasAuthService {
     ticket: string,
   ): string {
     const url = new URL(provider.validate_path, provider.cas_url);
+    if (provider.service_encode_mode === "raw") {
+      const separator = url.toString().includes("?") ? "&" : "?";
+      return `${url.toString()}${separator}${provider.service_param || "service"}=${service}&ticket=${encodeURIComponent(ticket)}`;
+    }
     url.searchParams.set(provider.service_param || "service", service);
     url.searchParams.set("ticket", ticket);
     return url.toString();

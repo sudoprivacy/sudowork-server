@@ -133,6 +133,25 @@ export function initSchema(): void {
   db.run(
     `CREATE INDEX IF NOT EXISTS idx_third_party_auth_enterprise_id ON third_party_auth_identities(enterprise_id)`,
   );
+  db.run(`
+    CREATE TABLE IF NOT EXISTS third_party_auth_handoffs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code_hash TEXT UNIQUE NOT NULL,
+      provider_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      external_user_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_handoffs_provider ON third_party_auth_handoffs(provider_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_handoffs_expires_at ON third_party_auth_handoffs(expires_at)`,
+  );
 
   // ============================================
   // Recharge System Tables (富友支付充值系统)
