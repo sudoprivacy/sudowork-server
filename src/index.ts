@@ -16,6 +16,7 @@ import { initDatabase } from "./db/init.js";
 // Routes
 import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
+import { thirdPartyAuthRoutes } from "./routes/auth-third-party.js";
 import { userRoutes } from "./routes/user.js";
 import { miscRoutes } from "./routes/misc.js";
 import { rechargeRoutes } from "./routes/recharge.js";
@@ -31,7 +32,11 @@ import { authRegisterPasswordRoutes } from "./routes/auth-register-password.js";
 import { initDatabase as initQmsDatabase } from "./qms/db/init.js";
 import qmsRoutes from "./qms/routes/index.js";
 import { createScheduler, setSchedulerInstance } from "./qms/tasks/index.js";
-import { corsMiddleware as qmsCorsMiddleware, errorHandler as qmsErrorHandler, requestLogger as qmsRequestLogger } from "./qms/middleware/index.js";
+import {
+  corsMiddleware as qmsCorsMiddleware,
+  errorHandler as qmsErrorHandler,
+  requestLogger as qmsRequestLogger,
+} from "./qms/middleware/index.js";
 
 const qmsEnabled = process.env.QMS_ENABLED === "true";
 
@@ -57,8 +62,8 @@ app.use("/favicon.svg", serveStatic({ root: "./admin-dist" }));
 app.use("/icons.svg", serveStatic({ root: "./admin-dist" }));
 
 // Serve uploaded config item icons
-const UPLOAD_DIR_STATIC = process.env.UPLOAD_DIR || './data/uploads';
-app.use("/uploads/*", serveStatic({ root: join(UPLOAD_DIR_STATIC, '..') }));
+const UPLOAD_DIR_STATIC = process.env.UPLOAD_DIR || "./data/uploads";
+app.use("/uploads/*", serveStatic({ root: join(UPLOAD_DIR_STATIC, "..") }));
 
 // Serve default config item icon
 app.use("/config-item-default.svg", serveStatic({ root: "./public" }));
@@ -83,6 +88,7 @@ app.route("/api/v1/admin/dify", adminDifyRoutes);
 app.route("/api/v1/admin", adminDatasetsRoutes);
 app.route("/api/v1/agents", agentsRoutes);
 app.route("/api/v1/auth", authRoutes);
+app.route("/api/v1/auth", thirdPartyAuthRoutes);
 app.route("/api/v1/auth", loginByConfigRoutes);
 app.route("/api/v1/auth", authChangePasswordRoutes);
 app.route("/api/v1/auth", authRegisterPasswordRoutes);

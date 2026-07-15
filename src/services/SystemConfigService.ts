@@ -2,7 +2,7 @@
  * System configuration service (KV store in system_config table).
  *
  * 系统级配置的读写服务。
- * - getLoginMethod(): 当前登录方式 0=手机验证码 / 1=用户名密码
+ * - getLoginMethod(): 当前登录方式 0=手机验证码 / 1=用户名密码 / 2=三方认证登录
  * - setLoginMethod(): 设置登录方式
  * - isSmsChannelConfigured(): 短信通道是否已真正配置(仅腾讯云完整配置才算)
  * - getLogReport/setLogReport: 日志上报开关配置(开关 + 协议 + 域名)
@@ -17,6 +17,11 @@ const LOGIN_METHOD_KEY = "login_method";
 const LOG_REPORT_KEY = "log_report";
 const VERSION_UPDATE_KEY = "version_update";
 const PRODUCT_IMPROVEMENT_KEY = "product_improvement";
+const THIRD_PARTY_AUTH_KEY = "third_party_auth";
+const DEFAULT_COMAC_SERVER_CALLBACK_URL =
+  "http://127.0.0.1:3000/api/v1/auth/third-party/cas/callback/comac_cas";
+const DEFAULT_COMAC_LOGOUT_SERVICE_URL =
+  "http://127.0.0.1:3000/api/v1/auth/third-party/cas/logout/callback/comac_cas";
 
 // 与 src/routes/system-config.ts:20 同一把 key（用户要求复用同一密钥；
 // 独立定义以避免对路由模块的反向依赖与最小化已有代码修改）。
@@ -45,32 +50,79 @@ export interface ProductImprovementConfig {
   domain?: string;
 }
 
+export interface ThirdPartyAuthProviderConfig {
+  id: string;
+  name: string;
+  type: "cas";
+  enabled: number;
+  cas_url: string;
+  login_path: string;
+  validate_path: string;
+  logout_path: string;
+  logout_service_url: string;
+  service_param: string;
+  service_encode_mode: "component" | "raw";
+  callback_mode: "direct_app" | "server_callback";
+  server_callback_url: string;
+  app_callback_url: string;
+  enterprise_code: string;
+  auto_provision: number;
+}
+
+export interface ThirdPartyAuthConfig {
+  enabled: number;
+  default_provider: string;
+  providers: ThirdPartyAuthProviderConfig[];
+}
+
+const DEFAULT_THIRD_PARTY_AUTH_CONFIG: ThirdPartyAuthConfig = {
+  enabled: 1,
+  default_provider: "comac_cas",
+  providers: [
+    {
+      id: "comac_cas",
+      name: "中国商飞",
+      type: "cas",
+      enabled: 1,
+      cas_url: "http://cas.cvtol.com/",
+      login_path: "/cas/login/",
+      validate_path: "/cas/p3/serviceValidate",
+      logout_path: "/cas/logout",
+      logout_service_url: DEFAULT_COMAC_LOGOUT_SERVICE_URL,
+      service_param: "service",
+      service_encode_mode: "component",
+      callback_mode: "server_callback",
+      server_callback_url: DEFAULT_COMAC_SERVER_CALLBACK_URL,
+      app_callback_url: "sudowork://cas-callback/comac_cas/callback",
+      enterprise_code: "sudo",
+      auto_provision: 1,
+    },
+  ],
+};
+
 export class SystemConfigService {
   /**
-   * 获取当前登录方式。0=手机验证码(默认), 1=用户名密码。
+   * 获取当前登录方式。0=手机验证码(默认), 1=用户名密码, 2=三方认证登录。
    */
   getLoginMethod(): number {
     const row = db
       .prepare("SELECT value FROM system_config WHERE key = ?")
       .get(LOGIN_METHOD_KEY) as { value: string } | undefined;
     const value = parseInt(row?.value ?? "0", 10);
-    return value === 1 ? 1 : 0;
+    return value === 1 || value === 2 ? value : 0;
   }
 
   /**
    * 设置登录方式。
    */
   setLoginMethod(value: number): void {
-    const v = value === 1 ? "1" : "0";
+    const v = value === 1 || value === 2 ? String(value) : "0";
     const result = db.run(
       "UPDATE system_config SET value = ?, updated_at = datetime('now') WHERE key = ?",
       [v, LOGIN_METHOD_KEY],
     );
     if (result.changes === 0) {
-      db.run(
-        "INSERT INTO system_config(key, value) VALUES(?, ?)",
-        [LOGIN_METHOD_KEY, v],
-      );
+      this.insertConfigValue(LOGIN_METHOD_KEY, v);
     }
   }
 
@@ -105,11 +157,28 @@ export class SystemConfigService {
       [v, key],
     );
     if (result.changes === 0) {
-      db.run(
-        "INSERT INTO system_config(key, value) VALUES(?, ?)",
-        [key, v],
-      );
+      this.insertConfigValue(key, v);
     }
+  }
+
+  private insertConfigValue(key: string, value: string): void {
+    const columns = db.prepare("PRAGMA table_info(system_config)").all() as {
+      name: string;
+    }[];
+    const hasDescription = columns.some(
+      (column) => column.name === "description",
+    );
+    const hasUpdatedAt = columns.some((column) => column.name === "updated_at");
+
+    if (hasDescription && hasUpdatedAt) {
+      db.run(
+        "INSERT INTO system_config(key, value, description, updated_at) VALUES(?, ?, ?, ?)",
+        [key, value, "", Math.floor(Date.now() / 1000)],
+      );
+      return;
+    }
+
+    db.run("INSERT INTO system_config(key, value) VALUES(?, ?)", [key, value]);
   }
 
   /**
@@ -231,6 +300,94 @@ export class SystemConfigService {
     this.setJsonConfig(PRODUCT_IMPROVEMENT_KEY, value);
   }
 
+  normalizeThirdPartyAuth(value: unknown): ThirdPartyAuthConfig {
+    const raw =
+      value && typeof value === "object"
+        ? (value as Partial<ThirdPartyAuthConfig>)
+        : {};
+    const defaultProviderConfig = DEFAULT_THIRD_PARTY_AUTH_CONFIG.providers[0]!;
+    const rawProviders =
+      Array.isArray(raw.providers) && raw.providers.length > 0
+        ? raw.providers
+        : DEFAULT_THIRD_PARTY_AUTH_CONFIG.providers;
+    const providers = rawProviders.map((provider, index) => {
+      const fallback =
+        DEFAULT_THIRD_PARTY_AUTH_CONFIG.providers.find(
+          (item) => item.id === provider?.id,
+        ) ??
+        DEFAULT_THIRD_PARTY_AUTH_CONFIG.providers[index] ??
+        defaultProviderConfig;
+      return this.normalizeThirdPartyProvider(provider, fallback);
+    });
+    const defaultProvider = this.cleanString(
+      raw.default_provider,
+      providers[0]?.id ?? DEFAULT_THIRD_PARTY_AUTH_CONFIG.default_provider,
+    );
+    const hasDefaultProvider = providers.some(
+      (item) => item.id === defaultProvider,
+    );
+    return {
+      enabled: this.normalizeFlag(
+        raw.enabled,
+        DEFAULT_THIRD_PARTY_AUTH_CONFIG.enabled,
+      ),
+      default_provider: hasDefaultProvider ? defaultProvider : providers[0]!.id,
+      providers,
+    };
+  }
+
+  getThirdPartyAuth(): ThirdPartyAuthConfig {
+    return this.normalizeThirdPartyAuth(
+      this.getJsonConfig<ThirdPartyAuthConfig>(
+        THIRD_PARTY_AUTH_KEY,
+        DEFAULT_THIRD_PARTY_AUTH_CONFIG,
+      ),
+    );
+  }
+
+  getPublicThirdPartyAuth(): ThirdPartyAuthConfig {
+    const config = this.getThirdPartyAuth();
+    return {
+      enabled: config.enabled,
+      default_provider: config.default_provider,
+      providers: config.providers
+        .filter((provider) => provider.enabled === 1)
+        .map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          type: provider.type,
+          enabled: provider.enabled,
+          cas_url: provider.cas_url,
+          login_path: provider.login_path,
+          validate_path: provider.validate_path,
+          logout_path: provider.logout_path,
+          logout_service_url: provider.logout_service_url,
+          service_param: provider.service_param,
+          service_encode_mode: provider.service_encode_mode,
+          callback_mode: provider.callback_mode,
+          server_callback_url: provider.server_callback_url,
+          app_callback_url: provider.app_callback_url,
+          enterprise_code: "",
+          auto_provision: 0,
+        })),
+    };
+  }
+
+  getThirdPartyProvider(
+    providerId?: string,
+  ): ThirdPartyAuthProviderConfig | null {
+    const config = this.getThirdPartyAuth();
+    const id = providerId || config.default_provider;
+    return config.providers.find((provider) => provider.id === id) ?? null;
+  }
+
+  setThirdPartyAuth(value: unknown): void {
+    this.setJsonConfig(
+      THIRD_PARTY_AUTH_KEY,
+      this.normalizeThirdPartyAuth(value),
+    );
+  }
+
   /**
    * 短信通道是否已真正配置。
    * 判定:SMS_PROVIDER=tencent 且 6 个腾讯云凭证齐全 → 已配置(唯一允许切换到手机验证码的条件)。
@@ -251,6 +408,115 @@ export class SystemConfigService {
     return credentials.every(
       (c) => typeof c === "string" && c.trim().length > 0,
     );
+  }
+
+  private normalizeThirdPartyProvider(
+    value: Partial<ThirdPartyAuthProviderConfig> | undefined,
+    fallback: ThirdPartyAuthProviderConfig,
+  ): ThirdPartyAuthProviderConfig {
+    return {
+      id: this.cleanString(value?.id, fallback.id),
+      name: this.cleanString(value?.name, fallback.name),
+      type: "cas",
+      enabled: this.normalizeFlag(value?.enabled, fallback.enabled),
+      cas_url: this.cleanString(value?.cas_url, fallback.cas_url),
+      login_path: this.normalizePath(value?.login_path, fallback.login_path),
+      validate_path: this.normalizePath(
+        value?.validate_path,
+        fallback.validate_path,
+      ),
+      logout_path: this.normalizePath(value?.logout_path, fallback.logout_path),
+      service_param: this.cleanString(
+        value?.service_param,
+        fallback.service_param,
+      ),
+      service_encode_mode:
+        value?.service_encode_mode === "raw" ? "raw" : "component",
+      callback_mode:
+        value?.callback_mode === "direct_app" ||
+        value?.callback_mode === "server_callback"
+          ? value.callback_mode
+          : fallback.callback_mode,
+      server_callback_url: this.cleanString(
+        value?.server_callback_url,
+        fallback.server_callback_url,
+      ),
+      app_callback_url: this.cleanString(
+        value?.app_callback_url,
+        fallback.app_callback_url ||
+          `sudowork://cas-callback/${this.cleanString(value?.id, fallback.id)}/callback`,
+      ),
+      logout_service_url: this.resolveLogoutServiceUrl(value, fallback),
+      enterprise_code: this.cleanString(
+        value?.enterprise_code,
+        fallback.enterprise_code,
+      ),
+      auto_provision: this.normalizeFlag(
+        value?.auto_provision,
+        fallback.auto_provision,
+      ),
+    };
+  }
+
+  private resolveLogoutServiceUrl(
+    value: Partial<ThirdPartyAuthProviderConfig> | undefined,
+    fallback: ThirdPartyAuthProviderConfig,
+  ): string {
+    const configured =
+      typeof value?.logout_service_url === "string"
+        ? value.logout_service_url.trim()
+        : "";
+    if (configured) {
+      return configured;
+    }
+
+    const providerId = this.cleanString(value?.id, fallback.id);
+    const callbackMode =
+      value?.callback_mode === "direct_app" ||
+      value?.callback_mode === "server_callback"
+        ? value.callback_mode
+        : fallback.callback_mode;
+    const serverCallbackUrl =
+      typeof value?.server_callback_url === "string"
+        ? value.server_callback_url.trim()
+        : fallback.server_callback_url;
+
+    if (callbackMode !== "server_callback" || !serverCallbackUrl) {
+      return fallback.logout_service_url || "";
+    }
+
+    try {
+      const url = new URL(serverCallbackUrl);
+      url.pathname = url.pathname.replace(
+        /\/callback\/[^/]+\/?$/,
+        `/logout/callback/${encodeURIComponent(providerId)}`,
+      );
+      url.search = "";
+      return url.toString();
+    } catch {
+      return fallback.logout_service_url || "";
+    }
+  }
+
+  private normalizeFlag(value: unknown, fallback: number): number {
+    if (value === true || value === 1 || value === "1") {
+      return 1;
+    }
+    if (value === false || value === 0 || value === "0") {
+      return 0;
+    }
+    return fallback === 1 ? 1 : 0;
+  }
+
+  private cleanString(value: unknown, fallback: string): string {
+    return typeof value === "string" && value.trim().length > 0
+      ? value.trim()
+      : fallback;
+  }
+
+  private normalizePath(value: unknown, fallback: string): string {
+    const path = this.cleanString(value, fallback);
+    return path.startsWith("/") ? path : `/${path}`;
   }
 }
 

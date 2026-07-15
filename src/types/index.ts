@@ -2,7 +2,13 @@
  * Type definitions for sudowork-server
  */
 
-import type { OrderStatus, UserStatus, UserRole, LedgerType, ConfigItemStatus } from '../utils/constants.js';
+import type {
+  OrderStatus,
+  UserStatus,
+  UserRole,
+  LedgerType,
+  ConfigItemStatus,
+} from "../utils/constants.js";
 
 // ==================== API Response ====================
 
@@ -29,7 +35,7 @@ export interface User {
   invitation_code_id: number | null;
   password_hash: string | null;
   must_change_password: boolean;
-  login_type: number; // 0: 手机验证码, 1: 用户名密码
+  login_type: number; // 0: 手机验证码, 1: 用户名密码, 2: 三方认证登录
   created_at: string;
 }
 
@@ -53,7 +59,7 @@ export interface RechargeOrder {
   quota_amount: number;
   points_amount: number;
   bonus_points: number;
-  payment_method: 'ALIPAY' | 'WECHAT';
+  payment_method: "ALIPAY" | "WECHAT";
   order_date: string;
   fuiou_order_info: string | null;
   status: OrderStatus;

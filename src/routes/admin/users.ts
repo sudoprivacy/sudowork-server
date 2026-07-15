@@ -2,22 +2,26 @@
  * Admin user management routes
  */
 
-import { Hono } from 'hono';
-import { db } from '../../db/index.js';
-import { sudorouterService } from '../../services/SudorouterService.js';
-import { systemConfigService } from '../../services/SystemConfigService.js';
-import { authMiddleware, adminMiddleware, getAuthUser } from '../../middleware/auth.js';
-import { logOperation } from '../../utils/logger.js';
-import type { User, UserWithEnterprise } from '../../types/index.js';
+import { Hono } from "hono";
+import { db } from "../../db/index.js";
+import { sudorouterService } from "../../services/SudorouterService.js";
+import { systemConfigService } from "../../services/SystemConfigService.js";
+import {
+  authMiddleware,
+  adminMiddleware,
+  getAuthUser,
+} from "../../middleware/auth.js";
+import { logOperation } from "../../utils/logger.js";
+import type { User, UserWithEnterprise } from "../../types/index.js";
 
 const usersRoutes = new Hono();
 
 // GET /users - User list
-usersRoutes.get('/users', authMiddleware, adminMiddleware, async (c) => {
-  const enterpriseId = c.req.query('enterprise_id');
-  const status = c.req.query('status');
-  const role = c.req.query('role');
-  const keyword = c.req.query('keyword')?.trim().substring(0, 50);
+usersRoutes.get("/users", authMiddleware, adminMiddleware, async (c) => {
+  const enterpriseId = c.req.query("enterprise_id");
+  const status = c.req.query("status");
+  const role = c.req.query("role");
+  const keyword = c.req.query("keyword")?.trim().substring(0, 50);
 
   const loginMethod = systemConfigService.getLoginMethod();
   let query = `
@@ -30,26 +34,26 @@ usersRoutes.get('/users', authMiddleware, adminMiddleware, async (c) => {
   const params: unknown[] = [loginMethod];
 
   if (enterpriseId) {
-    query += ' AND u.enterprise_id = ?';
+    query += " AND u.enterprise_id = ?";
     params.push(enterpriseId);
   }
 
   if (status) {
-    query += ' AND u.status = ?';
+    query += " AND u.status = ?";
     params.push(parseInt(status));
   }
 
   if (role) {
-    query += ' AND u.role = ?';
+    query += " AND u.role = ?";
     params.push(role);
   }
 
   if (keyword) {
-    query += ' AND (u.phone LIKE ? OR u.nickname LIKE ?)';
+    query += " AND (u.phone LIKE ? OR u.nickname LIKE ?)";
     params.push(`%${keyword}%`, `%${keyword}%`);
   }
 
-  query += ' ORDER BY u.created_at DESC';
+  query += " ORDER BY u.created_at DESC";
 
   const users = db.prepare(query).all(...params) as UserWithEnterprise[];
 
@@ -60,27 +64,35 @@ usersRoutes.get('/users', authMiddleware, adminMiddleware, async (c) => {
 });
 
 // POST /users - Create user (SUPER_ADMIN only)
-usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
+usersRoutes.post("/users", authMiddleware, adminMiddleware, async (c) => {
   const adminUser = (await getAuthUser(c)) as User;
 
+  if (systemConfigService.getLoginMethod() !== 0) {
+    return c.json(
+      { success: false, msg: "当前登录方式不支持创建手机验证码用户" },
+      403,
+    );
+  }
+
   // Only SUPER_ADMIN can create users
-  if (adminUser.role !== 'SUPER_ADMIN') {
+  if (adminUser.role !== "SUPER_ADMIN") {
     return c.json(
       {
         success: false,
-        msg: '只有超级管理员可以创建用户',
+        msg: "只有超级管理员可以创建用户",
       },
       403,
     );
   }
 
-  const { phone, nickname, enterprise_id, invitation_code_id } = await c.req.json();
+  const { phone, nickname, enterprise_id, invitation_code_id } =
+    await c.req.json();
 
   if (!phone || !enterprise_id) {
     return c.json(
       {
         success: false,
-        msg: '手机号和所属企业不能为空',
+        msg: "手机号和所属企业不能为空",
       },
       400,
     );
@@ -90,20 +102,20 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
     return c.json(
       {
         success: false,
-        msg: '请选择邀请码',
+        msg: "请选择邀请码",
       },
       400,
     );
   }
 
   // Check if phone already exists
-  const existing = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+  const existing = db.prepare("SELECT * FROM users WHERE phone = ?").get(phone);
 
   if (existing) {
     return c.json(
       {
         success: false,
-        msg: '手机号已存在',
+        msg: "手机号已存在",
       },
       400,
     );
@@ -111,20 +123,22 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
 
   // Validate invitation code
   const invitationCode = db
-    .prepare('SELECT * FROM invitation_codes WHERE id = ? AND status = 0')
-    .get(invitation_code_id) as {
-      id: number;
-      code: string;
-      enterprise_id: number;
-      status: number;
-      initial_quota_usd: number | null;
-    } | undefined;
+    .prepare("SELECT * FROM invitation_codes WHERE id = ? AND status = 0")
+    .get(invitation_code_id) as
+    | {
+        id: number;
+        code: string;
+        enterprise_id: number;
+        status: number;
+        initial_quota_usd: number | null;
+      }
+    | undefined;
 
   if (!invitationCode) {
     return c.json(
       {
         success: false,
-        msg: '邀请码不存在或已被使用',
+        msg: "邀请码不存在或已被使用",
       },
       400,
     );
@@ -134,7 +148,7 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
     return c.json(
       {
         success: false,
-        msg: '邀请码不属于所选企业',
+        msg: "邀请码不属于所选企业",
       },
       400,
     );
@@ -145,32 +159,35 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
     return c.json(
       {
         success: false,
-        msg: '系统未完成配置，请联系管理员',
+        msg: "系统未完成配置，请联系管理员",
       },
       500,
     );
   }
 
   // Call sudorouter to create user
-  const createUserResult = await sudorouterService.createUserWithLog(phone, nickname);
+  const createUserResult = await sudorouterService.createUserWithLog(
+    phone,
+    nickname,
+  );
   if (!createUserResult.success || !createUserResult.data) {
     logOperation({
       userId: adminUser.id,
       userPhone: adminUser.phone,
-      action: 'SUDOROUTER_CREATE_USER_FAILED',
-      resource: 'sudorouter_user',
+      action: "SUDOROUTER_CREATE_USER_FAILED",
+      resource: "sudorouter_user",
       method: createUserResult.request.method,
       path: createUserResult.request.url,
       requestData: createUserResult.request.body,
       responseData: createUserResult.response.data,
       responseStatus: createUserResult.response.status,
       durationMs: createUserResult.duration_ms,
-      errorMessage: createUserResult.error || '创建用户失败',
+      errorMessage: createUserResult.error || "创建用户失败",
     });
     return c.json(
       {
         success: false,
-        msg: `创建 Sudorouter 用户失败: ${createUserResult.error || '未知错误'}`,
+        msg: `创建 Sudorouter 用户失败: ${createUserResult.error || "未知错误"}`,
       },
       500,
     );
@@ -181,8 +198,8 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
   logOperation({
     userId: adminUser.id,
     userPhone: adminUser.phone,
-    action: 'SUDOROUTER_CREATE_USER',
-    resource: 'sudorouter_user',
+    action: "SUDOROUTER_CREATE_USER",
+    resource: "sudorouter_user",
     resourceId: sudorouterUser.id,
     method: createUserResult.request.method,
     path: createUserResult.request.url,
@@ -193,20 +210,21 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
   });
 
   // Call sudorouter to set initial quota
-  const initialQuota = invitationCode.initial_quota_usd == null
-    ? sudorouterService.getInitialQuota()
-    : sudorouterService.usdToQuota(invitationCode.initial_quota_usd);
+  const initialQuota =
+    invitationCode.initial_quota_usd == null
+      ? sudorouterService.getInitialQuota()
+      : sudorouterService.usdToQuota(invitationCode.initial_quota_usd);
   const quotaResult = await sudorouterService.updateUserQuotaWithLog(
     sudorouterUser.id,
     initialQuota,
-    '新用户注册赠送额度',
+    "新用户注册赠送额度",
   );
 
   logOperation({
     userId: adminUser.id,
     userPhone: adminUser.phone,
-    action: 'SUDOROUTER_UPDATE_QUOTA',
-    resource: 'sudorouter_quota',
+    action: "SUDOROUTER_UPDATE_QUOTA",
+    resource: "sudorouter_quota",
     resourceId: sudorouterUser.id,
     method: quotaResult.request.method,
     path: quotaResult.request.url,
@@ -232,20 +250,20 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
     logOperation({
       userId: adminUser.id,
       userPhone: adminUser.phone,
-      action: 'SUDOROUTER_CREATE_TOKEN_FAILED',
-      resource: 'sudorouter_token',
+      action: "SUDOROUTER_CREATE_TOKEN_FAILED",
+      resource: "sudorouter_token",
       method: createTokenResult.request.method,
       path: createTokenResult.request.url,
       requestData: createTokenResult.request.body,
       responseData: createTokenResult.response.data,
       responseStatus: createTokenResult.response.status,
       durationMs: createTokenResult.duration_ms,
-      errorMessage: createTokenResult.error || '创建令牌失败',
+      errorMessage: createTokenResult.error || "创建令牌失败",
     });
     return c.json(
       {
         success: false,
-        msg: `创建 Sudorouter 令牌失败: ${createTokenResult.error || '未知错误'}`,
+        msg: `创建 Sudorouter 令牌失败: ${createTokenResult.error || "未知错误"}`,
       },
       500,
     );
@@ -256,13 +274,16 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
   logOperation({
     userId: adminUser.id,
     userPhone: adminUser.phone,
-    action: 'SUDOROUTER_CREATE_TOKEN',
-    resource: 'sudorouter_token',
+    action: "SUDOROUTER_CREATE_TOKEN",
+    resource: "sudorouter_token",
     resourceId: sudorouterUser.id,
     method: createTokenResult.request.method,
     path: createTokenResult.request.url,
     requestData: createTokenResult.request.body,
-    responseData: { success: true, key_preview: sudorouterKey.substring(0, 20) + '...' },
+    responseData: {
+      success: true,
+      key_preview: sudorouterKey.substring(0, 20) + "...",
+    },
     responseStatus: createTokenResult.response.status,
     durationMs: createTokenResult.duration_ms,
   });
@@ -301,17 +322,17 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
   // Create initial points ledger entry
   db.run(
     "INSERT INTO ledger (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
-    [newUserId, initialBalance, 'BONUS', '新用户注册赠送'],
+    [newUserId, initialBalance, "BONUS", "新用户注册赠送"],
   );
 
   logOperation({
     userId: adminUser.id,
     userPhone: adminUser.phone,
-    action: 'USER_CREATE',
-    resource: 'user',
+    action: "USER_CREATE",
+    resource: "user",
     resourceId: newUserId,
-    method: 'POST',
-    path: '/api/v1/admin/users',
+    method: "POST",
+    path: "/api/v1/admin/users",
     requestData: { phone, nickname, enterprise_id, invitation_code_id },
     responseData: {
       id: newUserId,
@@ -324,7 +345,7 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
 
   return c.json({
     success: true,
-    msg: '用户创建成功',
+    msg: "用户创建成功",
     data: {
       id: newUserId,
       phone,
@@ -335,29 +356,39 @@ usersRoutes.post('/users', authMiddleware, adminMiddleware, async (c) => {
 });
 
 // PUT /users/:id - Update user (SUPER_ADMIN only)
-usersRoutes.put('/users/:id', authMiddleware, adminMiddleware, async (c) => {
+usersRoutes.put("/users/:id", authMiddleware, adminMiddleware, async (c) => {
   const adminUser = (await getAuthUser(c)) as User;
 
   // Only SUPER_ADMIN can update users
-  if (adminUser.role !== 'SUPER_ADMIN') {
+  if (adminUser.role !== "SUPER_ADMIN") {
     return c.json(
       {
         success: false,
-        msg: '只有超级管理员可以编辑用户',
+        msg: "只有超级管理员可以编辑用户",
       },
       403,
     );
   }
 
-  const id = c.req.param('id');
+  const id = c.req.param("id");
   const { nickname, status, enterprise_id } = await c.req.json();
 
   // Get user info before update
-  const oldUser = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
+  const oldUser = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as
+    User | undefined;
 
-  // 跨方式保护(验证码专属端点):非 SUPER_ADMIN 目标必须 login_type=0
-  if (oldUser && oldUser.role !== 'SUPER_ADMIN' && oldUser.login_type !== 0) {
-    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
+  const editableLoginType = systemConfigService.getLoginMethod() === 2 ? 2 : 0;
+
+  // 跨方式保护:验证码/三方列表共用该端点,目标必须属于当前可编辑方式
+  if (
+    oldUser &&
+    oldUser.role !== "SUPER_ADMIN" &&
+    oldUser.login_type !== editableLoginType
+  ) {
+    return c.json(
+      { success: false, msg: "跨方式操作被拒绝:该用户不属于当前登录方式" },
+      403,
+    );
   }
 
   db.run(
@@ -368,15 +399,16 @@ usersRoutes.put('/users/:id', authMiddleware, adminMiddleware, async (c) => {
   );
 
   // Get user info after update
-  const newUser = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
+  const newUser = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as
+    User | undefined;
 
   logOperation({
     userId: adminUser.id,
     userPhone: adminUser.phone,
-    action: 'USER_UPDATE',
-    resource: 'user',
+    action: "USER_UPDATE",
+    resource: "user",
     resourceId: parseInt(id),
-    method: 'PUT',
+    method: "PUT",
     path: `/api/v1/admin/users/${id}`,
     requestData: { nickname, status, enterprise_id },
     responseData: {
@@ -395,205 +427,228 @@ usersRoutes.put('/users/:id', authMiddleware, adminMiddleware, async (c) => {
 
   return c.json({
     success: true,
-    msg: '用户信息更新成功',
+    msg: "用户信息更新成功",
   });
 });
 
 // POST /users/:id/role - Set user role
-usersRoutes.post('/users/:id/role', authMiddleware, adminMiddleware, async (c) => {
-  const adminUser = (await getAuthUser(c)) as User;
-  const id = c.req.param('id');
-  const { role } = await c.req.json();
+usersRoutes.post(
+  "/users/:id/role",
+  authMiddleware,
+  adminMiddleware,
+  async (c) => {
+    const adminUser = (await getAuthUser(c)) as User;
+    const id = c.req.param("id");
+    const { role } = await c.req.json();
 
-  // Cannot change role to SUPER_ADMIN
-  if (role === 'SUPER_ADMIN') {
-    return c.json(
-      {
-        success: false,
-        msg: '无法将用户设置为超级管理员',
-      },
-      400,
-    );
-  }
-
-  // Only allow setting to USER or ENTERPRISE_ADMIN
-  if (!['USER', 'ENTERPRISE_ADMIN'].includes(role)) {
-    return c.json(
-      {
-        success: false,
-        msg: '无效的角色',
-      },
-      400,
-    );
-  }
-
-  // Get target user
-  const targetUser = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
-
-  if (!targetUser) {
-    return c.json({ success: false, msg: '用户不存在' }, 404);
-  }
-
-  // Cannot modify SUPER_ADMIN
-  if (targetUser.role === 'SUPER_ADMIN') {
-    return c.json(
-      {
-        success: false,
-        msg: '无法修改超级管理员的角色',
-      },
-      403,
-    );
-  }
-
-  // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
-  if (targetUser.login_type !== systemConfigService.getLoginMethod()) {
-    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
-  }
-
-  // SUPER_ADMIN can modify any user
-  if (adminUser.role === 'SUPER_ADMIN') {
-    db.run('UPDATE users SET role = ? WHERE id = ?', [role, id]);
-    return c.json({
-      success: true,
-      msg: '角色更新成功',
-    });
-  }
-
-  // ENTERPRISE_ADMIN can only modify users in the same enterprise
-  if (adminUser.role === 'ENTERPRISE_ADMIN') {
-    if (targetUser.enterprise_id !== adminUser.enterprise_id) {
+    // Cannot change role to SUPER_ADMIN
+    if (role === "SUPER_ADMIN") {
       return c.json(
         {
           success: false,
-          msg: '只能修改本企业的用户角色',
+          msg: "无法将用户设置为超级管理员",
+        },
+        400,
+      );
+    }
+
+    // Only allow setting to USER or ENTERPRISE_ADMIN
+    if (!["USER", "ENTERPRISE_ADMIN"].includes(role)) {
+      return c.json(
+        {
+          success: false,
+          msg: "无效的角色",
+        },
+        400,
+      );
+    }
+
+    // Get target user
+    const targetUser = db
+      .prepare("SELECT * FROM users WHERE id = ?")
+      .get(id) as User | undefined;
+
+    if (!targetUser) {
+      return c.json({ success: false, msg: "用户不存在" }, 404);
+    }
+
+    // Cannot modify SUPER_ADMIN
+    if (targetUser.role === "SUPER_ADMIN") {
+      return c.json(
+        {
+          success: false,
+          msg: "无法修改超级管理员的角色",
         },
         403,
       );
     }
-    db.run('UPDATE users SET role = ? WHERE id = ?', [role, id]);
-    return c.json({
-      success: true,
-      msg: '角色更新成功',
-    });
-  }
 
-  return c.json(
-    {
-      success: false,
-      msg: '权限不足',
-    },
-    403,
-  );
-});
+    // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
+    if (targetUser.login_type !== systemConfigService.getLoginMethod()) {
+      return c.json(
+        { success: false, msg: "跨方式操作被拒绝:该用户不属于当前登录方式" },
+        403,
+      );
+    }
 
-// POST /users/:id/manage - Enable/Disable user
-usersRoutes.post('/users/:id/manage', authMiddleware, adminMiddleware, async (c) => {
-  const adminUser = (await getAuthUser(c)) as User;
-  const id = c.req.param('id');
-  const { action } = await c.req.json(); // action: 'enable' or 'disable'
+    // SUPER_ADMIN can modify any user
+    if (adminUser.role === "SUPER_ADMIN") {
+      db.run("UPDATE users SET role = ? WHERE id = ?", [role, id]);
+      return c.json({
+        success: true,
+        msg: "角色更新成功",
+      });
+    }
 
-  if (!['enable', 'disable'].includes(action)) {
+    // ENTERPRISE_ADMIN can only modify users in the same enterprise
+    if (adminUser.role === "ENTERPRISE_ADMIN") {
+      if (targetUser.enterprise_id !== adminUser.enterprise_id) {
+        return c.json(
+          {
+            success: false,
+            msg: "只能修改本企业的用户角色",
+          },
+          403,
+        );
+      }
+      db.run("UPDATE users SET role = ? WHERE id = ?", [role, id]);
+      return c.json({
+        success: true,
+        msg: "角色更新成功",
+      });
+    }
+
     return c.json(
       {
         success: false,
-        msg: '无效的操作，请使用 enable 或 disable',
+        msg: "权限不足",
       },
-      400,
+      403,
     );
-  }
+  },
+);
 
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
+// POST /users/:id/manage - Enable/Disable user
+usersRoutes.post(
+  "/users/:id/manage",
+  authMiddleware,
+  adminMiddleware,
+  async (c) => {
+    const adminUser = (await getAuthUser(c)) as User;
+    const id = c.req.param("id");
+    const { action } = await c.req.json(); // action: 'enable' or 'disable'
 
-  if (!user) {
-    return c.json({ success: false, msg: '用户不存在' }, 404);
-  }
-
-  // Cannot disable super admin
-  if (user.role === 'SUPER_ADMIN') {
-    return c.json({ success: false, msg: '不能禁用超级管理员' }, 403);
-  }
-
-  // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
-  if (user.login_type !== systemConfigService.getLoginMethod()) {
-    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
-  }
-
-  // Call sudorouter management API
-  if (user.sudorouter_user_id && sudorouterService.isConfigured()) {
-    const result = await sudorouterService.manageUser(user.sudorouter_user_id, action);
-
-    if (!result.success) {
+    if (!["enable", "disable"].includes(action)) {
       return c.json(
-        { success: false, msg: result.message || 'Sudorouter 操作失败' },
-        500,
+        {
+          success: false,
+          msg: "无效的操作，请使用 enable 或 disable",
+        },
+        400,
       );
     }
-  }
 
-  // Update local user status
-  // status: 1=正常, 2=禁用
-  const newStatus = action === 'enable' ? 1 : 2;
-  db.run('UPDATE users SET status = ? WHERE id = ?', [newStatus, id]);
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as
+      User | undefined;
 
-  logOperation({
-    userId: adminUser.id,
-    userPhone: adminUser.phone,
-    action: action === 'enable' ? 'USER_ENABLE' : 'USER_DISABLE',
-    resource: 'user',
-    resourceId: parseInt(id),
-    method: 'POST',
-    path: `/api/v1/admin/users/${id}/manage`,
-    requestData: { action },
-    responseData: {
-      user_phone: user.phone,
-      old_status: user.status,
-      new_status: newStatus,
-    },
-  });
+    if (!user) {
+      return c.json({ success: false, msg: "用户不存在" }, 404);
+    }
 
-  return c.json({
-    success: true,
-    msg: action === 'enable' ? '用户已启用' : '用户已禁用',
-    data: { status: newStatus },
-  });
-});
+    // Cannot disable super admin
+    if (user.role === "SUPER_ADMIN") {
+      return c.json({ success: false, msg: "不能禁用超级管理员" }, 403);
+    }
+
+    // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
+    if (user.login_type !== systemConfigService.getLoginMethod()) {
+      return c.json(
+        { success: false, msg: "跨方式操作被拒绝:该用户不属于当前登录方式" },
+        403,
+      );
+    }
+
+    // Call sudorouter management API
+    if (user.sudorouter_user_id && sudorouterService.isConfigured()) {
+      const result = await sudorouterService.manageUser(
+        user.sudorouter_user_id,
+        action,
+      );
+
+      if (!result.success) {
+        return c.json(
+          { success: false, msg: result.message || "Sudorouter 操作失败" },
+          500,
+        );
+      }
+    }
+
+    // Update local user status
+    // status: 1=正常, 2=禁用
+    const newStatus = action === "enable" ? 1 : 2;
+    db.run("UPDATE users SET status = ? WHERE id = ?", [newStatus, id]);
+
+    logOperation({
+      userId: adminUser.id,
+      userPhone: adminUser.phone,
+      action: action === "enable" ? "USER_ENABLE" : "USER_DISABLE",
+      resource: "user",
+      resourceId: parseInt(id),
+      method: "POST",
+      path: `/api/v1/admin/users/${id}/manage`,
+      requestData: { action },
+      responseData: {
+        user_phone: user.phone,
+        old_status: user.status,
+        new_status: newStatus,
+      },
+    });
+
+    return c.json({
+      success: true,
+      msg: action === "enable" ? "用户已启用" : "用户已禁用",
+      data: { status: newStatus },
+    });
+  },
+);
 
 // DELETE /users/:id - Delete user (SUPER_ADMIN only)
-usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
+usersRoutes.delete("/users/:id", authMiddleware, adminMiddleware, async (c) => {
   const adminUser = (await getAuthUser(c)) as User;
 
   // Only SUPER_ADMIN can delete users
-  if (adminUser.role !== 'SUPER_ADMIN') {
+  if (adminUser.role !== "SUPER_ADMIN") {
     return c.json(
       {
         success: false,
-        msg: '只有超级管理员可以删除用户',
+        msg: "只有超级管理员可以删除用户",
       },
       403,
     );
   }
 
-  const id = c.req.param('id');
+  const id = c.req.param("id");
 
   // Check if user exists
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined;
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as
+    User | undefined;
 
   if (!user) {
     return c.json(
       {
         success: false,
-        msg: '用户不存在',
+        msg: "用户不存在",
       },
       404,
     );
   }
 
   // Cannot delete SUPER_ADMIN
-  if (user.role === 'SUPER_ADMIN') {
+  if (user.role === "SUPER_ADMIN") {
     return c.json(
       {
         success: false,
-        msg: '不能删除超级管理员',
+        msg: "不能删除超级管理员",
       },
       403,
     );
@@ -601,18 +656,23 @@ usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
 
   // 跨方式保护(共用端点):目标 login_type 必须=当前 getLoginMethod()
   if (user.login_type !== systemConfigService.getLoginMethod()) {
-    return c.json({ success: false, msg: '跨方式操作被拒绝:该用户不属于当前登录方式' }, 403);
+    return c.json(
+      { success: false, msg: "跨方式操作被拒绝:该用户不属于当前登录方式" },
+      403,
+    );
   }
 
   // Step 1: Call Sudorouter delete API first
   if (user.sudorouter_user_id && sudorouterService.isConfigured()) {
-    const deleteResult = await sudorouterService.deleteUserWithLog(user.sudorouter_user_id);
+    const deleteResult = await sudorouterService.deleteUserWithLog(
+      user.sudorouter_user_id,
+    );
 
     logOperation({
       userId: adminUser.id,
       userPhone: adminUser.phone,
-      action: 'SUDOROUTER_DELETE_USER',
-      resource: 'sudorouter_user',
+      action: "SUDOROUTER_DELETE_USER",
+      resource: "sudorouter_user",
       resourceId: user.sudorouter_user_id,
       method: deleteResult.request.method,
       path: deleteResult.request.url,
@@ -627,7 +687,7 @@ usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
       return c.json(
         {
           success: false,
-          msg: `Sudorouter 用户删除失败: ${deleteResult.error || '未知错误'}`,
+          msg: `Sudorouter 用户删除失败: ${deleteResult.error || "未知错误"}`,
         },
         500,
       );
@@ -636,57 +696,86 @@ usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
 
   // Step 2: Get complete data snapshot for logging (before deletion)
   const invitationCode = user.invitation_code_id
-    ? db.prepare('SELECT * FROM invitation_codes WHERE id = ?').get(user.invitation_code_id) as { code: string; enterprise_id: number } | undefined
+    ? (db
+        .prepare("SELECT * FROM invitation_codes WHERE id = ?")
+        .get(user.invitation_code_id) as
+        { code: string; enterprise_id: number } | undefined)
     : undefined;
 
   // Query complete financial data for snapshot
-  const ledgerRecords = db.prepare('SELECT * FROM ledger WHERE user_id = ?').all(id) as any[];
-  const rechargeOrders = db.prepare('SELECT * FROM recharge_orders WHERE user_id = ?').all(id) as any[];
-  const rechargeRecords = db.prepare('SELECT * FROM recharge_records WHERE user_id = ?').all(id) as any[];
-  const adminRechargeRecords = db.prepare('SELECT * FROM admin_recharge_records WHERE user_id = ?').all(id) as any[];
-  const refundRecords = db.prepare('SELECT * FROM refund_records WHERE user_id = ?').all(id) as any[];
+  const ledgerRecords = db
+    .prepare("SELECT * FROM ledger WHERE user_id = ?")
+    .all(id) as any[];
+  const rechargeOrders = db
+    .prepare("SELECT * FROM recharge_orders WHERE user_id = ?")
+    .all(id) as any[];
+  const rechargeRecords = db
+    .prepare("SELECT * FROM recharge_records WHERE user_id = ?")
+    .all(id) as any[];
+  const adminRechargeRecords = db
+    .prepare("SELECT * FROM admin_recharge_records WHERE user_id = ?")
+    .all(id) as any[];
+  const refundRecords = db
+    .prepare("SELECT * FROM refund_records WHERE user_id = ?")
+    .all(id) as any[];
+  const thirdPartyIdentities = db
+    .prepare("SELECT * FROM third_party_auth_identities WHERE user_id = ?")
+    .all(id) as any[];
 
   // Calculate summary statistics
-  const totalBonus = ledgerRecords.filter(r => r.type === 'BONUS').reduce((sum, r) => sum + r.amount, 0);
-  const totalRecharge = ledgerRecords.filter(r => r.type === 'RECHARGE').reduce((sum, r) => sum + r.amount, 0);
-  const totalUsage = ledgerRecords.filter(r => r.type === 'USAGE').reduce((sum, r) => sum + Math.abs(r.amount), 0);
-  const totalAdjustment = ledgerRecords.filter(r => r.type === 'ADMIN_ADJUST').reduce((sum, r) => sum + r.amount, 0);
+  const totalBonus = ledgerRecords
+    .filter((r) => r.type === "BONUS")
+    .reduce((sum, r) => sum + r.amount, 0);
+  const totalRecharge = ledgerRecords
+    .filter((r) => r.type === "RECHARGE")
+    .reduce((sum, r) => sum + r.amount, 0);
+  const totalUsage = ledgerRecords
+    .filter((r) => r.type === "USAGE")
+    .reduce((sum, r) => sum + Math.abs(r.amount), 0);
+  const totalAdjustment = ledgerRecords
+    .filter((r) => r.type === "ADMIN_ADJUST")
+    .reduce((sum, r) => sum + r.amount, 0);
 
   // Step 3: Delete all related data in local database using transaction
   // Note: operation_logs is preserved for audit purposes
   try {
-    db.run('BEGIN EXCLUSIVE TRANSACTION');
+    db.run("BEGIN EXCLUSIVE TRANSACTION");
 
     // Delete recharge-related records (child tables first)
-    db.run('DELETE FROM recharge_records WHERE user_id = ?', [id]);
-    db.run('DELETE FROM admin_recharge_records WHERE user_id = ?', [id]);
-    db.run('DELETE FROM refund_records WHERE user_id = ?', [id]);
-    db.run('DELETE FROM recharge_orders WHERE user_id = ?', [id]);
+    db.run("DELETE FROM recharge_records WHERE user_id = ?", [id]);
+    db.run("DELETE FROM admin_recharge_records WHERE user_id = ?", [id]);
+    db.run("DELETE FROM refund_records WHERE user_id = ?", [id]);
+    db.run("DELETE FROM recharge_orders WHERE user_id = ?", [id]);
 
     // Delete ledger (points history)
-    db.run('DELETE FROM ledger WHERE user_id = ?', [id]);
+    db.run("DELETE FROM ledger WHERE user_id = ?", [id]);
+
+    // Delete third-party identity bindings
+    db.run("DELETE FROM third_party_auth_identities WHERE user_id = ?", [id]);
 
     // Delete invitation code
     if (user.invitation_code_id) {
-      db.run('DELETE FROM invitation_codes WHERE id = ?', [user.invitation_code_id]);
+      db.run("DELETE FROM invitation_codes WHERE id = ?", [
+        user.invitation_code_id,
+      ]);
     }
 
     // Delete user (main table last)
-    db.run('DELETE FROM users WHERE id = ?', [id]);
+    db.run("DELETE FROM users WHERE id = ?", [id]);
 
-    db.run('COMMIT');
+    db.run("COMMIT");
   } catch (error) {
-    db.run('ROLLBACK');
+    db.run("ROLLBACK");
     console.error(`[Admin] 删除用户 ${id} 失败，事务已回滚:`, error);
 
     // Log the failure
     logOperation({
       userId: adminUser.id,
       userPhone: adminUser.phone,
-      action: 'USER_DELETE_FAILED',
-      resource: 'user',
+      action: "USER_DELETE_FAILED",
+      resource: "user",
       resourceId: parseInt(id),
-      method: 'DELETE',
+      method: "DELETE",
       path: `/api/v1/admin/users/${id}`,
       requestData: { target_user_id: id, hard_delete: true },
       responseData: { error: String(error) },
@@ -706,10 +795,10 @@ usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
   logOperation({
     userId: adminUser.id,
     userPhone: adminUser.phone,
-    action: 'USER_DELETE',
-    resource: 'user',
+    action: "USER_DELETE",
+    resource: "user",
     resourceId: parseInt(id),
-    method: 'DELETE',
+    method: "DELETE",
     path: `/api/v1/admin/users/${id}`,
     requestData: { target_user_id: id, hard_delete: true },
     responseData: {
@@ -727,10 +816,12 @@ usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
         created_at: user.created_at,
       },
       // Invitation code
-      invitation_code: invitationCode ? {
-        code: invitationCode.code,
-        enterprise_id: invitationCode.enterprise_id,
-      } : null,
+      invitation_code: invitationCode
+        ? {
+            code: invitationCode.code,
+            enterprise_id: invitationCode.enterprise_id,
+          }
+        : null,
       // Sudorouter deletion status
       sudorouter_deleted: user.sudorouter_user_id ? true : null,
       // Financial summary
@@ -754,31 +845,50 @@ usersRoutes.delete('/users/:id', authMiddleware, adminMiddleware, async (c) => {
         refund_records: refundRecords,
       },
       // Deleted tables list
-      deleted_tables: ['recharge_records', 'admin_recharge_records', 'refund_records', 'recharge_orders', 'ledger', 'invitation_codes', 'users'],
+      third_party_identities: thirdPartyIdentities,
+      deleted_tables: [
+        "recharge_records",
+        "admin_recharge_records",
+        "refund_records",
+        "recharge_orders",
+        "ledger",
+        "third_party_auth_identities",
+        "invitation_codes",
+        "users",
+      ],
     },
   });
 
-  console.log(`[Admin] 用户 ${id} (${user.phone}) 已彻底删除，包含 Sudorouter 用户 ${user.sudorouter_user_id}`);
+  console.log(
+    `[Admin] 用户 ${id} (${user.phone}) 已彻底删除，包含 Sudorouter 用户 ${user.sudorouter_user_id}`,
+  );
 
   return c.json({
     success: true,
-    msg: '用户删除成功，所有关联数据已清除',
+    msg: "用户删除成功，所有关联数据已清除",
   });
 });
 
 // GET /users/:id/ledger - User ledger
-usersRoutes.get('/users/:id/ledger', authMiddleware, adminMiddleware, async (c) => {
-  const id = c.req.param('id');
-  const limit = parseInt(c.req.query('limit') || '20');
+usersRoutes.get(
+  "/users/:id/ledger",
+  authMiddleware,
+  adminMiddleware,
+  async (c) => {
+    const id = c.req.param("id");
+    const limit = parseInt(c.req.query("limit") || "20");
 
-  const ledger = db
-    .prepare('SELECT * FROM ledger WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?')
-    .all(id, limit);
+    const ledger = db
+      .prepare(
+        "SELECT * FROM ledger WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?",
+      )
+      .all(id, limit);
 
-  return c.json({
-    success: true,
-    data: ledger,
-  });
-});
+    return c.json({
+      success: true,
+      data: ledger,
+    });
+  },
+);
 
 export { usersRoutes };

@@ -37,7 +37,7 @@ export function initSchema(): void {
       balance REAL DEFAULT 0,
       password_hash TEXT,
       must_change_password BOOLEAN DEFAULT FALSE,
-      login_type INTEGER NOT NULL DEFAULT 0, -- 0: 手机验证码, 1: 用户名密码
+      login_type INTEGER NOT NULL DEFAULT 0, -- 0: 手机验证码, 1: 用户名密码, 2: 三方认证登录
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(enterprise_id) REFERENCES enterprises(id)
     );
@@ -95,11 +95,63 @@ export function initSchema(): void {
   `);
 
   // Create indexes
-  db.run(`CREATE INDEX IF NOT EXISTS idx_invitation_codes_code ON invitation_codes(code)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_invitation_codes_status ON invitation_codes(status)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_operation_logs_user_id ON operation_logs(user_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_operation_logs_action ON operation_logs(action)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_operation_logs_created_at ON operation_logs(created_at)`);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_invitation_codes_code ON invitation_codes(code)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_invitation_codes_status ON invitation_codes(status)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_operation_logs_user_id ON operation_logs(user_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_operation_logs_action ON operation_logs(action)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_operation_logs_created_at ON operation_logs(created_at)`,
+  );
+
+  // Third-party authentication identities table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS third_party_auth_identities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider_id TEXT NOT NULL,
+      external_user_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      enterprise_id INTEGER NOT NULL,
+      raw_profile TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(provider_id, external_user_id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id)
+    );
+  `);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_user_id ON third_party_auth_identities(user_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_enterprise_id ON third_party_auth_identities(enterprise_id)`,
+  );
+  db.run(`
+    CREATE TABLE IF NOT EXISTS third_party_auth_handoffs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code_hash TEXT UNIQUE NOT NULL,
+      provider_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      external_user_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      used_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_handoffs_provider ON third_party_auth_handoffs(provider_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_third_party_auth_handoffs_expires_at ON third_party_auth_handoffs(expires_at)`,
+  );
 
   // ============================================
   // Recharge System Tables (富友支付充值系统)
@@ -241,15 +293,33 @@ export function initSchema(): void {
   `);
 
   // Create indexes for recharge tables
-  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_user_id ON recharge_orders(user_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_status ON recharge_orders(status)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_order_no ON recharge_orders(order_no)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_orders_created_at ON recharge_orders(created_at)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_records_order_id ON recharge_records(order_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_recharge_records_user_id ON recharge_records(user_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_user_id ON admin_recharge_records(user_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_admin_id ON admin_recharge_records(admin_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_created_at ON admin_recharge_records(created_at)`);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_recharge_orders_user_id ON recharge_orders(user_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_recharge_orders_status ON recharge_orders(status)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_recharge_orders_order_no ON recharge_orders(order_no)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_recharge_orders_created_at ON recharge_orders(created_at)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_recharge_records_order_id ON recharge_records(order_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_recharge_records_user_id ON recharge_records(user_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_user_id ON admin_recharge_records(user_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_admin_id ON admin_recharge_records(admin_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_created_at ON admin_recharge_records(created_at)`,
+  );
 
   // ============================================
   // Config Items System Tables (配置项管理系统)
@@ -304,13 +374,27 @@ export function initSchema(): void {
   `);
 
   // Create indexes for config items tables
-  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_config_items_name ON config_items(name)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_config_items_status ON config_items(status)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_config_items_updated_at ON config_items(updated_at)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_config_entries_config_item_id ON config_entries(config_item_id)`);
-  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_config_entries_item_key ON config_entries(config_item_id, config_key)`);
-  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_config_enterprise_rel_item_enterprise ON config_enterprise_rel(config_item_id, enterprise_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_config_enterprise_rel_enterprise_id ON config_enterprise_rel(enterprise_id)`);
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_config_items_name ON config_items(name)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_config_items_status ON config_items(status)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_config_items_updated_at ON config_items(updated_at)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_config_entries_config_item_id ON config_entries(config_item_id)`,
+  );
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_config_entries_item_key ON config_entries(config_item_id, config_key)`,
+  );
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_config_enterprise_rel_item_enterprise ON config_enterprise_rel(config_item_id, enterprise_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_config_enterprise_rel_enterprise_id ON config_enterprise_rel(enterprise_id)`,
+  );
 
   // ============================================
   // System Config Table (系统配置 KV)
@@ -399,8 +483,12 @@ export function initSchema(): void {
     );
   `);
 
-  db.run(`CREATE INDEX IF NOT EXISTS idx_dify_app_binding_app_id ON dify_app_binding(dify_app_id)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_assistant_acl_assistant_id ON assistant_acl(assistant_id)`);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_dify_app_binding_app_id ON dify_app_binding(dify_app_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_assistant_acl_assistant_id ON assistant_acl(assistant_id)`,
+  );
   db.run(
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_assistant_acl_unique
        ON assistant_acl(enterprise_id, assistant_id, subject_type, COALESCE(subject_id, ''))`,

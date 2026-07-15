@@ -8,6 +8,7 @@
  * - 0 手机验证码:校验 phone+code(smsService.verifyCode),查 users WHERE phone=? AND login_type=0
  *   (密码用户即使 phone 命中也不可经此分支登录,满足 §一需求3)
  * - 1 用户名密码:校验 phone+password(verifyPassword),查 users WHERE phone=? AND login_type=1
+ * - 2 三方认证登录:拒绝本接口,客户端应走 Provider CAS 回调接口
  *
  * 不改 auth.ts;/auth/login、/admin/login 保持原样。登录成功逻辑(同步额度/签发 token)
  * 依据 auth.ts:121-311 在本文件内重新实现(代码冗余以避免改动 auth.ts)。
@@ -34,10 +35,7 @@ const loginByConfigRoutes = new Hono();
 async function buildLoginSuccess(c: Context, user: User, phone: string) {
   // 账号禁用检查
   if (user.status === 2) {
-    return c.json(
-      { success: false, msg: "该账户已被禁用，请联系管理员" },
-      403,
-    );
+    return c.json({ success: false, msg: "该账户已被禁用，请联系管理员" }, 403);
   }
 
   // 查询用户关联的企业
@@ -86,7 +84,7 @@ async function buildLoginSuccess(c: Context, user: User, phone: string) {
           userId: user.id,
           userPhone: phone,
           action: "SUDOROUTER_GET_USER",
-          resourceId: user.sudorouter_user_id,
+          resourceId: user.sudorouter_user_id ?? undefined,
           method: getUserResult.request.method,
           url: getUserResult.request.url,
           requestBody: { user_id: user.sudorouter_user_id },
@@ -103,7 +101,7 @@ async function buildLoginSuccess(c: Context, user: User, phone: string) {
           userId: user.id,
           userPhone: phone,
           action: "SUDOROUTER_GET_USER",
-          resourceId: user.sudorouter_user_id,
+          resourceId: user.sudorouter_user_id ?? undefined,
           method: getUserResult.request.method,
           url: getUserResult.request.url,
           requestBody: { user_id: user.sudorouter_user_id },
@@ -255,14 +253,18 @@ loginByConfigRoutes.post(
       });
     }
 
+    if (loginMethod === 2) {
+      return c.json(
+        { success: false, msg: "当前系统已开启三方认证登录，请使用 CAS 登录" },
+        403,
+      );
+    }
+
     // ===== 密码分支(login_method=1) =====
     const { phone, password } = body;
 
     if (!phone || !password) {
-      return c.json(
-        { success: false, msg: "账号或密码不能为空" },
-        400,
-      );
+      return c.json({ success: false, msg: "账号或密码不能为空" }, 400);
     }
 
     // 强制 login_type=1 过滤
