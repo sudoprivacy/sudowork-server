@@ -57,6 +57,11 @@ interface ThirdPartyAuthConfig {
   providers: ThirdPartyProviderConfig[];
 }
 
+const DEFAULT_COMAC_SERVER_CALLBACK_URL =
+  "http://127.0.0.1:3000/api/v1/auth/third-party/cas/callback/comac_cas";
+const DEFAULT_COMAC_LOGOUT_SERVICE_URL =
+  "http://127.0.0.1:3000/api/v1/auth/third-party/cas/logout/callback/comac_cas";
+
 const DEFAULT_THIRD_PARTY_AUTH: ThirdPartyAuthConfig = {
   enabled: 1,
   default_provider: "comac_cas",
@@ -70,11 +75,11 @@ const DEFAULT_THIRD_PARTY_AUTH: ThirdPartyAuthConfig = {
       login_path: "/cas/login/",
       validate_path: "/cas/p3/serviceValidate",
       logout_path: "/cas/logout",
-      logout_service_url: "",
+      logout_service_url: DEFAULT_COMAC_LOGOUT_SERVICE_URL,
       service_param: "service",
       service_encode_mode: "component",
       callback_mode: "server_callback",
-      server_callback_url: "",
+      server_callback_url: DEFAULT_COMAC_SERVER_CALLBACK_URL,
       app_callback_url: "sudowork://cas-callback/comac_cas/callback",
       enterprise_code: "sudo",
       auto_provision: 1,
@@ -110,29 +115,32 @@ function normalizeThirdPartyAuthConfig(value: any): ThirdPartyAuthConfig {
     enabled: value.enabled === 0 ? 0 : 1,
     default_provider:
       value.default_provider || DEFAULT_THIRD_PARTY_AUTH.default_provider,
-    providers: value.providers.map((provider: any) => ({
-      ...DEFAULT_THIRD_PARTY_AUTH.providers[0],
-      ...provider,
-      enabled: provider.enabled === 0 ? 0 : 1,
-      auto_provision: provider.auto_provision === 0 ? 0 : 1,
-      service_encode_mode:
-        provider.service_encode_mode === "raw" ? "raw" : "component",
-      callback_mode:
-        provider.callback_mode === "direct_app"
-          ? "direct_app"
-          : "server_callback",
-      server_callback_url: provider.server_callback_url || "",
-      logout_service_url:
-        provider.logout_service_url ||
-        buildLogoutServiceUrl(
-          provider.server_callback_url || "",
-          provider.id || "comac_cas",
-        ),
-      app_callback_url:
-        provider.app_callback_url ||
-        `sudowork://cas-callback/${provider.id || "comac_cas"}/callback`,
-      type: "cas",
-    })),
+    providers: value.providers.map((provider: any) => {
+      const fallback = DEFAULT_THIRD_PARTY_AUTH.providers[0]!;
+      const providerId = provider.id || fallback.id;
+      const serverCallbackUrl =
+        provider.server_callback_url || fallback.server_callback_url;
+      return {
+        ...fallback,
+        ...provider,
+        enabled: provider.enabled === 0 ? 0 : 1,
+        auto_provision: provider.auto_provision === 0 ? 0 : 1,
+        service_encode_mode:
+          provider.service_encode_mode === "raw" ? "raw" : "component",
+        callback_mode:
+          provider.callback_mode === "direct_app"
+            ? "direct_app"
+            : "server_callback",
+        server_callback_url: serverCallbackUrl,
+        logout_service_url:
+          provider.logout_service_url ||
+          buildLogoutServiceUrl(serverCallbackUrl, providerId),
+        app_callback_url:
+          provider.app_callback_url ||
+          `sudowork://cas-callback/${providerId}/callback`,
+        type: "cas",
+      };
+    }),
   };
 }
 

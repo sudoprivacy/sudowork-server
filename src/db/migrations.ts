@@ -105,7 +105,7 @@ function createSystemConfigTable(): void {
   );
   insertSystemConfigIfMissing(
     "third_party_auth",
-    '{"enabled":1,"default_provider":"comac_cas","providers":[{"id":"comac_cas","name":"中国商飞","type":"cas","enabled":1,"cas_url":"http://cas.cvtol.com/","login_path":"/cas/login/","validate_path":"/cas/p3/serviceValidate","logout_path":"/cas/logout","logout_service_url":"","service_param":"service","service_encode_mode":"component","callback_mode":"server_callback","server_callback_url":"","app_callback_url":"sudowork://cas-callback/comac_cas/callback","enterprise_code":"sudo","auto_provision":1}]}',
+    '{"enabled":1,"default_provider":"comac_cas","providers":[{"id":"comac_cas","name":"中国商飞","type":"cas","enabled":1,"cas_url":"http://cas.cvtol.com/","login_path":"/cas/login/","validate_path":"/cas/p3/serviceValidate","logout_path":"/cas/logout","logout_service_url":"http://127.0.0.1:3000/api/v1/auth/third-party/cas/logout/callback/comac_cas","service_param":"service","service_encode_mode":"component","callback_mode":"server_callback","server_callback_url":"http://127.0.0.1:3000/api/v1/auth/third-party/cas/callback/comac_cas","app_callback_url":"sudowork://cas-callback/comac_cas/callback","enterprise_code":"sudo","auto_provision":1}]}',
   );
 }
 
