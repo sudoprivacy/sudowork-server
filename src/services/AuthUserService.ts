@@ -7,6 +7,8 @@ import { USER_ROLES, USER_STATUS } from "../utils/constants.js";
 import { logOperation, logSudorouterCall } from "../utils/logger.js";
 import type { Enterprise, User } from "../types/index.js";
 
+const SUDOROUTER_DISPLAY_NAME_MAX_LENGTH = 20;
+
 export class AuthUserServiceError extends Error {
   constructor(
     public readonly status: number,
@@ -44,11 +46,23 @@ export interface LoginSuccessData {
 export interface ProvisionUserInput {
   account: string;
   nickname: string;
+  sudorouterUsername?: string;
   enterprise: Enterprise;
   loginType: number;
   operationPath: string;
   invitationCodePrefix: string;
   initialQuotaUsd?: number | null;
+}
+
+interface SudorouterProvisionOutcome {
+  sudorouterUser: {
+    id: number;
+    username: string;
+    quota?: number;
+    used_quota?: number;
+  };
+  sudorouterUsername: string;
+  createdSudorouterUser: boolean;
 }
 
 class AuthUserService {
@@ -203,78 +217,56 @@ class AuthUserService {
       throw new AuthUserServiceError(500, "系统未完成配置，请联系管理员");
     }
 
-    const createUserResult = await sudorouterService.createUserWithLog(
-      input.account,
-      input.nickname,
-    );
-    if (!createUserResult.success || !createUserResult.data) {
-      logSudorouterCall({
-        userId: 0,
-        userPhone: input.account,
-        action: "SUDOROUTER_CREATE_USER",
-        method: createUserResult.request.method,
-        url: createUserResult.request.url,
-        requestBody: createUserResult.request.body,
-        responseBody: createUserResult.response.data,
-        responseStatus: createUserResult.response.status,
-        durationMs: createUserResult.duration_ms,
-        errorMessage: createUserResult.error || "创建用户失败",
-      });
-      throw new AuthUserServiceError(500, "创建用户失败，请稍后重试");
-    }
-
-    const sudorouterUser = createUserResult.data;
-    logSudorouterCall({
-      userId: 0,
-      userPhone: input.account,
-      action: "SUDOROUTER_CREATE_USER",
-      resourceId: sudorouterUser.id,
-      method: createUserResult.request.method,
-      url: createUserResult.request.url,
-      requestBody: createUserResult.request.body,
-      responseBody: {
-        success: true,
-        id: sudorouterUser.id,
-        username: sudorouterUser.username,
-      },
-      responseStatus: createUserResult.response.status,
-      durationMs: createUserResult.duration_ms,
-    });
+    const {
+      sudorouterUser,
+      sudorouterUsername,
+      createdSudorouterUser,
+    } = await this.createOrFindSudorouterUser(input);
 
     const initialQuota =
       input.initialQuotaUsd == null
         ? sudorouterService.getInitialQuota()
         : sudorouterService.usdToQuota(input.initialQuotaUsd);
-    const quotaResult = await sudorouterService.updateUserQuotaWithLog(
-      sudorouterUser.id,
-      initialQuota,
-      "新用户注册赠送额度",
-    );
+    let localQuota = sudorouterUser.quota ?? 0;
+    let localUsedQuota = sudorouterUser.used_quota ?? 0;
+    let localBalance = sudorouterService.quotaToPoints(localQuota);
 
-    logSudorouterCall({
-      userId: 0,
-      userPhone: input.account,
-      action: "SUDOROUTER_UPDATE_QUOTA",
-      resourceId: sudorouterUser.id,
-      method: quotaResult.request.method,
-      url: quotaResult.request.url,
-      requestBody: quotaResult.request.body,
-      responseBody: quotaResult.success
-        ? { success: true, quota: initialQuota }
-        : quotaResult.response.data,
-      responseStatus: quotaResult.response.status,
-      durationMs: quotaResult.duration_ms,
-      errorMessage: quotaResult.success
-        ? undefined
-        : quotaResult.error || "额度充值失败",
-    });
-    if (!quotaResult.success) {
-      console.error(`[AuthUserService] 用户 ${input.account} 额度充值失败`);
+    if (createdSudorouterUser) {
+      const quotaResult = await sudorouterService.updateUserQuotaWithLog(
+        sudorouterUser.id,
+        initialQuota,
+        "新用户注册赠送额度",
+      );
+
+      logSudorouterCall({
+        userId: 0,
+        userPhone: input.account,
+        action: "SUDOROUTER_UPDATE_QUOTA",
+        resourceId: sudorouterUser.id,
+        method: quotaResult.request.method,
+        url: quotaResult.request.url,
+        requestBody: quotaResult.request.body,
+        responseBody: quotaResult.success
+          ? { success: true, quota: initialQuota }
+          : quotaResult.response.data,
+        responseStatus: quotaResult.response.status,
+        durationMs: quotaResult.duration_ms,
+        errorMessage: quotaResult.success
+          ? undefined
+          : quotaResult.error || "额度充值失败",
+      });
+      if (!quotaResult.success) {
+        console.error(`[AuthUserService] 用户 ${input.account} 额度充值失败`);
+      }
+
+      localQuota = initialQuota;
+      localUsedQuota = 0;
+      localBalance = sudorouterService.quotaToPoints(initialQuota);
     }
 
     const createTokenResult = await sudorouterService.createTokenWithLog(
       sudorouterUser.id,
-      input.account,
+      sudorouterUsername,
       true,
     );
     if (!createTokenResult.success || !createTokenResult.data) {
@@ -316,7 +308,6 @@ class AuthUserService {
       input.invitationCodePrefix,
       input.initialQuotaUsd,
     );
-    const initialBalance = sudorouterService.quotaToPoints(initialQuota);
 
     const result = db.run(
       `INSERT INTO users (
@@ -333,9 +324,9 @@ class AuthUserService {
         sudorouterUser.id,
         sudorouterKey,
         invitationCode.id,
-        initialQuota,
-        0,
-        initialBalance,
+        localQuota,
+        localUsedQuota,
+        localBalance,
         input.loginType,
       ],
     );
@@ -345,10 +336,12 @@ class AuthUserService {
       "UPDATE invitation_codes SET status = 1, used_by_user_id = ?, used_at = datetime('now') WHERE id = ?",
       [newUserId, invitationCode.id],
     );
-    db.run(
-      "INSERT INTO ledger (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
-      [newUserId, initialBalance, "BONUS", "新用户注册赠送"],
-    );
+    if (createdSudorouterUser && localBalance > 0) {
+      db.run(
+        "INSERT INTO ledger (user_id, amount, type, memo) VALUES (?, ?, ?, ?)",
+        [newUserId, localBalance, "BONUS", "新用户注册赠送"],
+      );
+    }
 
     logOperation({
       userId: newUserId,
@@ -365,12 +358,14 @@ class AuthUserService {
         invitation_code_id: invitationCode.id,
         login_type: input.loginType,
         provisioned_by: "third_party_auth",
+        sudorouter_username: sudorouterUsername,
       },
       responseData: {
         id: newUserId,
         sudorouter_user_id: sudorouterUser.id,
-        initial_points: initialBalance,
-        quota: initialQuota,
+        sudorouter_binding: createdSudorouterUser ? "created" : "existing",
+        initial_points: createdSudorouterUser ? localBalance : 0,
+        quota: localQuota,
       },
     });
 
@@ -408,6 +403,141 @@ class AuthUserService {
       }
     }
     throw new AuthUserServiceError(500, "自动邀请码生成失败，请稍后重试");
+  }
+
+  private buildSudorouterDisplayName(
+    nickname: string,
+    fallback: string,
+  ): string {
+    const value = nickname.trim() || fallback;
+    return Array.from(value)
+      .slice(0, SUDOROUTER_DISPLAY_NAME_MAX_LENGTH)
+      .join("");
+  }
+
+  private async createOrFindSudorouterUser(
+    input: ProvisionUserInput,
+  ): Promise<SudorouterProvisionOutcome> {
+    const sudorouterUsername = this.buildSudorouterUsername(input);
+    const sudorouterDisplayName = this.buildSudorouterDisplayName(
+      input.nickname,
+      sudorouterUsername,
+    );
+    const createUserResult = await sudorouterService.createUserWithLog(
+      sudorouterUsername,
+      sudorouterDisplayName,
+    );
+
+    if (createUserResult.success && createUserResult.data) {
+      const sudorouterUser = createUserResult.data;
+      logSudorouterCall({
+        userId: 0,
+        userPhone: input.account,
+        action: "SUDOROUTER_CREATE_USER",
+        resourceId: sudorouterUser.id,
+        method: createUserResult.request.method,
+        url: createUserResult.request.url,
+        requestBody: createUserResult.request.body,
+        responseBody: {
+          success: true,
+          id: sudorouterUser.id,
+          username: sudorouterUser.username,
+        },
+        responseStatus: createUserResult.response.status,
+        durationMs: createUserResult.duration_ms,
+      });
+      return {
+        sudorouterUser,
+        sudorouterUsername,
+        createdSudorouterUser: true,
+      };
+    }
+
+    logSudorouterCall({
+      userId: 0,
+      userPhone: input.account,
+      action: "SUDOROUTER_CREATE_USER",
+      method: createUserResult.request.method,
+      url: createUserResult.request.url,
+      requestBody: createUserResult.request.body,
+      responseBody: createUserResult.response.data,
+      responseStatus: createUserResult.response.status,
+      durationMs: createUserResult.duration_ms,
+      errorMessage: createUserResult.error || "创建用户失败",
+    });
+
+    if (!this.isSudorouterUsernameConflict(createUserResult)) {
+      throw new AuthUserServiceError(500, "创建用户失败，请稍后重试");
+    }
+
+    const findUserResult =
+      await sudorouterService.findUserByUsernameWithLog(sudorouterUsername);
+    if (!findUserResult.success || !findUserResult.data) {
+      logSudorouterCall({
+        userId: 0,
+        userPhone: input.account,
+        action: "SUDOROUTER_FIND_USER",
+        method: findUserResult.request.method,
+        url: findUserResult.request.url,
+        requestBody: { username: sudorouterUsername },
+        responseBody: findUserResult.response.data,
+        responseStatus: findUserResult.response.status,
+        durationMs: findUserResult.duration_ms,
+        errorMessage: findUserResult.error || "查询用户失败",
+      });
+      throw new AuthUserServiceError(
+        500,
+        "Sudorouter 用户名已存在，但查询既有用户失败，请稍后重试",
+      );
+    }
+
+    logSudorouterCall({
+      userId: 0,
+      userPhone: input.account,
+      action: "SUDOROUTER_FIND_USER",
+      resourceId: findUserResult.data.id,
+      method: findUserResult.request.method,
+      url: findUserResult.request.url,
+      requestBody: { username: sudorouterUsername },
+      responseBody: {
+        success: true,
+        id: findUserResult.data.id,
+        username: findUserResult.data.username,
+        quota: findUserResult.data.quota,
+        used_quota: findUserResult.data.used_quota,
+      },
+      responseStatus: findUserResult.response.status,
+      durationMs: findUserResult.duration_ms,
+    });
+    console.warn(
+      `[AuthUserService] Sudorouter 用户名 ${sudorouterUsername} 已存在，绑定既有用户 ID ${findUserResult.data.id}`,
+    );
+
+    return {
+      sudorouterUser: findUserResult.data,
+      sudorouterUsername,
+      createdSudorouterUser: false,
+    };
+  }
+
+  private buildSudorouterUsername(input: ProvisionUserInput): string {
+    const username = (input.sudorouterUsername || input.account).trim();
+    if (!username) {
+      throw new AuthUserServiceError(400, "Sudorouter 用户名为空");
+    }
+    return username;
+  }
+
+  private isSudorouterUsernameConflict(
+    result: Awaited<ReturnType<typeof sudorouterService.createUserWithLog>>,
+  ): boolean {
+    const errorText = [
+      result.error,
+      JSON.stringify(result.response.data),
+    ].join(" ");
+    return /duplicate|already exists|unique|用户名|已存在/i.test(
+      errorText,
+    );
   }
 }
 

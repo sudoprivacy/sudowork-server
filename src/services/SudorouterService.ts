@@ -38,6 +38,17 @@ interface SudorouterUserInfo {
   request_count: number;
 }
 
+interface SudorouterUserSearchItem {
+  id: number;
+  username: string;
+  status?: number;
+  quota?: number;
+  used_quota?: number;
+  request_count?: number;
+  DeletedAt?: unknown;
+  deleted_at?: unknown;
+}
+
 interface UsageLog {
   id: number;
   user_id: number;
@@ -170,7 +181,7 @@ class SudorouterService {
         body: JSON.stringify(body),
       }, this.config.timeoutMs);
 
-      const data = await response.json();
+      const data = (await response.json()) as any;
       const duration = Date.now() - startTime;
 
       if (data.success && data.data) {
@@ -301,7 +312,7 @@ class SudorouterService {
         headers: this.getHeaders(),
       }, this.config.timeoutMs);
 
-      const data = await response.json();
+      const data = (await response.json()) as any;
       const duration = Date.now() - startTime;
 
       if (data.success && data.data) {
@@ -346,6 +357,85 @@ class SudorouterService {
     return result.data;
   }
 
+  // 按用户名精确查找用户。Sudorouter 的 search 是模糊查询，这里只接受 username 完全一致的结果。
+  async findUserByUsernameWithLog(
+    username: string,
+  ): Promise<ApiCallResult<SudorouterUserInfo>> {
+    const params = new URLSearchParams({
+      keyword: username,
+      page: "1",
+      page_size: "100",
+    });
+    const url = `${this.config.baseUrl}/api/user/search?${params.toString()}`;
+
+    const startTime = Date.now();
+    try {
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method: "GET",
+          headers: this.getHeaders(),
+        },
+        this.config.timeoutMs,
+      );
+
+      const data = (await response.json()) as any;
+      const duration = Date.now() - startTime;
+      const items = Array.isArray(data.data?.items)
+        ? (data.data.items as SudorouterUserSearchItem[])
+        : [];
+      const matched = items.find((item) => item.username === username);
+      const unavailableReason = matched
+        ? getUnavailableSudorouterUserReason(matched)
+        : null;
+
+      if (data.success && matched && !unavailableReason) {
+        return {
+          success: true,
+          data: {
+            id: Number(matched.id),
+            username: matched.username,
+            quota: Number(matched.quota || 0),
+            used_quota: Number(matched.used_quota || 0),
+            request_count: Number(matched.request_count || 0),
+          },
+          request: { method: "GET", url },
+          response: { status: response.status, data },
+          duration_ms: duration,
+        };
+      }
+
+      const errorMessage = data.success
+        ? matched
+          ? unavailableReason || "匹配的 Sudorouter 用户不可用"
+          : "未找到完全匹配的 Sudorouter 用户"
+        : data.message || "查询用户失败";
+      console.error(`[Sudorouter] 用户查询失败:`, errorMessage);
+      return {
+        success: false,
+        data: null,
+        request: { method: "GET", url },
+        response: { status: response.status, data },
+        duration_ms: duration,
+        error: errorMessage,
+      };
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      const errorMsg = error.name === "AbortError"
+        ? `请求超时 (${this.config.timeoutMs}ms)`
+        : `网络错误: ${error.message || String(error)}`;
+      console.error(`[Sudorouter] 用户查询异常:`, errorMsg);
+      return {
+        success: false,
+        data: null,
+        request: { method: "GET", url },
+        response: { status: 0, data: null },
+        duration_ms: duration,
+        error: errorMsg,
+      };
+    }
+  }
+
   // 更新用户额度（返回详细结果用于日志）
   async updateUserQuotaWithLog(
     sudorouterUserId: number,
@@ -367,7 +457,7 @@ class SudorouterService {
         body: JSON.stringify(body),
       }, this.config.timeoutMs);
 
-      const data = await response.json();
+      const data = (await response.json()) as any;
       const duration = Date.now() - startTime;
 
       if (data.success) {
@@ -446,7 +536,7 @@ class SudorouterService {
         this.config.timeoutMs
       );
 
-      const data = await response.json();
+      const data = (await response.json()) as any;
 
       if (data.success) {
         return data;
@@ -679,7 +769,7 @@ class SudorouterService {
         body: JSON.stringify(body),
       }, this.config.timeoutMs);
 
-      const data = await response.json();
+      const data = (await response.json()) as any;
 
       if (data.success) {
         console.log(`[Sudorouter] 用户状态更新成功: userId=${sudorouterUserId}, action=${action}`);
@@ -822,7 +912,7 @@ class SudorouterService {
         this.config.timeoutMs
       );
 
-      const data = await response.json();
+      const data = (await response.json()) as any;
 
       if (data.success && Array.isArray(data.data)) {
         const models = data.data.map((item: { model_id: string }) => item.model_id);
@@ -855,7 +945,7 @@ class SudorouterService {
         },
         5000
       );
-      const data = await response.json();
+      const data = (await response.json()) as any;
       return { success: data.success, message: data.success ? "连接成功" : data.message };
     } catch (error: any) {
       const errorMsg = error.name === "AbortError"
@@ -868,3 +958,22 @@ class SudorouterService {
 
 export const sudorouterService = new SudorouterService();
 export type { SudorouterUser, SudorouterUserInfo, UsageLog, ApiCallResult, ModelUsageStatItem };
+
+function getUnavailableSudorouterUserReason(
+  user: SudorouterUserSearchItem,
+): string | null {
+  const deletedAt = user.DeletedAt ?? user.deleted_at;
+  if (deletedAt) {
+    if (
+      typeof deletedAt !== "object" ||
+      !("Valid" in deletedAt) ||
+      Boolean((deletedAt as { Valid?: unknown }).Valid)
+    ) {
+      return "匹配的 Sudorouter 用户已删除";
+    }
+  }
+  if (typeof user.status === "number" && user.status !== 1) {
+    return `匹配的 Sudorouter 用户状态不可用: ${user.status}`;
+  }
+  return null;
+}

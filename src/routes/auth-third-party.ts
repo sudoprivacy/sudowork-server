@@ -55,6 +55,8 @@ class ThirdPartyAuthRouteError extends Error {
 }
 
 const HANDOFF_TTL_SECONDS = 60;
+const SUDOROUTER_USERNAME_MAX_LENGTH = 12;
+const HASHED_SUDOROUTER_USERNAME_PREFIX = "c";
 const thirdPartyAuthRoutes = new Hono();
 
 thirdPartyAuthRoutes.post(
@@ -292,6 +294,10 @@ async function resolveCasAuthenticatedUser(input: {
       user = await authUserService.createProvisionedUser({
         account: profile.account,
         nickname: profile.nickname,
+        sudorouterUsername: buildProvisionedSudorouterUsername(
+          provider,
+          profile,
+        ),
         enterprise,
         loginType: 2,
         operationPath: input.operationPath,
@@ -334,6 +340,29 @@ function getEnabledCasProvider(
   }
 
   return provider;
+}
+
+function buildProvisionedSudorouterUsername(
+  provider: ThirdPartyAuthProviderConfig,
+  profile: CasUserProfile,
+): string {
+  const principal = profile.user.trim();
+  if (Array.from(principal).length <= SUDOROUTER_USERNAME_MAX_LENGTH) {
+    return principal;
+  }
+
+  const suffixLength =
+    SUDOROUTER_USERNAME_MAX_LENGTH - HASHED_SUDOROUTER_USERNAME_PREFIX.length;
+  const hashSpace = 36n ** BigInt(suffixLength);
+  const hash = BigInt(
+    `0x${createHash("sha256")
+      .update(`${provider.id}:${principal}`)
+      .digest("hex")}`,
+  );
+  const suffix = (hash % hashSpace)
+    .toString(36)
+    .padStart(suffixLength, "0");
+  return `${HASHED_SUDOROUTER_USERNAME_PREFIX}${suffix}`;
 }
 
 function createHandoffCode(resolved: ResolvedCasUser): string {
