@@ -179,6 +179,7 @@ async function buildLoginSuccess(c: Context, user: User, phone: string) {
           : null,
         model_service_url: modelServiceUrl,
         models: models,
+        scode_auto_model: systemConfigService.getScodeAutoModel(),
         points: {
           total: totalPoints,
           used: usedPoints,

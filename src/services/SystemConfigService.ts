@@ -18,6 +18,7 @@ const LOG_REPORT_KEY = "log_report";
 const VERSION_UPDATE_KEY = "version_update";
 const PRODUCT_IMPROVEMENT_KEY = "product_improvement";
 const THIRD_PARTY_AUTH_KEY = "third_party_auth";
+const SCODE_AUTO_MODEL_KEY = "scode_auto_model";
 const DEFAULT_COMAC_SERVER_CALLBACK_URL =
   "http://127.0.0.1:3000/api/v1/auth/third-party/cas/callback/comac_cas";
 const DEFAULT_COMAC_LOGOUT_SERVICE_URL =
@@ -300,6 +301,20 @@ export class SystemConfigService {
     this.setJsonConfig(PRODUCT_IMPROVEMENT_KEY, value);
   }
 
+  getScodeAutoModel(): string {
+    const row = db
+      .prepare("SELECT value FROM system_config WHERE key = ?")
+      .get(SCODE_AUTO_MODEL_KEY) as { value: string } | undefined;
+    return this.cleanOptionalString(row?.value);
+  }
+
+  setScodeAutoModel(value: string): void {
+    this.insertOrUpdateStringConfig(
+      SCODE_AUTO_MODEL_KEY,
+      this.cleanOptionalString(value),
+    );
+  }
+
   normalizeThirdPartyAuth(value: unknown): ThirdPartyAuthConfig {
     const raw =
       value && typeof value === "object"
@@ -512,6 +527,20 @@ export class SystemConfigService {
     return typeof value === "string" && value.trim().length > 0
       ? value.trim()
       : fallback;
+  }
+
+  private cleanOptionalString(value: unknown): string {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  private insertOrUpdateStringConfig(key: string, value: string): void {
+    const result = db.run(
+      "UPDATE system_config SET value = ?, updated_at = datetime('now') WHERE key = ?",
+      [value, key],
+    );
+    if (result.changes === 0) {
+      this.insertConfigValue(key, value);
+    }
   }
 
   private normalizePath(value: unknown, fallback: string): string {

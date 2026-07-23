@@ -2,6 +2,7 @@ import { sign } from "hono/jwt";
 import { db, SECRET } from "../db/index.js";
 import { redis } from "../redis.js";
 import { sudorouterService } from "./SudorouterService.js";
+import { systemConfigService } from "./SystemConfigService.js";
 import { generateInvitationCode } from "../utils/invitation.js";
 import { USER_ROLES, USER_STATUS } from "../utils/constants.js";
 import { logOperation, logSudorouterCall } from "../utils/logger.js";
@@ -34,6 +35,7 @@ export interface LoginSuccessData {
     sudorouter_key: string | null;
     model_service_url: string;
     models: string[];
+    scode_auto_model: string;
     points: {
       total: number;
       used: number;
@@ -202,6 +204,7 @@ class AuthUserService {
           : null,
         model_service_url: sudorouterService.getModelServiceUrl(),
         models,
+        scode_auto_model: systemConfigService.getScodeAutoModel(),
         points: {
           total: totalPoints,
           used: usedPoints,

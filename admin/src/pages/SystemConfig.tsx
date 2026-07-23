@@ -168,6 +168,18 @@ function buildLogoutServiceUrl(
   }
 }
 
+function getRequestErrorMessage(error: unknown, fallback: string): string {
+  const responseMessage =
+    typeof error === "object" && error !== null && "response" in error
+      ? (error as { response?: { data?: { msg?: unknown } } }).response?.data
+          ?.msg
+      : undefined;
+  if (typeof responseMessage === "string" && responseMessage) {
+    return responseMessage;
+  }
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 // 模块级常量,避免父组件 re-render 时 schema 引用变化触发子组件 useEffect 重置已编辑字段。
 const LOG_REPORT_SCHEMA: SchemaField[] = [
   { kind: "protocol", name: "protocol", label: "上报协议" },
@@ -208,6 +220,8 @@ const SystemConfig: React.FC = () => {
   const [selectedProviderId, setSelectedProviderId] =
     useState<string>("comac_cas");
   const [savingThirdParty, setSavingThirdParty] = useState(false);
+  const [savingScodeAutoModel, setSavingScodeAutoModel] = useState(false);
+  const [scodeAutoModel, setScodeAutoModel] = useState<string>("");
   const [logReport, setLogReport] = useState<SwitchConfigCardValue>({
     enabled: 0,
     protocol: "",
@@ -261,6 +275,9 @@ const SystemConfig: React.FC = () => {
               protocol: response.data.product_improvement.protocol ?? "",
               domain: response.data.product_improvement.domain ?? "",
             });
+          }
+          if (typeof response.data.scode_auto_model === "string") {
+            setScodeAutoModel(response.data.scode_auto_model);
           }
         }
       } catch (error) {
@@ -323,6 +340,25 @@ const SystemConfig: React.FC = () => {
       message.error(error.response?.data?.msg || error.message || "保存失败");
     } finally {
       setSavingThirdParty(false);
+    }
+  };
+  const saveScodeAutoModel = async () => {
+    const nextModel = scodeAutoModel.trim();
+
+    setSavingScodeAutoModel(true);
+    try {
+      const res = (await adminApi.updateSystemConfig({
+        scode_auto_model: nextModel,
+      })) as { success?: boolean; msg?: string };
+      if (!res?.success) {
+        throw new Error(res?.msg || "保存失败");
+      }
+      setScodeAutoModel(nextModel);
+      message.success("Sudowork Auto 默认模型已保存");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "保存失败"));
+    } finally {
+      setSavingScodeAutoModel(false);
     }
   };
 
@@ -443,6 +479,34 @@ const SystemConfig: React.FC = () => {
             保存设置
           </Button>
         </div>
+      </Card>
+
+      <Card
+        title="Sudowork Auto 默认模型"
+        style={{ maxWidth: 760, marginTop: 16 }}
+      >
+        <Text type="secondary">
+          可选配置。留空时，Sudowork 客户端继续沿用原有 auto
+          选择逻辑；填写后，客户端重新登录或刷新模型列表会同步该配置，同步后的新会话生效。
+        </Text>
+        <Form layout="vertical" style={{ marginTop: 20 }}>
+          <Form.Item label="Auto 默认模型（可选）">
+            <Input
+              value={scodeAutoModel}
+              placeholder="留空则沿用客户端原有 auto 选择逻辑"
+              onChange={(e) => setScodeAutoModel(getInputValue(e))}
+            />
+          </Form.Item>
+          <div style={{ textAlign: "right" }}>
+            <Button
+              type="primary"
+              loading={savingScodeAutoModel}
+              onClick={saveScodeAutoModel}
+            >
+              保存 Auto 模型
+            </Button>
+          </div>
+        </Form>
       </Card>
 
       {(radioVal === 2 || loginMethod === 2) && selectedProvider && (

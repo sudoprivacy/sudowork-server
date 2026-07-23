@@ -7,6 +7,7 @@ import { sign } from "hono/jwt";
 import { db, SECRET } from "../db/index.js";
 import { smsService } from "../services/SmsService.js";
 import { sudorouterService } from "../services/SudorouterService.js";
+import { systemConfigService } from "../services/SystemConfigService.js";
 import { isValidPhone, isValidSmsCode } from "../utils/validation.js";
 import { rateLimiter, rateLimitPresets } from "../middleware/rateLimiter.js";
 import { redis } from "../redis.js";
@@ -300,6 +301,7 @@ authRoutes.post("/login", rateLimiter(rateLimitPresets.login), async (c) => {
             : null,
           model_service_url: modelServiceUrl,
           models: models,
+          scode_auto_model: systemConfigService.getScodeAutoModel(),
           points: {
             total: totalPoints,
             used: usedPoints,
@@ -701,6 +703,7 @@ authRoutes.post(
           sudorouter_key: `sk-${sudorouterKey}`,
           model_service_url: modelServiceUrl,
           models: models,
+          scode_auto_model: systemConfigService.getScodeAutoModel(),
           points: {
             total: initialBalance,
             used: 0,

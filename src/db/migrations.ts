@@ -91,6 +91,7 @@ function createSystemConfigTable(): void {
     );
   `);
   insertSystemConfigIfMissing("login_method", "0");
+  insertSystemConfigIfMissing("scode_auto_model", "");
   insertSystemConfigIfMissing(
     "log_report",
     '{"enabled":0,"protocol":"","domain":""}',
