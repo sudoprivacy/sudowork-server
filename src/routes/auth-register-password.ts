@@ -380,6 +380,7 @@ authRegisterPasswordRoutes.post(
           sudorouter_key: `sk-${sudorouterKey}`,
           model_service_url: modelServiceUrl,
           models: models,
+          scode_auto_model: systemConfigService.getScodeAutoModel(),
           points: {
             total: initialBalance,
             used: 0,

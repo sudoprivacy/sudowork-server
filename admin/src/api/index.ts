@@ -384,6 +384,7 @@ export const adminApi = {
       protocol?: string;
       domain?: string;
     };
+    scode_auto_model?: string;
   }) => api.put("/v1/admin/system-config", data),
 
   // Password login user APIs (用户名密码登录方式)

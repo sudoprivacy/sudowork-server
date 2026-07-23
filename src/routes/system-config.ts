@@ -56,6 +56,7 @@ const PUBLIC_CONFIG: Record<string, () => unknown> = {
     (process.env.SUDOROUTER_BASE_URL || "").replace(/\/+$/, ""),
   skillhub_baseurl: () =>
     (process.env.SKILLHUB_BASE_URL || "").replace(/\/+$/, ""),
+  scode_auto_model: () => systemConfigService.getScodeAutoModel(),
   third_party_auth: () => systemConfigService.getPublicThirdPartyAuth(),
 };
 
@@ -181,6 +182,7 @@ systemConfigRoutes.get(
         })(),
         version_update: systemConfigService.getVersionUpdate(),
         product_improvement: systemConfigService.getProductImprovement(),
+        scode_auto_model: systemConfigService.getScodeAutoModel(),
       },
     });
   },
@@ -243,6 +245,19 @@ systemConfigRoutes.put(
       const before = systemConfigService.getLoginMethod();
       systemConfigService.setLoginMethod(login_method);
       changes.login_method = { before, after: login_method };
+    }
+
+    if (body.scode_auto_model !== undefined) {
+      if (typeof body.scode_auto_model !== "string") {
+        return c.json(
+          { success: false, msg: "Sudowork Auto 默认模型必须为字符串" },
+          400,
+        );
+      }
+      const before = systemConfigService.getScodeAutoModel();
+      const after = body.scode_auto_model.trim();
+      systemConfigService.setScodeAutoModel(after);
+      changes.scode_auto_model = { before, after };
     }
 
     if (body.log_report !== undefined) {
