@@ -483,6 +483,29 @@ export function initSchema(): void {
     );
   `);
 
+  // skill-hub 当前 assistant PUT 接口无法稳定更新基础信息。
+  // 在不修改 skill-hub 的前提下，本地保存企业助手基础字段覆盖值，并在列表接口合并返回。
+  db.run(`
+    CREATE TABLE IF NOT EXISTS assistant_metadata_overrides (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      enterprise_id INTEGER NOT NULL,
+      assistant_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      profession TEXT NOT NULL,
+      description TEXT,
+      default_init_prompt TEXT,
+      categories TEXT,
+      skills TEXT,
+      prompt_file TEXT,
+      avatar TEXT,
+      skillhub_version TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(enterprise_id, assistant_id),
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id)
+    );
+  `);
+
   db.run(
     `CREATE INDEX IF NOT EXISTS idx_dify_app_binding_app_id ON dify_app_binding(dify_app_id)`,
   );
@@ -496,5 +519,9 @@ export function initSchema(): void {
   db.run(
     `CREATE INDEX IF NOT EXISTS idx_dify_dataset_binding_assistant
        ON dify_dataset_binding(enterprise_id, assistant_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_assistant_metadata_overrides_assistant
+       ON assistant_metadata_overrides(enterprise_id, assistant_id)`,
   );
 }

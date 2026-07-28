@@ -34,6 +34,10 @@ import * as sudohub from "./SudohubClient.js";
 import { system as difySystem } from "./DifyClient.js";
 import { ensureTenantBinding } from "./DifyTenantService.js";
 import { replaceAcl, type AclEntry } from "./DifyAgentService.js";
+import {
+  applyAssistantMetadataOverrides,
+  upsertAssistantMetadataOverride,
+} from "./AssistantMetadataOverrideService.js";
 
 /**
  * Mode the admin actively selects when enabling Dify enhancement on an
@@ -91,6 +95,24 @@ export interface CreateEnterpriseAssistantInput {
   tenantCode: string;
 }
 
+export interface UpdateEnterpriseAssistantInput {
+  enterpriseId: number;
+  assistantId: string;
+  tenantCode: string;
+  name: string;
+  profession: string;
+  description?: string;
+  defaultInitPrompt?: string;
+  categories?: string[];
+  skills?: string[];
+  promptFileBytes?: Uint8Array | Buffer;
+  promptFileName?: string;
+  avatarBytes?: Uint8Array | Buffer;
+  avatarFileName?: string;
+  sourceZipBytes?: Uint8Array | Buffer;
+  sourceZipFileName?: string;
+}
+
 export interface EnterpriseAssistantSummary {
   assistantId: string;
   enterpriseId: number;
@@ -101,6 +123,19 @@ export interface EnterpriseAssistantSummary {
   enhancement?: { mode: EnhancementMode } | null;
   /** Pure-RAG path: dataset ids attached. Empty when enhancement is on. */
   datasetIds?: string[];
+}
+
+export interface EnterpriseAssistantUpdateSummary {
+  assistantId: string;
+  enterpriseId: number;
+  tenantCode: string;
+  version: string;
+  raw: unknown;
+}
+
+export interface EnterpriseAssistantDetail {
+  assistant: Record<string, unknown>;
+  promptText: string | null;
 }
 
 interface CompensationLog {
@@ -123,6 +158,46 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+type SourceZipBuildInput = {
+  name: string;
+  promptFileBytes?: Uint8Array | Buffer;
+  promptFileName?: string;
+  avatarBytes?: Uint8Array | Buffer;
+  avatarFileName?: string;
+  sourceZipBytes?: Uint8Array | Buffer;
+  sourceZipFileName?: string;
+  bumpMarker?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+function normalizeZipEntryName(name: string): string {
+  return name.replaceAll("\\", "/").replace(/^\.\/+/, "");
+}
+
+function detectSingleTopLevelPrefix(zip: JSZip): string {
+  const entries = Object.values(zip.files)
+    .filter((entry) => !entry.dir)
+    .map((entry) => normalizeZipEntryName(entry.name))
+    .filter((entryName) => !entryName.includes("__MACOSX") && !entryName.endsWith(".DS_Store"))
+    .filter(Boolean);
+  const topLevels = Array.from(new Set(entries.map((entryName) => entryName.split("/")[0])));
+  if (topLevels.length === 1 && entries.every((entryName) => entryName.includes("/"))) {
+    return `${topLevels[0]}/`;
+  }
+  return "";
+}
+
+function writeAssistantPackageMetadata(
+  zip: JSZip,
+  prefix: string,
+  metadata?: Record<string, unknown>,
+): void {
+  if (!metadata) return;
+  const content = JSON.stringify(metadata, null, 2);
+  zip.file(`${prefix}_sudowork_meta.json`, content);
+  zip.file(`${prefix}_moss_meta.json`, content);
+}
+
 /**
  * Build a minimal sudohub-compatible source.zip from the admin-provided prompt
  * (and optional avatar). The sudowork client's install handler does not require
@@ -135,16 +210,33 @@ function nowSec(): number {
  * is no prompt either we return undefined and let the caller decide whether to
  * fail or proceed (sudohub itself will reject creation without prompt_file).
  */
-async function ensureSourceZip(input: CreateEnterpriseAssistantInput): Promise<{
+async function ensureSourceZip(input: SourceZipBuildInput): Promise<{
   bytes: Uint8Array;
   fileName: string;
 } | undefined> {
-  if (input.sourceZipBytes) {
+  if (input.sourceZipBytes && !input.bumpMarker && !input.metadata) {
     const bytes =
       input.sourceZipBytes instanceof Uint8Array
         ? input.sourceZipBytes
         : new Uint8Array(input.sourceZipBytes);
     return { bytes, fileName: input.sourceZipFileName || "source.zip" };
+  }
+  if (input.sourceZipBytes) {
+    const bytes =
+      input.sourceZipBytes instanceof Uint8Array
+        ? input.sourceZipBytes
+        : new Uint8Array(input.sourceZipBytes);
+    const zip = await JSZip.loadAsync(bytes);
+    const prefix = detectSingleTopLevelPrefix(zip);
+    if (input.bumpMarker) {
+      zip.file(
+        `${prefix}_sudowork_update.json`,
+        JSON.stringify({ updated_at: new Date().toISOString() }, null, 2),
+      );
+    }
+    writeAssistantPackageMetadata(zip, prefix, input.metadata);
+    const buffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+    return { bytes: buffer, fileName: input.sourceZipFileName || `${input.name}.zip` };
   }
   if (!input.promptFileBytes) return undefined;
 
@@ -166,6 +258,13 @@ async function ensureSourceZip(input: CreateEnterpriseAssistantInput): Promise<{
         : new Uint8Array(input.avatarBytes),
     );
   }
+  if (input.bumpMarker) {
+    zip.file(
+      "_sudowork_update.json",
+      JSON.stringify({ updated_at: new Date().toISOString() }, null, 2),
+    );
+  }
+  writeAssistantPackageMetadata(zip, "", input.metadata);
   const buffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
   return { bytes: buffer, fileName: `${input.name}.zip` };
 }
@@ -192,6 +291,327 @@ function resolveDifyAppModeForCreation(mode: EnhancementMode): string {
  */
 function persistedMode(mode: EnhancementMode): string {
   return mode;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getStringField(obj: Record<string, unknown> | null, keys: string[]): string | undefined {
+  if (!obj) return undefined;
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+function getNumberField(obj: Record<string, unknown> | null, keys: string[]): number | undefined {
+  if (!obj) return undefined;
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const n = Number(value);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return undefined;
+}
+
+function getStringArrayField(obj: Record<string, unknown> | null, keys: string[]): string[] {
+  if (!obj) return [];
+  for (const key of keys) {
+    const value = obj[key];
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === "string");
+    }
+  }
+  return [];
+}
+
+function normalizeSudohubAssistant(raw: unknown): Record<string, unknown> | null {
+  const root = asRecord(raw);
+  const data = asRecord(root?.data);
+  const assistant = asRecord(data?.assistant);
+  if (assistant) {
+    const latestVersion =
+      data?.latestVersion ??
+      data?.latest_version ??
+      assistant.latestVersion ??
+      assistant.latest_version;
+    return {
+      ...assistant,
+      versions: data?.versions ?? assistant.versions,
+      latestVersion,
+    };
+  }
+  return data || root;
+}
+
+function firstVersionFrom(value: unknown): string | undefined {
+  const record = asRecord(value);
+  return getStringField(record, ["version"]);
+}
+
+function extractLatestVersion(record: Record<string, unknown> | null): string | undefined {
+  if (!record) return undefined;
+  const direct = getStringField(record, ["version", "latest_version"]);
+  if (direct) return direct;
+  const latest = firstVersionFrom(record.latestVersion) || firstVersionFrom(record.latest_version);
+  if (latest) return latest;
+  const versions = Array.isArray(record.versions) ? record.versions : [];
+  return firstVersionFrom(versions[0]);
+}
+
+function bumpPatchVersion(current?: string): string {
+  const fallback = "1.0.1";
+  if (!current) return fallback;
+  const trimmed = current.trim();
+  const match = trimmed.match(/^(v?)(\d+)(?:\.(\d+))?(?:\.(\d+))?/i);
+  if (!match) return fallback;
+  const prefix = match[1] ?? "";
+  const majorRaw = match[2];
+  const minorRaw = match[3];
+  const patchRaw = match[4];
+  if (!majorRaw) return fallback;
+  const major = Number.parseInt(majorRaw, 10);
+  const minor = Number.parseInt(minorRaw ?? "0", 10);
+  const patch = Number.parseInt(patchRaw ?? "0", 10);
+  if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) {
+    return fallback;
+  }
+  return `${prefix}${major}.${minor}.${patch + 1}`;
+}
+
+function packageFileName(name: string, version: string): string {
+  const safeName = (name.trim() || "assistant").replace(/[\\/]/g, "_").slice(0, 80);
+  return `${safeName}-${version}.zip`;
+}
+
+function resolveHubFileUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("/")) return `${sudohub.SUDOHUB_BASE}${url}`;
+  return `${sudohub.SUDOHUB_BASE}/${url}`;
+}
+
+async function downloadHubFile(url: string): Promise<Uint8Array> {
+  const resolved = resolveHubFileUrl(url);
+  const resp = await fetch(resolved);
+  if (!resp.ok) {
+    throw new Error(`download ${resolved} failed with ${resp.status}`);
+  }
+  return new Uint8Array(await resp.arrayBuffer());
+}
+
+function extractSourceUrl(record: Record<string, unknown> | null): string | undefined {
+  if (!record) return undefined;
+  const direct = getStringField(record, ["sourceUrl", "source_url"]);
+  if (direct) return direct;
+  const latest = asRecord(record.latestVersion) || asRecord(record.latest_version);
+  const latestSource = getStringField(latest, ["sourceUrl", "source_url"]);
+  if (latestSource) return latestSource;
+  const versions = Array.isArray(record.versions) ? record.versions : [];
+  return getStringField(asRecord(versions[0]), ["sourceUrl", "source_url"]);
+}
+
+function extractPromptUrl(record: Record<string, unknown> | null): string | undefined {
+  return getStringField(record, ["promptFile", "prompt_file"]);
+}
+
+function resolveUploadedAssistantObjectUrl(
+  current: Record<string, unknown> | null,
+  assistantId: string,
+  fileName: string,
+): string {
+  const objectKey = `assistant-hub/${assistantId}/${fileName}`;
+  const samples = [
+    extractPromptUrl(current),
+    getStringField(current, ["avatar"]),
+    extractSourceUrl(current),
+  ].filter((url): url is string => typeof url === "string" && url.length > 0);
+  for (const sample of samples) {
+    const marker = "/assistant-hub/";
+    const idx = sample.indexOf(marker);
+    if (/^https?:\/\//i.test(sample) && idx >= 0) {
+      return `${sample.slice(0, idx)}/${objectKey}`;
+    }
+  }
+
+  const localContentBase = (
+    process.env.SUDOHUB_CONTENT_BASE_URL ||
+    process.env.SKILLHUB_CONTENT_BASE_URL ||
+    ""
+  ).replace(/\/+$/, "");
+  if (localContentBase) {
+    return `${localContentBase}/api/skills/content/${objectKey}`;
+  }
+
+  const cosBase = (
+    process.env.SUDOHUB_COS_BASE_URL ||
+    process.env.SKILLHUB_COS_BASE_URL ||
+    "https://sudowork-hub-1309794936.cos.ap-beijing.myqcloud.com"
+  ).replace(/\/+$/, "");
+  return `${cosBase}/${objectKey}`;
+}
+
+function buildAssistantPackageMetadata(
+  input: UpdateEnterpriseAssistantInput,
+  current: Record<string, unknown> | null,
+  nextVersion: string,
+): Record<string, unknown> {
+  const nowIso = new Date().toISOString();
+  const description = input.description ?? "";
+  const skills = input.skills ?? [];
+  const categories = input.categories ?? [];
+  const avatar =
+    input.avatarBytes
+      ? input.avatarFileName || "avatar.png"
+      : getStringField(current, ["avatar"]);
+  return {
+    id: input.assistantId,
+    name: input.name,
+    display_name: input.name,
+    profession: input.profession,
+    nameI18n: {
+      "zh-CN": input.name,
+      "en-US": input.name,
+    },
+    descriptionI18n: {
+      "zh-CN": description,
+      "en-US": description,
+    },
+    avatar,
+    emoji: null,
+    presetAgentType: "claude",
+    source_type: "tenant",
+    tag: "tenant",
+    skills,
+    defaultEnabledSkills: skills,
+    enabledSkills: skills,
+    categories,
+    is_builtin: false,
+    enabled: true,
+    defaultInitPrompt: input.defaultInitPrompt ?? null,
+    installed_version: nextVersion,
+    installed_at: nowIso,
+    updated_at: nowIso,
+    ruleFile: input.promptFileBytes ? `${input.name}.md` : undefined,
+  };
+}
+
+async function buildUpdateSourceZip(
+  input: UpdateEnterpriseAssistantInput,
+  current: Record<string, unknown> | null,
+  nextVersion: string,
+): Promise<{ bytes: Uint8Array; fileName: string } | undefined> {
+  const fileName = packageFileName(input.name, nextVersion);
+  const metadata = buildAssistantPackageMetadata(input, current, nextVersion);
+  const explicitZip = await ensureSourceZip({
+    name: input.name,
+    promptFileBytes: input.promptFileBytes,
+    promptFileName: input.promptFileName,
+    avatarBytes: input.avatarBytes,
+    avatarFileName: input.avatarFileName,
+    sourceZipBytes: input.sourceZipBytes,
+    sourceZipFileName: fileName,
+    bumpMarker: true,
+    metadata,
+  });
+  if (explicitZip) return explicitZip;
+
+  const sourceUrl = extractSourceUrl(current);
+  if (sourceUrl) {
+    try {
+      const existingSource = await downloadHubFile(sourceUrl);
+      return ensureSourceZip({
+        name: input.name,
+        sourceZipBytes: existingSource,
+        sourceZipFileName: fileName,
+        bumpMarker: true,
+        metadata,
+      });
+    } catch (err) {
+      console.warn("sudohub existing source_url download failed; trying prompt_file:", err);
+    }
+  }
+
+  const promptUrl = extractPromptUrl(current);
+  if (!promptUrl) return undefined;
+  const existingPrompt = await downloadHubFile(promptUrl);
+  return ensureSourceZip({
+    name: input.name,
+    promptFileBytes: existingPrompt,
+    promptFileName: `${input.name}.md`,
+    sourceZipFileName: fileName,
+    bumpMarker: true,
+    metadata,
+  });
+}
+
+async function readPromptTextFromSourceZip(
+  bytes: Uint8Array,
+  assistantName?: string,
+): Promise<string | null> {
+  const zip = await JSZip.loadAsync(bytes);
+  const markdownFiles = Object.values(zip.files).filter(
+    (entry) => !entry.dir && /\.md$/i.test(entry.name),
+  );
+  if (markdownFiles.length === 0) return null;
+
+  const preferredFileName = assistantName ? `${assistantName}.md` : "";
+  const preferred =
+    preferredFileName.length > 0
+      ? markdownFiles.find((entry) => entry.name.split("/").pop() === preferredFileName)
+      : undefined;
+  const selected = preferred ?? markdownFiles[0];
+  return selected.async("string");
+}
+
+async function loadAssistantPromptText(record: Record<string, unknown>): Promise<string | null> {
+  const promptUrl = extractPromptUrl(record);
+  if (promptUrl) {
+    try {
+      return new TextDecoder().decode(await downloadHubFile(promptUrl));
+    } catch (err) {
+      console.warn("sudohub prompt_file download failed; trying source_url:", err);
+    }
+  }
+
+  const sourceUrl = extractSourceUrl(record);
+  if (!sourceUrl) return null;
+  try {
+    const assistantName = getStringField(record, ["name"]);
+    return readPromptTextFromSourceZip(await downloadHubFile(sourceUrl), assistantName);
+  } catch (err) {
+    console.warn("sudohub source_url prompt extraction failed:", err);
+    return null;
+  }
+}
+
+export async function getEnterpriseAssistantDetail(input: {
+  enterpriseId: number;
+  assistantId: string;
+  tenantCode: string;
+}): Promise<EnterpriseAssistantDetail> {
+  const currentRaw = await sudohub.getAssistant(input.assistantId);
+  const current = normalizeSudohubAssistant(currentRaw);
+  if (!current) {
+    throw new Error(`assistant ${input.assistantId} not found`);
+  }
+
+  const currentTenant = getStringField(current, ["tenantId", "tenant_id"]);
+  if (currentTenant && currentTenant !== input.tenantCode) {
+    throw new Error(
+      `assistant ${input.assistantId} belongs to tenant ${currentTenant}, not ${input.tenantCode}`,
+    );
+  }
+
+  const assistant = applyAssistantMetadataOverrides(input.enterpriseId, [current])[0] ?? current;
+  const promptText = await loadAssistantPromptText(assistant);
+  return { assistant, promptText };
 }
 
 export async function createEnterpriseAssistant(
@@ -356,6 +776,116 @@ export async function createEnterpriseAssistant(
     await safeRollback(log);
     throw err;
   }
+}
+
+export async function updateEnterpriseAssistant(
+  input: UpdateEnterpriseAssistantInput,
+): Promise<EnterpriseAssistantUpdateSummary> {
+  const currentRaw = await sudohub.getAssistant(input.assistantId);
+  const current = normalizeSudohubAssistant(currentRaw);
+  const currentTenant = getStringField(current, ["tenantId", "tenant_id"]);
+  if (currentTenant && currentTenant !== input.tenantCode) {
+    throw new Error(
+      `assistant ${input.assistantId} belongs to tenant ${currentTenant}, not ${input.tenantCode}`,
+    );
+  }
+
+  let nextVersion = bumpPatchVersion(extractLatestVersion(current));
+  let sourceZip: { bytes: Uint8Array; fileName: string } | undefined;
+
+  const currentName = getStringField(current, ["name"]) ?? input.name;
+  const currentProfession = getStringField(current, ["profession"]) ?? input.profession;
+  const currentDescription = getStringField(current, ["description"]) ?? input.description ?? "";
+  const currentDefaultPrompt =
+    getStringField(current, ["defaultInitPrompt", "default_init_prompt"]) ??
+    input.defaultInitPrompt ??
+    "";
+  const currentCategories = getStringArrayField(current, ["categories"]);
+  const currentSkills = getStringArrayField(current, ["skills"]);
+  const status = getNumberField(current, ["status"]) ?? 1;
+  const sortOrder = getNumberField(current, ["sortOrder", "sort_order"]);
+
+  let versionResult: { id: string; raw: unknown } | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      sourceZip = await buildUpdateSourceZip(input, current, nextVersion);
+      if (!sourceZip) {
+        throw new Error("unable to build assistant source package for version bump");
+      }
+      versionResult = await sudohub.createAssistantVersion({
+        name: currentName,
+        profession: currentProfession,
+        description: currentDescription,
+        defaultInitPrompt: currentDefaultPrompt,
+        tenantId: input.tenantCode,
+        categories: currentCategories,
+        skills: currentSkills,
+        status,
+        sortOrder,
+        version: nextVersion,
+        changelog: "Updated from sudowork-server admin",
+        promptFileBytes: input.promptFileBytes,
+        promptFileName: input.promptFileName,
+        avatarBytes: input.avatarBytes,
+        avatarFileName: input.avatarFileName,
+        sourceZipBytes: sourceZip.bytes,
+        sourceZipFileName: sourceZip.fileName,
+      });
+      break;
+    } catch (err) {
+      if (
+        err instanceof sudohub.SudohubClientError &&
+        /version .*already exists/i.test(JSON.stringify(err.detail))
+      ) {
+        nextVersion = bumpPatchVersion(nextVersion);
+        continue;
+      }
+      throw err;
+    }
+  }
+  if (!versionResult) {
+    throw new Error("unable to create a unique assistant package version");
+  }
+  if (versionResult.id !== input.assistantId) {
+    throw new Error(
+      `skill-hub version creation returned assistant ${versionResult.id}, expected ${input.assistantId}`,
+    );
+  }
+
+  const promptFileUrl = input.promptFileBytes
+    ? resolveUploadedAssistantObjectUrl(
+        current,
+        input.assistantId,
+        input.promptFileName || "prompt.md",
+      )
+    : getStringField(current, ["promptFile", "prompt_file"]) ?? null;
+  const avatarUrl = input.avatarBytes
+    ? resolveUploadedAssistantObjectUrl(current, input.assistantId, "avatar.png")
+    : getStringField(current, ["avatar"]) ?? null;
+  const override = upsertAssistantMetadataOverride({
+    enterpriseId: input.enterpriseId,
+    assistantId: input.assistantId,
+    name: input.name,
+    profession: input.profession,
+    description: input.description ?? "",
+    defaultInitPrompt: input.defaultInitPrompt ?? "",
+    categories: input.categories ?? [],
+    skills: input.skills ?? [],
+    promptFile: promptFileUrl,
+    avatar: avatarUrl,
+    skillhubVersion: nextVersion,
+  });
+
+  return {
+    assistantId: input.assistantId,
+    enterpriseId: input.enterpriseId,
+    tenantCode: input.tenantCode,
+    version: nextVersion,
+    raw: {
+      skillhubVersion: versionResult.raw,
+      metadataOverride: override,
+    },
+  };
 }
 
 /**

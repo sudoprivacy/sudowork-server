@@ -43,6 +43,7 @@ import {
   invokeStreaming,
 } from "../services/EnhancementInvocationService.js";
 import * as sudohub from "../services/SudohubClient.js";
+import { applyAssistantMetadataOverrides } from "../services/AssistantMetadataOverrideService.js";
 
 const agentsRoutes = new Hono();
 
@@ -180,6 +181,7 @@ agentsRoutes.get("/visible", async (c) => {
       : Array.isArray((data as { assistants?: unknown })?.assistants)
         ? ((data as { assistants: Array<Record<string, unknown>> }).assistants)
         : [];
+    sudohubAssistants = applyAssistantMetadataOverrides(user.enterprise_id, sudohubAssistants);
   } catch (err) {
     return c.json({ success: false, msg: `sudohub list failed: ${(err as Error).message}` }, 502);
   }
@@ -235,15 +237,51 @@ agentsRoutes.get("/visible", async (c) => {
     .map((a) => {
       const id = a.id as string;
       const binding = bindingByAssistant.get(id);
+      const versions = Array.isArray(a.versions) ? a.versions : [];
+      const latestVersion =
+        (a.latestVersion as Record<string, unknown> | undefined) ??
+        (a.latest_version as Record<string, unknown> | undefined) ??
+        (versions[0] as Record<string, unknown> | undefined) ??
+        null;
+      const version =
+        a.version ??
+        (latestVersion && typeof latestVersion.version === "string"
+          ? latestVersion.version
+          : undefined);
+      const sourceUrl =
+        a.sourceUrl ??
+        a.source_url ??
+        (latestVersion && typeof latestVersion.sourceUrl === "string"
+          ? latestVersion.sourceUrl
+          : undefined) ??
+        (latestVersion && typeof latestVersion.source_url === "string"
+          ? latestVersion.source_url
+          : undefined);
       return {
+        id,
         assistant_id: id,
         // verbatim sudohub fields the client may use for display
         name: a.name,
-        display_name: (a as { display_name?: string }).display_name,
+        display_name:
+          (a as { display_name?: string }).display_name ??
+          (typeof a.profession === "string" ? a.profession : undefined) ??
+          (typeof a.name === "string" ? a.name : undefined),
+        profession: a.profession,
         description: a.description,
         avatar: a.avatar,
         categories: a.categories,
-        profession: a.profession,
+        skills: a.skills,
+        defaultInitPrompt: a.defaultInitPrompt,
+        default_init_prompt: a.default_init_prompt,
+        promptFile: a.promptFile,
+        prompt_file: a.prompt_file,
+        sourceUrl,
+        source_url: sourceUrl,
+        version,
+        latestVersion,
+        latest_version: latestVersion,
+        updatedAt: a.updatedAt,
+        updated_at: a.updated_at,
         // enhancement annotation
         enhancement: binding
           ? {

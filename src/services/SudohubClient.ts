@@ -17,7 +17,7 @@
  *   GET    /api/assistants/cursor                user-facing list (status=1)
  *   GET    /api/assistants/admin/cursor          admin list (all statuses)
  *   GET    /api/assistants/{id}                  detail
- *   PUT    /api/assistants/{id}                  update (semantics TBD by sudohub)
+ *   PUT    /api/assistants/{id}                  JSON metadata update
  *   DELETE /api/assistants/{id}                  delete
  *   POST   /api/assistants/{id}/approve          status 0 → 1
  *
@@ -217,12 +217,14 @@ export async function approveAssistant(assistantId: string): Promise<unknown> {
 }
 
 // ============================================================================
-// Create / update (multipart)
+// Create / version-create (multipart) + metadata update (JSON)
 // ============================================================================
 
 export interface CreateAssistantInput {
   name: string;
   profession: string;
+  version?: string;
+  changelog?: string;
   description?: string;
   defaultInitPrompt?: string;
   tenantId?: string;
@@ -243,9 +245,33 @@ export interface CreateAssistantInput {
   sourceZipFileName?: string;
 }
 
+export interface CreateAssistantVersionInput extends CreateAssistantInput {
+  version: string;
+  sourceZipBytes: Uint8Array | Buffer;
+}
+
+function bytesToBlobPart(bytes: Uint8Array | Buffer): ArrayBuffer {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const copy = new Uint8Array(view.byteLength);
+  copy.set(view);
+  return copy.buffer;
+}
+
+function describeFormValue(value: unknown): unknown {
+  if (value && typeof value === "object" && "name" in value && "size" in value) {
+    const maybeFile = value as { name?: unknown; size?: unknown };
+    if (typeof maybeFile.name === "string" && typeof maybeFile.size === "number") {
+      return `<file ${maybeFile.name} ${maybeFile.size}B>`;
+    }
+  }
+  return value;
+}
+
 function appendMultipart(form: FormData, input: CreateAssistantInput) {
   form.append("name", input.name);
   form.append("profession", input.profession);
+  if (input.version) form.append("version", input.version);
+  if (input.changelog) form.append("changelog", input.changelog);
   if (input.description) form.append("description", input.description);
   if (input.defaultInitPrompt) form.append("defaultInitPrompt", input.defaultInitPrompt);
   if (input.tenantId) form.append("tenantId", input.tenantId);
@@ -260,15 +286,15 @@ function appendMultipart(form: FormData, input: CreateAssistantInput) {
     form.append("skills", input.skills.join(","));
   }
   if (input.promptFileBytes) {
-    const blob = new Blob([input.promptFileBytes], { type: "text/markdown" });
+    const blob = new Blob([bytesToBlobPart(input.promptFileBytes)], { type: "text/markdown" });
     form.append("prompt_file", blob, input.promptFileName || "prompt.md");
   }
   if (input.avatarBytes) {
-    const blob = new Blob([input.avatarBytes], { type: "image/png" });
+    const blob = new Blob([bytesToBlobPart(input.avatarBytes)], { type: "image/png" });
     form.append("avatar", blob, input.avatarFileName || "avatar.png");
   }
   if (input.sourceZipBytes) {
-    const blob = new Blob([input.sourceZipBytes], { type: "application/zip" });
+    const blob = new Blob([bytesToBlobPart(input.sourceZipBytes)], { type: "application/zip" });
     form.append("source_url", blob, input.sourceZipFileName || "source.zip");
   }
 }
@@ -277,15 +303,29 @@ export async function createAssistant(input: CreateAssistantInput): Promise<{
   id: string;
   raw: unknown;
 }> {
+  return postAssistantMultipart(input, "createAssistant");
+}
+
+export async function createAssistantVersion(input: CreateAssistantVersionInput): Promise<{
+  id: string;
+  raw: unknown;
+}> {
+  return postAssistantMultipart(input, "createAssistantVersion");
+}
+
+async function postAssistantMultipart(
+  input: CreateAssistantInput,
+  label: "createAssistant" | "createAssistantVersion",
+): Promise<{ id: string; raw: unknown }> {
   const form = new FormData();
   appendMultipart(form, input);
   // Log the form contents (sans file bytes) so we can compare against the
   // server's reported validation failure when sudohub returns 4xx.
   const dumped: Record<string, unknown> = {};
   for (const [k, v] of form.entries()) {
-    dumped[k] = v instanceof File ? `<file ${v.name} ${v.size}B>` : v;
+    dumped[k] = describeFormValue(v);
   }
-  console.log("[sudohub.createAssistant] POST /api/assistants payload:", dumped);
+  console.log(`[sudohub.${label}] POST /api/assistants payload:`, dumped);
 
   const resp = await fetch(`${SUDOHUB_BASE_URL}/api/assistants`, {
     method: "POST",
@@ -295,7 +335,7 @@ export async function createAssistant(input: CreateAssistantInput): Promise<{
   const body = await parseBody(resp);
   if (!resp.ok) {
     console.error(
-      `[sudohub.createAssistant] sudohub ${resp.status} body:`,
+      `[sudohub.${label}] sudohub ${resp.status} body:`,
       JSON.stringify(body),
     );
     throw new SudohubClientError(resp.status, "POST /api/assistants failed", body);
@@ -323,7 +363,7 @@ export async function createAssistant(input: CreateAssistantInput): Promise<{
     ok?.data?.assistant?.id;
   if (!id) {
     console.error(
-      "[sudohub.createAssistant] missing id; raw body:",
+      `[sudohub.${label}] missing id; raw body:`,
       JSON.stringify(body),
     );
     throw new SudohubClientError(500, "sudohub response missing id", body);
@@ -336,64 +376,49 @@ export interface UpdateAssistantInput {
   profession?: string;
   description?: string;
   defaultInitPrompt?: string;
+  tenantId?: string;
   sortOrder?: number;
   status?: number;
   categories?: string[];
   skills?: string[];
-  promptFileBytes?: Uint8Array | Buffer;
-  promptFileName?: string;
-  avatarBytes?: Uint8Array | Buffer;
-  avatarFileName?: string;
-  sourceZipBytes?: Uint8Array | Buffer;
-  sourceZipFileName?: string;
 }
 
 /**
- * Replace-mode update — passes only the fields the caller provided. sudohub's
- * PUT semantics are not formally documented; this client assumes it accepts
- * partial multipart bodies. If sudohub turns out to require all fields, this
- * is the single point to add a GET-then-merge step.
+ * Replace-mode metadata update — passes only the fields the caller provided.
+ * skill-hub's assistant PUT route calls `request.get_json()`, so files/version
+ * data must go through POST /api/assistants instead.
  */
 export async function updateAssistant(
   assistantId: string,
   input: UpdateAssistantInput,
 ): Promise<unknown> {
-  const form = new FormData();
-  if (input.name) form.append("name", input.name);
-  if (input.profession) form.append("profession", input.profession);
-  if (input.description) form.append("description", input.description);
-  if (input.defaultInitPrompt) form.append("defaultInitPrompt", input.defaultInitPrompt);
-  if (input.sortOrder != null) form.append("sortOrder", String(input.sortOrder));
-  if (input.status != null) form.append("status", String(input.status));
-  if (input.categories) form.append("categories", JSON.stringify(input.categories));
-  if (input.skills) form.append("skills", input.skills.join(","));
-  if (input.promptFileBytes) {
-    form.append(
-      "prompt_file",
-      new Blob([input.promptFileBytes], { type: "text/markdown" }),
-      input.promptFileName || "prompt.md",
-    );
+  const payload: Record<string, unknown> = {};
+  if (input.name !== undefined) payload.name = input.name;
+  if (input.profession !== undefined) payload.profession = input.profession;
+  if (input.description !== undefined) payload.description = input.description;
+  if (input.defaultInitPrompt !== undefined) {
+    payload.defaultInitPrompt = input.defaultInitPrompt;
   }
-  if (input.avatarBytes) {
-    form.append(
-      "avatar",
-      new Blob([input.avatarBytes], { type: "image/png" }),
-      input.avatarFileName || "avatar.png",
-    );
-  }
-  if (input.sourceZipBytes) {
-    form.append(
-      "source_url",
-      new Blob([input.sourceZipBytes], { type: "application/zip" }),
-      input.sourceZipFileName || "source.zip",
-    );
-  }
+  if (input.tenantId !== undefined) payload.tenantId = input.tenantId;
+  if (input.sortOrder != null) payload.sortOrder = input.sortOrder;
+  if (input.status != null) payload.status = input.status;
+  if (input.categories !== undefined) payload.categories = input.categories;
+  if (input.skills !== undefined) payload.skills = input.skills;
+
   const resp = await fetch(`${SUDOHUB_BASE_URL}/api/assistants/${assistantId}`, {
     method: "PUT",
-    headers: headersBare(),
-    body: form,
+    headers: headersJson(),
+    body: JSON.stringify(payload),
   });
-  return expectOk(resp, `PUT /api/assistants/${assistantId}`);
+  if (!resp.ok) {
+    const body = await parseBody(resp);
+    console.error(
+      `[sudohub.updateAssistant] sudohub ${resp.status} body:`,
+      JSON.stringify(body),
+    );
+    throw new SudohubClientError(resp.status, `PUT /api/assistants/${assistantId} failed`, body);
+  }
+  return parseBody(resp);
 }
 
 export const SUDOHUB_BASE = SUDOHUB_BASE_URL;
