@@ -27,6 +27,7 @@ import { db } from "../db/index.js";
 import { system as difySystem } from "./DifyClient.js";
 import { ensureTenantBinding, getTenantBinding } from "./DifyTenantService.js";
 import * as sudohub from "./SudohubClient.js";
+import { deleteAssistantMetadataOverride } from "./AssistantMetadataOverrideService.js";
 
 export type AgentMode =
   | "chat"
@@ -233,6 +234,7 @@ export async function deleteAgent(enterpriseId: number, assistantId: string): Pr
     db.prepare(
       `DELETE FROM dify_dataset_binding WHERE enterprise_id = ? AND assistant_id = ?`,
     ).run(enterpriseId, assistantId);
+    deleteAssistantMetadataOverride(enterpriseId, assistantId);
   });
   tx();
 }

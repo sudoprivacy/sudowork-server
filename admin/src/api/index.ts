@@ -429,6 +429,12 @@ export const adminApi = {
   getEnterpriseAssistants: (params?: { enterprise_id?: number }) =>
     api.get("/v1/admin/dify/enterprise-assistants", { params }),
 
+  /** Load one enterprise assistant with editable metadata and prompt content. */
+  getEnterpriseAssistant: (
+    assistantId: string,
+    params?: { enterprise_id?: number },
+  ) => api.get(`/v1/admin/dify/enterprise-assistants/${assistantId}`, { params }),
+
   /** Get datasets visible to the (resolved) tenant. */
   getDifyDatasets: (params?: { enterprise_id?: number }) =>
     api.get("/v1/admin/dify/datasets", { params }),
@@ -441,6 +447,12 @@ export const adminApi = {
    */
   createEnterpriseAssistant: (form: FormData) =>
     api.post("/v1/admin/dify/enterprise-assistants", form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+
+  /** Update an enterprise assistant's sudohub-owned base fields and bump package version. */
+  updateEnterpriseAssistant: (assistantId: string, form: FormData) =>
+    api.put(`/v1/admin/dify/enterprise-assistants/${assistantId}`, form, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
 

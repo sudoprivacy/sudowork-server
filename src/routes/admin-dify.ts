@@ -47,8 +47,10 @@ import {
 } from "../services/DifyAgentService.js";
 import {
   createEnterpriseAssistant,
+  getEnterpriseAssistantDetail,
   getEnhancement as getEnhancementInfo,
   setEnhancement,
+  updateEnterpriseAssistant,
   type EnhancementMode,
 } from "../services/EnterpriseAssistantService.js";
 import { buildSsoLink } from "../services/DifySsoService.js";
@@ -56,6 +58,7 @@ import { ensureTenantBinding, findBinding } from "../services/DifyTenantService.
 import { db } from "../db/index.js";
 import * as sudohub from "../services/SudohubClient.js";
 import { system as difySystem } from "../services/DifyClient.js";
+import { applyAssistantMetadataOverrides } from "../services/AssistantMetadataOverrideService.js";
 import {
   resolveAdminEnterpriseId,
   resolveFromBody,
@@ -72,7 +75,7 @@ adminDifyRoutes.use("*", requireDifyConfigured);
 /** Tiny adapter so handlers can either get `enterpriseId` or short-circuit. */
 function resolveOrFail(c: Context, r: ResolveResult): number | Response {
   if (r.ok) return r.enterpriseId;
-  return c.json({ success: false, msg: r.msg }, r.status);
+  return c.json({ success: false, msg: r.msg }, r.status as 400);
 }
 
 /**
@@ -316,6 +319,7 @@ adminDifyRoutes.get("/enterprise-assistants", async (c) => {
       : Array.isArray((data as { assistants?: unknown })?.assistants)
         ? ((data as { assistants: Array<Record<string, unknown>> }).assistants)
         : [];
+    sudohubAssistants = applyAssistantMetadataOverrides(enterpriseId, sudohubAssistants);
   } catch (err) {
     return c.json({ success: false, msg: `sudohub list failed: ${(err as Error).message}` }, 502);
   }
@@ -517,6 +521,139 @@ adminDifyRoutes.post("/enterprise-assistants", async (c) => {
   }
 });
 
+adminDifyRoutes.get("/enterprise-assistants/:assistantId", async (c) => {
+  const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
+  if (typeof enterpriseId !== "number") return enterpriseId;
+
+  let tenantCode: string;
+  try {
+    tenantCode = loadEnterpriseCode(enterpriseId);
+  } catch (err) {
+    return c.json({ success: false, msg: (err as Error).message }, 500);
+  }
+
+  const assistantId = c.req.param("assistantId");
+  try {
+    const detail = await getEnterpriseAssistantDetail({
+      enterpriseId,
+      tenantCode,
+      assistantId,
+    });
+    const acl = listAcl(enterpriseId, assistantId).map((entry) => ({
+      subject_type: entry.subjectType,
+      subject_id: entry.subjectId ?? null,
+    }));
+    return c.json({
+      success: true,
+      data: {
+        assistant: detail.assistant,
+        promptText: detail.promptText,
+        prompt_text: detail.promptText,
+        enhancement: getEnhancementInfo(enterpriseId, assistantId),
+        dataset_ids: listDatasets(enterpriseId, assistantId),
+        acl_summary: aclSummary(acl),
+      },
+    });
+  } catch (err: any) {
+    console.error("[admin.dify.getEnterpriseAssistantDetail] load failed:", err);
+    return c.json(
+      {
+        success: false,
+        msg: err?.message || "load assistant detail failed",
+        detail: err?.detail,
+      },
+      500,
+    );
+  }
+});
+
+adminDifyRoutes.put("/enterprise-assistants/:assistantId", async (c) => {
+  const form = await c.req.formData().catch(() => null);
+  if (!form) {
+    return c.json({ success: false, msg: "expected multipart/form-data" }, 400);
+  }
+
+  const optional = (k: string): string | undefined => {
+    const v = form.get(k);
+    return typeof v === "string" ? v : undefined;
+  };
+  const required = (k: string): string | null => {
+    const v = optional(k);
+    return v !== undefined && v.trim().length > 0 ? v : null;
+  };
+  const jsonField = <T>(k: string): T | undefined => {
+    const raw = optional(k);
+    if (raw === undefined || raw === "") return undefined;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return undefined;
+    }
+  };
+  const fileBytes = async (
+    k: string,
+  ): Promise<{ bytes: Buffer; name: string } | undefined> => {
+    const f = form.get(k);
+    if (!(f instanceof File)) return undefined;
+    const buf = Buffer.from(await f.arrayBuffer());
+    return { bytes: buf, name: f.name };
+  };
+
+  const enterpriseId = resolveOrFail(
+    c,
+    resolveAdminEnterpriseId(c, { kind: "body", value: optional("enterprise_id") }),
+  );
+  if (typeof enterpriseId !== "number") return enterpriseId;
+
+  const name = required("name");
+  const profession = required("profession");
+  if (!name || !profession) {
+    return c.json({ success: false, msg: "name and profession are required" }, 400);
+  }
+
+  let tenantCode: string;
+  try {
+    tenantCode = loadEnterpriseCode(enterpriseId);
+  } catch (err) {
+    return c.json({ success: false, msg: (err as Error).message }, 500);
+  }
+
+  const promptFile = await fileBytes("prompt_file");
+  const avatar = await fileBytes("avatar");
+  const sourceZip = await fileBytes("source_url");
+
+  try {
+    const summary = await updateEnterpriseAssistant({
+      enterpriseId,
+      tenantCode,
+      assistantId: c.req.param("assistantId"),
+      name,
+      profession,
+      description: optional("description") ?? "",
+      defaultInitPrompt: optional("default_init_prompt") ?? optional("defaultInitPrompt") ?? "",
+      categories: jsonField<string[]>("categories") ?? [],
+      skills: jsonField<string[]>("skills") ?? [],
+      promptFileBytes: promptFile?.bytes,
+      promptFileName: promptFile?.name,
+      avatarBytes: avatar?.bytes,
+      avatarFileName: avatar?.name,
+      sourceZipBytes: sourceZip?.bytes,
+      sourceZipFileName: sourceZip?.name,
+    });
+    return c.json({ success: true, data: summary });
+  } catch (err: any) {
+    console.error("[admin.dify.updateEnterpriseAssistant] update failed:", err);
+    return c.json(
+      {
+        success: false,
+        msg: err?.message || "update failed",
+        detail: err?.detail,
+      },
+      500,
+    );
+  }
+});
+
 adminDifyRoutes.put("/enterprise-assistants/:assistantId/enhancement", async (c) => {
   const body = (await c.req.json().catch(() => null)) as
     | {
@@ -530,6 +667,22 @@ adminDifyRoutes.put("/enterprise-assistants/:assistantId/enhancement", async (c)
   if (typeof enterpriseId !== "number") return enterpriseId;
   if (!body || typeof body.enable !== "boolean") {
     return c.json({ success: false, msg: "enable (boolean) required" }, 400);
+  }
+  const current = getEnhancementInfo(enterpriseId, c.req.param("assistantId"));
+  const desiredEnabled = body.enable;
+  const desiredMode = body.mode;
+  const changesExistingMethod =
+    current.enabled !== desiredEnabled ||
+    (current.enabled &&
+      desiredEnabled &&
+      current.mode !== "rag-only" &&
+      desiredMode !== undefined &&
+      desiredMode !== current.mode);
+  if (changesExistingMethod) {
+    return c.json(
+      { success: false, msg: "enhancement method cannot be changed after creation" },
+      400,
+    );
   }
   try {
     const result = await setEnhancement({
@@ -572,9 +725,23 @@ adminDifyRoutes.put("/agents/:assistantId/datasets", async (c) => {
     return c.json({ success: false, msg: "dataset_ids is required" }, 400);
   }
   try {
+    const assistantId = c.req.param("assistantId");
+    const currentDatasets = listDatasets(enterpriseId, assistantId);
+    if (currentDatasets.length === 0 && body.dataset_ids.length > 0) {
+      return c.json(
+        { success: false, msg: "enhancement method cannot be changed after creation" },
+        400,
+      );
+    }
+    if (currentDatasets.length > 0 && body.dataset_ids.length === 0) {
+      return c.json(
+        { success: false, msg: "enhancement method cannot be changed after creation" },
+        400,
+      );
+    }
     const stored = await replaceDatasets(
       enterpriseId,
-      c.req.param("assistantId"),
+      assistantId,
       body.dataset_ids,
     );
     return c.json({ success: true, data: stored });

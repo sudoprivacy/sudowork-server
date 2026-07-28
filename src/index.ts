@@ -128,4 +128,4 @@ if (qmsEnabled) {
   qmsScheduler.start();
 }
 
-export default { port: 3000, fetch: app.fetch };
+export default { port: Number(process.env.PORT || 3000), fetch: app.fetch };

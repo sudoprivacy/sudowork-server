@@ -5,6 +5,8 @@
 
 import { Hono } from "hono";
 import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
+import { db } from "../db/index.js";
+import { applyAssistantMetadataOverrides } from "../services/AssistantMetadataOverrideService.js";
 
 const SKILLHUB_BASE_URL = (
   process.env.SKILLHUB_BASE_URL || "https://sudoworkhub.sudoprivacy.com"
@@ -29,6 +31,47 @@ async function parseProxyResponse(response: Response) {
   } catch {
     return { success: response.ok, message: rawText };
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function enterpriseIdForTenantCode(tenantId?: string): number | undefined {
+  if (!tenantId) return undefined;
+  const row = db
+    .prepare(`SELECT id FROM enterprises WHERE code = ?`)
+    .get(tenantId) as { id: number } | undefined;
+  return row?.id;
+}
+
+function mergeAssistantOverridesIntoCursorResponse(
+  body: unknown,
+  enterpriseId?: number,
+): unknown {
+  if (!enterpriseId) return body;
+
+  const root = asRecord(body);
+  if (!root) return body;
+
+  if (Array.isArray(root.data)) {
+    root.data = applyAssistantMetadataOverrides(
+      enterpriseId,
+      root.data.filter((item): item is Record<string, unknown> => !!asRecord(item)),
+    );
+    return root;
+  }
+
+  const data = asRecord(root.data);
+  if (data && Array.isArray(data.assistants)) {
+    data.assistants = applyAssistantMetadataOverrides(
+      enterpriseId,
+      data.assistants.filter((item): item is Record<string, unknown> => !!asRecord(item)),
+    );
+  }
+  return root;
 }
 
 // Proxy skills API
@@ -61,7 +104,7 @@ proxyRoutes.get("/skills/cursor", authMiddleware, adminMiddleware, async (c) => 
   const data = await parseProxyResponse(response);
   console.log("响应状态:", response.status);
   console.log("响应数据:", JSON.stringify(data, null, 2));
-  return c.json(data, response.status);
+  return c.json(data, response.status as 200);
 });
 
 // Proxy assistants API
@@ -91,10 +134,13 @@ proxyRoutes.get("/assistants/cursor", authMiddleware, adminMiddleware, async (c)
     headers: PROXY_HEADERS,
   });
 
-  const data = await parseProxyResponse(response);
+  const data = mergeAssistantOverridesIntoCursorResponse(
+    await parseProxyResponse(response),
+    enterpriseIdForTenantCode(tenantId),
+  );
   console.log("响应状态:", response.status);
   console.log("响应数据:", JSON.stringify(data, null, 2));
-  return c.json(data, response.status);
+  return c.json(data, response.status as 200);
 });
 
 // Approve skill API
@@ -115,7 +161,7 @@ proxyRoutes.post("/skills/:skillId/approve", authMiddleware, adminMiddleware, as
   const data = await parseProxyResponse(response);
   console.log("响应状态:", response.status);
   console.log("响应数据:", JSON.stringify(data, null, 2));
-  return c.json(data, response.status);
+  return c.json(data, response.status as 200);
 });
 
 // Delete skill API
@@ -136,7 +182,7 @@ proxyRoutes.delete("/skills/:skillId", authMiddleware, adminMiddleware, async (c
   const data = await parseProxyResponse(response);
   console.log("响应状态:", response.status);
   console.log("响应数据:", JSON.stringify(data, null, 2));
-  return c.json(data, response.status);
+  return c.json(data, response.status as 200);
 });
 
 // Approve assistant API
@@ -157,7 +203,7 @@ proxyRoutes.post("/assistants/:assistantId/approve", authMiddleware, adminMiddle
   const data = await parseProxyResponse(response);
   console.log("响应状态:", response.status);
   console.log("响应数据:", JSON.stringify(data, null, 2));
-  return c.json(data, response.status);
+  return c.json(data, response.status as 200);
 });
 
 // Delete assistant API
@@ -178,7 +224,7 @@ proxyRoutes.delete("/assistants/:assistantId", authMiddleware, adminMiddleware, 
   const data = await parseProxyResponse(response);
   console.log("响应状态:", response.status);
   console.log("响应数据:", JSON.stringify(data, null, 2));
-  return c.json(data, response.status);
+  return c.json(data, response.status as 200);
 });
 
 export { proxyRoutes };

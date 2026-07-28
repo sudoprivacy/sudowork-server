@@ -187,6 +187,115 @@ interface EnterpriseAssistantMetaRow {
   acl_summary: AclSummary;
 }
 
+interface EnterpriseAssistantDetailPayload {
+  assistant?: Record<string, unknown> | null;
+  promptText?: string | null;
+  prompt_text?: string | null;
+  enhancement?: EnhancementInfo;
+  dataset_ids?: string[];
+  acl_summary?: AclSummary;
+}
+
+function readStringField(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[],
+): string | undefined {
+  if (!record) return undefined;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string") return value;
+  }
+  return undefined;
+}
+
+function readNullableStringField(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[],
+  fallback: string | null,
+): string | null {
+  if (!record) return fallback;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string") return value;
+    if (value === null) return null;
+  }
+  return fallback;
+}
+
+function readNumberField(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[],
+): number | undefined {
+  if (!record) return undefined;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+function readStringArrayField(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[],
+  fallback: string[],
+): string[] {
+  if (!record) return fallback;
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === "string");
+    }
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((item): item is string => typeof item === "string");
+        }
+      } catch {
+        return value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+    }
+  }
+  return fallback;
+}
+
+function mergeAssistantDetailRecord(
+  row: Assistant,
+  detail: Record<string, unknown> | null | undefined,
+): Assistant {
+  if (!detail) return row;
+  return {
+    ...row,
+    ...(detail as Partial<Assistant>),
+    id: readStringField(detail, ["id", "assistant_id"]) ?? row.id,
+    name: readStringField(detail, ["name", "display_name"]) ?? row.name,
+    profession: readStringField(detail, ["profession"]) ?? row.profession,
+    description: readStringField(detail, ["description"]) ?? row.description,
+    avatar: readNullableStringField(detail, ["avatar"], row.avatar),
+    categories: readStringArrayField(detail, ["categories"], row.categories ?? []),
+    defaultInitPrompt: readNullableStringField(
+      detail,
+      ["defaultInitPrompt", "default_init_prompt"],
+      row.defaultInitPrompt,
+    ),
+    promptFile: readNullableStringField(detail, ["promptFile", "prompt_file"], row.promptFile),
+    sourceUrl: readStringField(detail, ["sourceUrl", "source_url"]) ?? row.sourceUrl,
+    skills: readStringArrayField(detail, ["skills"], row.skills ?? []),
+    sortOrder: readNumberField(detail, ["sortOrder", "sort_order"]) ?? row.sortOrder,
+    status: readNumberField(detail, ["status"]) ?? row.status,
+    tenantId: readNullableStringField(detail, ["tenantId", "tenant_id"], row.tenantId),
+    createdAt: readStringField(detail, ["createdAt", "created_at"]) ?? row.createdAt,
+    updatedAt: readStringField(detail, ["updatedAt", "updated_at"]) ?? row.updatedAt,
+  };
+}
+
 const { Title, Text } = Typography;
 const { Search } = Input;
 const { Option } = Select;
@@ -198,7 +307,19 @@ interface SkillVersion {
   checksum: string;
   created_at: string;
   source_url: string;
+  sourceUrl?: string | null;
+  download_url?: string | null;
   version: string;
+}
+
+interface AssistantVersion {
+  changelog?: string | null;
+  checksum?: string | null;
+  created_at?: string | null;
+  source_url?: string | null;
+  sourceUrl?: string | null;
+  download_url?: string | null;
+  version?: string | null;
 }
 
 interface Skill {
@@ -231,13 +352,41 @@ interface Assistant {
   categories: string[];
   defaultInitPrompt: string | null;
   promptFile: string | null;
-  sourceUrl: string;
+  sourceUrl: string | null;
+  source_url?: string | null;
   skills: string[];
   sortOrder: number;
   status: number;
   tenantId: string | null;
   createdAt: string;
   updatedAt: string;
+  latestVersion?: AssistantVersion | null;
+  latest_version?: AssistantVersion | null;
+  version?: string | AssistantVersion | null;
+}
+
+function getAssistantLatestVersion(record: Assistant): AssistantVersion | null {
+  if (record.latestVersion) return record.latestVersion;
+  if (record.latest_version) return record.latest_version;
+  return typeof record.version === "object" && record.version ? record.version : null;
+}
+
+function getAssistantVersionText(record: Assistant): string {
+  const latest = getAssistantLatestVersion(record);
+  if (latest?.version) return latest.version;
+  return typeof record.version === "string" && record.version.trim() ? record.version : "-";
+}
+
+function getAssistantSourceUrl(record: Assistant): string | undefined {
+  const latest = getAssistantLatestVersion(record);
+  return (
+    latest?.source_url ||
+    latest?.sourceUrl ||
+    latest?.download_url ||
+    record.sourceUrl ||
+    record.source_url ||
+    undefined
+  );
 }
 
 interface Enterprise {
@@ -301,12 +450,18 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   const [editingRow, setEditingRow] = useState<Assistant | null>(null);
   const [drawerForm] = Form.useForm();
   const [savingDrawer, setSavingDrawer] = useState(false);
+  const [openingDrawerId, setOpeningDrawerId] = useState<string | null>(null);
   // Drawer/modal use destroyOnClose so the Form remounts on every open. That
   // means setFieldsValue called BEFORE setOpen(true) writes to a still-empty
   // form and gets dropped. Instead we snapshot the initial values into state
   // and pass them via Form's `initialValues` prop, which the freshly-mounted
   // form reads on registration.
   const [drawerInitialValues, setDrawerInitialValues] = useState<Record<string, unknown>>({});
+  const [editPromptFile, setEditPromptFile] = useState<UploadFile | null>(null);
+  const [editAvatarFile, setEditAvatarFile] = useState<UploadFile | null>(null);
+  const [editPromptInputMode, setEditPromptInputMode] = useState<"inline" | "upload">("inline");
+  const [editPromptText, setEditPromptText] = useState<string>("");
+  const [editPromptViewMode, setEditPromptViewMode] = useState<"edit" | "preview">("edit");
 
   // -- Picker data (users for ACL + datasets for binding) --
   const [users, setUsers] = useState<Array<{ id: number; phone: string; nickname: string }>>([]);
@@ -729,80 +884,131 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       message.error("请先选择企业");
       return;
     }
-    const enh = enhancementMap[record.id];
-    const acl = aclMap[record.id];
-    const initialDatasets = datasetMap[record.id] ?? [];
-    const initialKnowledgeMode: "none" | "datasets" | "enhancement" = enh?.enabled
-      ? "enhancement"
-      : initialDatasets.length > 0
-        ? "datasets"
-        : "none";
-    setDrawerInitialValues({
-      knowledge_mode: initialKnowledgeMode,
-      enhancement_mode: enh?.mode || "agent-chat",
-      acl_scope: acl?.scope || "all",
-      acl_user_ids: acl?.user_ids || [],
-      dataset_ids: initialDatasets,
-    });
-    setEditingRow(record);
-    setDrawerOpen(true);
+    setOpeningDrawerId(record.id);
+    try {
+      const response = (await adminApi.getEnterpriseAssistant(record.id, {
+        enterprise_id: selectedEnterpriseId,
+      })) as any;
+      if (!response?.success) {
+        throw new Error(response?.msg || "加载智能体详情失败");
+      }
+
+      const detail = (response.data || {}) as EnterpriseAssistantDetailPayload;
+      const mergedRecord = mergeAssistantDetailRecord(record, detail.assistant);
+      const enh = detail.enhancement ?? enhancementMap[record.id];
+      const acl = detail.acl_summary ?? aclMap[record.id];
+      const initialDatasets = detail.dataset_ids ?? datasetMap[record.id] ?? [];
+      const initialKnowledgeMode: "none" | "datasets" | "enhancement" = enh?.enabled
+        ? "enhancement"
+        : initialDatasets.length > 0
+          ? "datasets"
+          : "none";
+      const initialValues = {
+        name: mergedRecord.name,
+        profession: mergedRecord.profession,
+        description: mergedRecord.description || "",
+        default_init_prompt: mergedRecord.defaultInitPrompt || "",
+        categories: mergedRecord.categories || [],
+        knowledge_mode: initialKnowledgeMode,
+        enhancement_mode: enh?.mode || "agent-chat",
+        acl_scope: acl?.scope || "all",
+        acl_user_ids: acl?.user_ids || [],
+        dataset_ids: initialDatasets,
+      };
+
+      setDrawerInitialValues(initialValues);
+      drawerForm.setFieldsValue(initialValues);
+      setEditPromptFile(null);
+      setEditAvatarFile(null);
+      setEditPromptInputMode("inline");
+      setEditPromptText(detail.prompt_text ?? detail.promptText ?? "");
+      setEditPromptViewMode("edit");
+      setEditingRow(mergedRecord);
+      setDrawerOpen(true);
+      setTimeout(() => {
+        drawerForm.setFieldsValue(initialValues);
+      }, 0);
+    } catch (err: any) {
+      message.error(err?.response?.data?.msg || err?.message || "加载智能体详情失败");
+    } finally {
+      setOpeningDrawerId(null);
+    }
   };
 
   const saveDrawer = async () => {
     if (!editingRow || !selectedEnterpriseId) return;
     const values = await drawerForm.validateFields();
+    const prevEnh = enhancementMap[editingRow.id];
+    const prevDatasets = datasetMap[editingRow.id] ?? [];
+    const prevMode: "none" | "datasets" | "enhancement" = prevEnh?.enabled
+      ? "enhancement"
+      : prevDatasets.length > 0
+        ? "datasets"
+        : "none";
+    const nextMode: "none" | "datasets" | "enhancement" =
+      values.knowledge_mode || "none";
+    if (nextMode !== prevMode) {
+      message.error("增强方式创建后不允许修改");
+      return;
+    }
+    if (
+      prevMode === "enhancement" &&
+      prevEnh?.mode &&
+      values.enhancement_mode &&
+      values.enhancement_mode !== prevEnh.mode
+    ) {
+      message.error("增强模式创建后不允许修改");
+      return;
+    }
+
+    let promptFileToSend: File | undefined;
+    if (editPromptInputMode === "inline") {
+      if (editPromptText.trim()) {
+        const blob = new Blob([editPromptText], { type: "text/markdown" });
+        const baseName =
+          (typeof values.name === "string" && values.name.trim()) || editingRow.name || "prompt";
+        promptFileToSend = new File([blob], `${baseName}.md`, { type: "text/markdown" });
+      }
+    } else if (editPromptFile?.originFileObj) {
+      promptFileToSend = editPromptFile.originFileObj as File;
+    }
+
     setSavingDrawer(true);
     try {
-      // 2026-06-22 P2.5.1: knowledge_mode drives both enhancement and dataset
-      // attachment as mutually-exclusive branches. The server also enforces
-      // mutex but we have to apply the changes in the right order to avoid
-      // a transient conflicting state (e.g., enabling enhancement while
-      // datasets are still attached → server rejects).
-      const prevEnh = enhancementMap[editingRow.id];
-      const prevDatasets = datasetMap[editingRow.id] ?? [];
-      const prevMode: "none" | "datasets" | "enhancement" = prevEnh?.enabled
-        ? "enhancement"
-        : prevDatasets.length > 0
-          ? "datasets"
-          : "none";
-      const nextMode: "none" | "datasets" | "enhancement" =
-        values.knowledge_mode || "none";
-
-      // Step A: tear down the side that's switching off. This must happen
-      // before we set up the new side so the server's mutex check passes.
-      if (prevMode === "enhancement" && nextMode !== "enhancement") {
-        await adminApi.setEnterpriseAssistantEnhancement(editingRow.id, {
-          enable: false,
-          enterprise_id: selectedEnterpriseId,
-        });
+      const form = new FormData();
+      form.append("enterprise_id", String(selectedEnterpriseId));
+      form.append("name", values.name);
+      form.append("profession", values.profession);
+      form.append("description", values.description || "");
+      form.append("default_init_prompt", values.default_init_prompt || "");
+      form.append("categories", JSON.stringify(values.categories || []));
+      form.append("skills", JSON.stringify(editingRow.skills || []));
+      if (promptFileToSend) {
+        form.append("prompt_file", promptFileToSend, promptFileToSend.name);
       }
-      if (prevMode === "datasets" && nextMode !== "datasets") {
-        await adminApi.setAgentDatasets(editingRow.id, [], selectedEnterpriseId);
+      if (editAvatarFile?.originFileObj) {
+        form.append("avatar", editAvatarFile.originFileObj as File, editAvatarFile.name);
+      }
+      const updateRes: any = await adminApi.updateEnterpriseAssistant(editingRow.id, form);
+      if (!updateRes?.success) {
+        throw new Error(updateRes?.msg || "基础信息保存失败");
       }
 
-      // Step B: set up the new side.
-      if (nextMode === "enhancement") {
-        const modeChanged = prevEnh?.mode !== values.enhancement_mode;
-        if (prevMode !== "enhancement" || modeChanged) {
-          await adminApi.setEnterpriseAssistantEnhancement(editingRow.id, {
-            enable: true,
-            mode: values.enhancement_mode,
-            enterprise_id: selectedEnterpriseId,
-          });
-        }
-      } else if (nextMode === "datasets") {
+      // Enhancement method is immutable in edit mode. Only the dataset list
+      // inside an already dataset-backed assistant remains editable.
+      if (prevMode === "datasets") {
         const desired: string[] = Array.isArray(values.dataset_ids)
           ? values.dataset_ids
           : [];
         const changed =
           desired.length !== prevDatasets.length ||
           desired.some((id, idx) => prevDatasets[idx] !== id);
-        if (prevMode !== "datasets" || changed) {
+        if (changed) {
           await adminApi.setAgentDatasets(editingRow.id, desired, selectedEnterpriseId);
         }
       }
 
-      // Step C: ACL (independent of knowledge dimension).
+      // ACL is independent of knowledge dimension.
       const aclEntries =
         values.acl_scope === "specific"
           ? (values.acl_user_ids || []).map((id: string) => ({
@@ -820,7 +1026,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       // can't tell the save took effect.
       setAnnotationsTick((t) => t + 1);
     } catch (err: any) {
-      message.error(err?.message || "保存失败");
+      message.error(err?.response?.data?.msg || err?.message || "保存失败");
     } finally {
       setSavingDrawer(false);
     }
@@ -1116,7 +1322,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       title: "版本",
       key: "version",
       width: 100,
-      render: () => "-",
+      render: (_, record) => getAssistantVersionText(record),
     },
     {
       title: "分类",
@@ -1182,6 +1388,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
             size="small"
             icon={<SettingOutlined />}
             disabled={difyDisabled}
+            loading={openingDrawerId === record.id}
             onClick={() => openEditDrawer(record)}
           >
             编辑
@@ -1208,12 +1415,12 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               审批发布
             </Button>
           )}
-          {record.sourceUrl && (
+          {getAssistantSourceUrl(record) && (
             <Button
               type="link"
               size="small"
               icon={<DownloadOutlined />}
-              onClick={() => triggerDownload(record.sourceUrl, `${record.name || "assistant"}.zip`)}
+              onClick={() => triggerDownload(getAssistantSourceUrl(record), `${record.name || "assistant"}.zip`)}
             >
               下载
             </Button>
@@ -1266,7 +1473,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       <Descriptions bordered column={1} size="small">
         <Descriptions.Item label="名称">{record.name}</Descriptions.Item>
         <Descriptions.Item label="职业">{formatValue(record.profession)}</Descriptions.Item>
-        <Descriptions.Item label="版本">-</Descriptions.Item>
+        <Descriptions.Item label="版本">{getAssistantVersionText(record)}</Descriptions.Item>
         <Descriptions.Item label="状态">
           <Tag color={getStatusColor(record.status)}>{getStatusLabel(record.status)}</Tag>
         </Descriptions.Item>
@@ -1284,7 +1491,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           {record.skills?.length ? record.skills.join(", ") : "-"}
         </Descriptions.Item>
         <Descriptions.Item label="租户">{formatValue(record.tenantId)}</Descriptions.Item>
-        <Descriptions.Item label="资源地址">{formatValue(record.sourceUrl)}</Descriptions.Item>
+        <Descriptions.Item label="资源地址">{formatValue(getAssistantSourceUrl(record))}</Descriptions.Item>
         <Descriptions.Item label="创建时间">{formatValue(record.createdAt)}</Descriptions.Item>
         <Descriptions.Item label="更新时间">{formatValue(record.updatedAt)}</Descriptions.Item>
       </Descriptions>
@@ -1453,12 +1660,12 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               >
                 下载资源
               </Button>
-            ) : !isSkillsPage && (detailRecord as Assistant).sourceUrl ? (
+            ) : !isSkillsPage && getAssistantSourceUrl(detailRecord as Assistant) ? (
               <Button
                 key="download"
                 icon={<DownloadOutlined />}
                 onClick={() =>
-                  triggerDownload((detailRecord as Assistant).sourceUrl, `${(detailRecord as Assistant).name}.zip`)
+                  triggerDownload(getAssistantSourceUrl(detailRecord as Assistant), `${(detailRecord as Assistant).name}.zip`)
                 }
               >
                 下载资源
@@ -1808,7 +2015,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           title={editingRow ? `编辑：${editingRow.name}` : ""}
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
-          width={520}
+          width={720}
           destroyOnClose
           extra={
             <Button type="primary" loading={savingDrawer} onClick={saveDrawer}>
@@ -1822,13 +2029,157 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               layout="vertical"
               initialValues={drawerInitialValues}
             >
+              <SectionTitle icon={<ProfileOutlined />} text="基础信息" />
+              <Form.Item name="name" label="智能体名称" rules={[{ required: true }]}>
+                <Input placeholder="例如 recruitment_expert" />
+              </Form.Item>
+              <Form.Item name="profession" label="职业 / 角色" rules={[{ required: true }]}>
+                <Input placeholder="例如 招聘专家" />
+              </Form.Item>
+              <Form.Item name="description" label="描述">
+                <Input.TextArea rows={2} />
+              </Form.Item>
+              <Form.Item name="default_init_prompt" label="默认问候语">
+                <Input.TextArea rows={2} />
+              </Form.Item>
+              <Form.Item name="categories" label="分类">
+                <Select mode="tags" placeholder="按回车添加" />
+              </Form.Item>
+              <Form.Item label="提示词 (.md)">
+                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                  <Radio.Group
+                    value={editPromptInputMode}
+                    onChange={(e) => setEditPromptInputMode(e.target.value)}
+                    optionType="button"
+                    buttonStyle="solid"
+                    size="small"
+                    options={[
+                      { label: "内联编辑", value: "inline" },
+                      { label: "上传文件", value: "upload" },
+                    ]}
+                  />
+                  {editPromptInputMode === "inline" ? (
+                    <div
+                      style={{
+                        border: "1px solid var(--ant-color-border, #d9d9d9)",
+                        borderRadius: 6,
+                        overflow: "hidden",
+                        height: 220,
+                        display: "flex",
+                        flexDirection: "column",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          height: 36,
+                          borderBottom: "1px solid var(--ant-color-border, #d9d9d9)",
+                          background: "var(--ant-color-fill-quaternary, #fafafa)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {(["edit", "preview"] as const).map((m) => (
+                          <div
+                            key={m}
+                            onClick={() => setEditPromptViewMode(m)}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              padding: "0 16px",
+                              height: "100%",
+                              cursor: "pointer",
+                              fontSize: 13,
+                              fontWeight: 500,
+                              color:
+                                editPromptViewMode === m
+                                  ? "var(--ant-color-primary, #1677ff)"
+                                  : "var(--ant-color-text-secondary, #666)",
+                              borderBottom:
+                                editPromptViewMode === m
+                                  ? "2px solid var(--ant-color-primary, #1677ff)"
+                                  : "2px solid transparent",
+                              background:
+                                editPromptViewMode === m
+                                  ? "var(--ant-color-bg-container, #fff)"
+                                  : "transparent",
+                              transition: "all 0.15s",
+                            }}
+                          >
+                            {m === "edit" ? "Edit" : "Preview"}
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+                        {editPromptViewMode === "edit" ? (
+                          <Input.TextArea
+                            value={editPromptText}
+                            onChange={(e) => setEditPromptText(e.target.value)}
+                            placeholder="填写后会替换当前提示词；留空则保持当前提示词"
+                            autoSize={false}
+                            style={{
+                              border: "none",
+                              borderRadius: 0,
+                              height: "100%",
+                              resize: "none",
+                              fontFamily:
+                                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                              fontSize: 13,
+                              lineHeight: 1.6,
+                              background: "transparent",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            className="prompt-md-preview"
+                            style={{ padding: 16, fontSize: 13, lineHeight: 1.7 }}
+                          >
+                            {editPromptText.trim() ? (
+                              <ReactMarkdown>{editPromptText}</ReactMarkdown>
+                            ) : (
+                              <Text
+                                type="secondary"
+                                style={{ display: "block", textAlign: "center", padding: "32px 0" }}
+                              >
+                                无内容可预览
+                              </Text>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <Upload
+                      accept=".md,text/markdown"
+                      maxCount={1}
+                      beforeUpload={() => false}
+                      fileList={editPromptFile ? [editPromptFile] : []}
+                      onChange={({ fileList }) => setEditPromptFile(fileList[0] || null)}
+                    >
+                      <Button icon={<UploadOutlined />}>选择文件</Button>
+                    </Upload>
+                  )}
+                </Space>
+              </Form.Item>
+              <Form.Item label="头像 (.png)">
+                <Upload
+                  accept=".png,image/png"
+                  maxCount={1}
+                  beforeUpload={() => false}
+                  fileList={editAvatarFile ? [editAvatarFile] : []}
+                  onChange={({ fileList }) => setEditAvatarFile(fileList[0] || null)}
+                >
+                  <Button icon={<UploadOutlined />}>选择头像</Button>
+                </Upload>
+              </Form.Item>
+
               <SectionTitle icon={<ThunderboltOutlined />} text="知识增强" color="#fa8c16" />
               <Form.Item
                 name="knowledge_mode"
                 label="增强方式"
-                tooltip="纯知识库与 Dify 增强互斥；切换时会先解除旧绑定，再建立新绑定"
+                tooltip="增强方式创建后不允许修改"
               >
                 <Radio.Group
+                  disabled
                   options={[
                     { label: "不启用", value: "none" },
                     { label: "启用知识库（纯检索）", value: "datasets" },
@@ -1860,30 +2211,16 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                     );
                   }
                   if (km === "enhancement") {
-                    // Lock the mode select when the assistant already has a
-                    // Dify App bound. Switching Agent ↔ Workflow on the Dify
-                    // side means a different App entity (different Studio
-                    // page, different runtime endpoint), and "in-place
-                    // conversion" doesn't exist there — flipping the value
-                    // would silently leave the old App orphaned. The escape
-                    // hatch is to first switch this radio to "不启用" (which
-                    // deletes the App) and save, then come back and pick a
-                    // new mode.
-                    const modeLocked = !!enhancementMap[editingRow.id]?.enabled;
                     return (
                       <>
                         <Form.Item
                           name="enhancement_mode"
                           label="增强模式"
                           rules={[{ required: true }]}
-                          tooltip={
-                            modeLocked
-                              ? "已创建的 Dify 增强智能体不允许直接切换 Agent / Workflow（两者在 Dify 中是不同应用类型，无法直接转换）。"
-                              : undefined
-                          }
+                          tooltip="增强模式创建后不允许修改"
                         >
                           <Select
-                            disabled={modeLocked}
+                            disabled
                             options={[
                               { label: ENH_MODE_LABEL["agent-chat"], value: "agent-chat" },
                               { label: ENH_MODE_LABEL.workflow, value: "workflow" },
