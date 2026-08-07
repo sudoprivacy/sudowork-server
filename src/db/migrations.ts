@@ -44,6 +44,21 @@ export function runMigrations(): void {
   // properly-scoped 'app' type token instead of the tenant-wide 'dataset'
   // token (which Dify rejects with 401 for app endpoints).
   addColumnIfNotExists("dify_app_binding", "app_api_key", "TEXT");
+
+  // Credit application workflow
+  addColumnIfNotExists(
+    "admin_recharge_records",
+    "source",
+    "TEXT DEFAULT 'ADMIN_MANUAL'",
+  );
+  addColumnIfNotExists("admin_recharge_records", "source_id", "INTEGER");
+  createCreditApplicationsTable();
+  createCreditApplicationRechargeRecordIndex();
+  insertSystemConfigIfMissing("recharge_mode", "pay");
+  insertSystemConfigIfMissing(
+    "credit_application",
+    '{"min_points":100,"max_points":1000000,"allow_duplicate_pending":false}',
+  );
 }
 
 /**
@@ -177,5 +192,52 @@ function createThirdPartyAuthTables(): void {
   );
   db.run(
     `CREATE INDEX IF NOT EXISTS idx_third_party_auth_handoffs_expires_at ON third_party_auth_handoffs(expires_at)`,
+  );
+}
+
+function createCreditApplicationsTable(): void {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS credit_applications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      application_no TEXT UNIQUE NOT NULL,
+      user_id INTEGER NOT NULL,
+      enterprise_id INTEGER,
+      requested_points INTEGER NOT NULL,
+      approved_points INTEGER,
+      quota_amount INTEGER,
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      admin_id INTEGER,
+      admin_comment TEXT,
+      sudorouter_user_id INTEGER,
+      sudorouter_success BOOLEAN DEFAULT FALSE,
+      sudorouter_error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id),
+      FOREIGN KEY (admin_id) REFERENCES users(id)
+    );
+  `);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_credit_applications_user_id ON credit_applications(user_id)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_credit_applications_status ON credit_applications(status)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_credit_applications_created_at ON credit_applications(created_at)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_credit_applications_application_no ON credit_applications(application_no)`,
+  );
+}
+
+function createCreditApplicationRechargeRecordIndex(): void {
+  db.run(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_recharge_records_credit_application_once
+     ON admin_recharge_records(source, source_id)
+     WHERE source = 'CREDIT_APPLICATION' AND source_id IS NOT NULL`,
   );
 }

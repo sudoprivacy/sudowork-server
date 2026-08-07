@@ -402,15 +402,25 @@ rechargeRoutes.get("/recharge-records", authMiddleware, adminMiddleware, async (
       NULL as amount_cny,
       NULL as payment_method,
       arr.created_at,
-      arr.created_at as processed_at,
-      a.nickname as admin_nickname,
-      arr.reason,
-      arr.payment_reference
-    FROM admin_recharge_records arr
-    LEFT JOIN users u ON arr.user_id = u.id
-    LEFT JOIN users a ON arr.admin_id = a.id
-    WHERE 1=1
-  `;
+	      arr.created_at as processed_at,
+	      a.nickname as admin_nickname,
+	      arr.reason,
+	      arr.payment_reference,
+	      arr.source,
+	      arr.source_id,
+	      ca.application_no,
+	      ca.requested_points,
+	      ca.approved_points,
+	      ca.reason as application_reason,
+	      ca.admin_comment
+	    FROM admin_recharge_records arr
+	    LEFT JOIN users u ON arr.user_id = u.id
+	    LEFT JOIN users a ON arr.admin_id = a.id
+	    LEFT JOIN credit_applications ca
+	      ON arr.source = 'CREDIT_APPLICATION'
+	     AND arr.source_id = ca.id
+	    WHERE 1=1
+	  `;
   const adminParams: any[] = [];
 
   if (keyword) {
@@ -450,10 +460,26 @@ rechargeRoutes.get("/recharge-records", authMiddleware, adminMiddleware, async (
     quota: r.quota,
     amount_cny: r.amount_cny,
     payment_method: r.payment_method,
-    admin_nickname: r.admin_nickname || null,
-    reason: r.reason || null,
-    created_at: r.created_at,
-  }));
+	    admin_nickname: r.admin_nickname || null,
+	    reason: r.reason || null,
+	    created_at: r.created_at,
+	    source: r.type === "ADMIN" ? r.source || "ADMIN_MANUAL" : null,
+	    source_text:
+	      r.type === "ADMIN"
+	        ? r.source === "CREDIT_APPLICATION"
+	          ? "积分申请审批发放"
+	          : "后台手工充值"
+	        : null,
+	    application_id:
+	      r.type === "ADMIN" && r.source === "CREDIT_APPLICATION"
+	        ? r.source_id
+	        : null,
+	    application_no: r.application_no || null,
+	    requested_points: r.requested_points || null,
+	    approved_points: r.approved_points || null,
+	    application_reason: r.application_reason || null,
+	    admin_comment: r.admin_comment || null,
+	  }));
 
   return c.json({
     success: true,

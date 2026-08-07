@@ -88,6 +88,46 @@ export interface LedgerEntry {
   timestamp: string;
 }
 
+// ==================== Credit Application Types ====================
+
+export type RechargeMode = "pay" | "approve" | "disabled";
+
+export type CreditApplicationStatus =
+  | "PENDING"
+  | "PROCESSING"
+  | "APPROVED"
+  | "REJECTED"
+  | "SYNC_FAILED"
+  | "SYNC_UNKNOWN";
+
+export interface CreditApplication {
+  id: number;
+  application_no: string;
+  user_id: number;
+  enterprise_id: number | null;
+  requested_points: number;
+  approved_points: number | null;
+  quota_amount: number | null;
+  reason: string | null;
+  status: CreditApplicationStatus;
+  admin_id: number | null;
+  admin_comment: string | null;
+  sudorouter_user_id: number | null;
+  sudorouter_success: boolean;
+  sudorouter_error: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+  updated_at: string;
+}
+
+export interface CreditApplicationWithUser extends CreditApplication {
+  user_phone: string | null;
+  user_nickname: string | null;
+  enterprise_name: string | null;
+  admin_phone: string | null;
+  admin_nickname: string | null;
+}
+
 // ==================== Enterprise Types ====================
 
 export interface Enterprise {

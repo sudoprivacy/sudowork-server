@@ -12,6 +12,7 @@ import { syncRoutes } from './sync.js';
 import { configItemsRoutes } from './config-items.js';
 import { uploadRoutes } from './upload.js';
 import { usersPasswordRoutes } from './users-password.js';
+import { adminCreditApplicationRoutes } from './credit-applications.js';
 
 const adminRoutes = new Hono();
 
@@ -24,5 +25,6 @@ adminRoutes.route('/', syncRoutes);
 adminRoutes.route('/', configItemsRoutes);
 adminRoutes.route('/', uploadRoutes);
 adminRoutes.route('/', usersPasswordRoutes);
+adminRoutes.route('/', adminCreditApplicationRoutes);
 
 export { adminRoutes };

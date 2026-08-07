@@ -19,6 +19,8 @@ const VERSION_UPDATE_KEY = "version_update";
 const PRODUCT_IMPROVEMENT_KEY = "product_improvement";
 const THIRD_PARTY_AUTH_KEY = "third_party_auth";
 const SCODE_AUTO_MODEL_KEY = "scode_auto_model";
+const RECHARGE_MODE_KEY = "recharge_mode";
+const CREDIT_APPLICATION_KEY = "credit_application";
 const DEFAULT_COMAC_SERVER_CALLBACK_URL =
   "http://127.0.0.1:3000/api/v1/auth/third-party/cas/callback/comac_cas";
 const DEFAULT_COMAC_LOGOUT_SERVICE_URL =
@@ -75,6 +77,20 @@ export interface ThirdPartyAuthConfig {
   default_provider: string;
   providers: ThirdPartyAuthProviderConfig[];
 }
+
+export type RechargeMode = "pay" | "approve" | "disabled";
+
+export interface CreditApplicationConfig {
+  min_points: number;
+  max_points: number;
+  allow_duplicate_pending: boolean;
+}
+
+const DEFAULT_CREDIT_APPLICATION_CONFIG: CreditApplicationConfig = {
+  min_points: 100,
+  max_points: 1000000,
+  allow_duplicate_pending: false,
+};
 
 const DEFAULT_THIRD_PARTY_AUTH_CONFIG: ThirdPartyAuthConfig = {
   enabled: 1,
@@ -315,6 +331,41 @@ export class SystemConfigService {
     );
   }
 
+  getRechargeMode(): RechargeMode {
+    const row = db
+      .prepare("SELECT value FROM system_config WHERE key = ?")
+      .get(RECHARGE_MODE_KEY) as { value: string } | undefined;
+    return this.normalizeRechargeMode(row?.value);
+  }
+
+  setRechargeMode(value: unknown): void {
+    this.insertOrUpdateStringConfig(
+      RECHARGE_MODE_KEY,
+      this.normalizeRechargeMode(value),
+    );
+  }
+
+  normalizeRechargeMode(value: unknown): RechargeMode {
+    return value === "approve" || value === "disabled" || value === "pay"
+      ? value
+      : "pay";
+  }
+
+  getCreditApplicationConfig(): CreditApplicationConfig {
+    const raw = this.getJsonConfig<Partial<CreditApplicationConfig>>(
+      CREDIT_APPLICATION_KEY,
+      DEFAULT_CREDIT_APPLICATION_CONFIG,
+    );
+    return this.normalizeCreditApplicationConfig(raw);
+  }
+
+  setCreditApplicationConfig(value: Partial<CreditApplicationConfig>): void {
+    this.setJsonConfig(
+      CREDIT_APPLICATION_KEY,
+      this.normalizeCreditApplicationConfig(value),
+    );
+  }
+
   normalizeThirdPartyAuth(value: unknown): ThirdPartyAuthConfig {
     const raw =
       value && typeof value === "object"
@@ -541,6 +592,27 @@ export class SystemConfigService {
     if (result.changes === 0) {
       this.insertConfigValue(key, value);
     }
+  }
+
+  private normalizeCreditApplicationConfig(
+    value: Partial<CreditApplicationConfig>,
+  ): CreditApplicationConfig {
+    const minPoints = Number(value.min_points);
+    const normalizedMin =
+      Number.isInteger(minPoints) && minPoints > 0
+        ? minPoints
+        : DEFAULT_CREDIT_APPLICATION_CONFIG.min_points;
+    const maxPoints = Number(value.max_points);
+    const normalizedMax =
+      Number.isInteger(maxPoints) && maxPoints >= normalizedMin
+        ? maxPoints
+        : DEFAULT_CREDIT_APPLICATION_CONFIG.max_points;
+
+    return {
+      min_points: normalizedMin,
+      max_points: normalizedMax,
+      allow_duplicate_pending: value.allow_duplicate_pending === true,
+    };
   }
 
   private normalizePath(value: unknown, fallback: string): string {
