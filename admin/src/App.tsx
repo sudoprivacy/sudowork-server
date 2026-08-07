@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -27,13 +27,13 @@ import {
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import EnterpriseList from "./pages/EnterpriseList";
-import UserList from "./pages/UserList";
 import UserManagement from "./pages/UserManagement";
 import SystemConfig from "./pages/SystemConfig";
 import InvitationCodeList from "./pages/InvitationCodeList";
 import OperationLogs from "./pages/OperationLogs";
 import RechargeList from "./pages/RechargeList";
 import RechargeRecords from "./pages/RechargeRecords";
+import CreditApplications from "./pages/CreditApplications";
 import ConfigItemList from "./pages/ConfigItemList";
 import SkillsList from "./pages/SkillsList";
 import DatasetsList from "./pages/DatasetsList";
@@ -49,14 +49,22 @@ import QmsSystem from "./pages/qms/System";
 import QmsUserStats from "./pages/qms/UserStats";
 import "antd/dist/reset.css";
 import "./components/Layout.css";
+import { adminApi } from "./api";
 
 const { Sider, Content, Header } = Layout;
 
 type Role = "SUPER_ADMIN" | "ENTERPRISE_ADMIN" | "USER";
+type RechargeMode = "pay" | "approve" | "disabled";
 
 interface AdminUser {
   role?: Role;
   nickname?: string;
+}
+
+interface SystemConfigResponse {
+  data?: {
+    recharge_mode?: unknown;
+  };
 }
 
 interface MenuItemConfig {
@@ -150,6 +158,21 @@ const MainLayout = () => {
   const userRole: Role = user.role || "USER";
   const isQmsPage = location.pathname === "/qms" || location.pathname.startsWith("/qms/");
   const canSelectQmsTenant = isQmsPage && userRole === "SUPER_ADMIN";
+  const [rechargeMode, setRechargeMode] = useState<RechargeMode>("pay");
+
+  useEffect(() => {
+    adminApi
+      .getSystemConfig()
+      .then((response: SystemConfigResponse) => {
+        const mode = response?.data?.recharge_mode;
+        setRechargeMode(
+          mode === "approve" || mode === "disabled" ? mode : "pay",
+        );
+      })
+      .catch(() => {
+        setRechargeMode("pay");
+      });
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem("admin_token");
@@ -170,6 +193,15 @@ const MainLayout = () => {
       }
       return item;
     });
+
+  if (rechargeMode === "approve" && (userRole === "SUPER_ADMIN" || userRole === "ENTERPRISE_ADMIN")) {
+    visibleMenuConfig.push({
+      key: "/credit-applications",
+      icon: <PayCircleOutlined />,
+      label: "积分申请",
+      roles: ["SUPER_ADMIN", "ENTERPRISE_ADMIN"],
+    });
+  }
 
   const menuItems: MenuProps["items"] = visibleMenuConfig.map((item) => ({
     key: item.key,
@@ -281,6 +313,7 @@ const App = () => {
           <Route path="qms/system" element={<QmsSystem />} />
           <Route path="orders" element={<RechargeList />} />
           <Route path="recharge-records" element={<RechargeRecords />} />
+          <Route path="credit-applications" element={<CreditApplications />} />
           <Route path="invitation-codes" element={<InvitationCodeList />} />
           <Route path="logs" element={<OperationLogs />} />
           <Route path="system-config" element={<SystemConfig />} />

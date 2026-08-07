@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Card, Table, Tag, Space, Button, message, Form, Input, Select } from "antd";
+import type { TablePaginationConfig } from "antd";
 import { ReloadOutlined, AlipayCircleOutlined, WechatOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { adminApi } from "../api";
@@ -16,7 +17,31 @@ interface RechargeRecord {
   payment_method: string | null;
   admin_nickname: string | null;
   reason: string | null;
+  source: "ADMIN_MANUAL" | "CREDIT_APPLICATION" | null;
+  source_text: string | null;
+  application_id: number | null;
+  application_no: string | null;
+  requested_points: number | null;
+  approved_points: number | null;
+  application_reason: string | null;
+  admin_comment: string | null;
   created_at: string;
+}
+
+interface IRechargeRecordFilters {
+  keyword?: string;
+  type?: string;
+  payment_method?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+interface IRechargeRecordsResponse {
+  success?: boolean;
+  data?: {
+    list?: RechargeRecord[];
+    total?: number;
+  };
 }
 
 const RechargeRecords: React.FC = () => {
@@ -25,29 +50,29 @@ const RechargeRecords: React.FC = () => {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const [filterForm] = Form.useForm();
 
-  const loadRecords = async (params?: { keyword?: string; type?: string; payment_method?: string; page?: number; pageSize?: number }) => {
+  const loadRecords = useCallback(async (params?: IRechargeRecordFilters) => {
     setLoading(true);
     try {
       const response = await adminApi.getRechargeRecords({
-        page: params?.page ?? pagination.current,
-        pageSize: params?.pageSize ?? pagination.pageSize,
+        page: params?.page ?? 1,
+        pageSize: params?.pageSize ?? 20,
         keyword: params?.keyword,
         type: params?.type,
         payment_method: params?.payment_method,
-      });
-      if ((response as any).success) {
-        setRecords((response as any).data.list || []);
+      }) as IRechargeRecordsResponse;
+      if (response.success) {
+        setRecords(response.data?.list || []);
         setPagination((prev) => ({
           ...prev,
-          total: (response as any).data.total || 0,
+          total: response.data?.total || 0,
         }));
       }
-    } catch (error) {
+    } catch {
       message.error("加载充值记录失败");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const handleFilterSearch = () => {
     const values = filterForm.getFieldsValue();
@@ -71,11 +96,15 @@ const RechargeRecords: React.FC = () => {
   };
 
   useEffect(() => {
-    loadRecords();
-  }, []);
+    void loadRecords();
+  }, [loadRecords]);
 
-  const handleTableChange = (pag: any) => {
-    setPagination(pag);
+  const handleTableChange = (pag: TablePaginationConfig) => {
+    setPagination((prev) => ({
+      current: pag.current ?? prev.current,
+      pageSize: pag.pageSize ?? prev.pageSize,
+      total: pag.total ?? prev.total,
+    }));
     const values = filterForm.getFieldsValue();
     loadRecords({
       page: pag.current,
@@ -86,9 +115,14 @@ const RechargeRecords: React.FC = () => {
     });
   };
 
-  const typeConfig = {
-    CLIENT: { color: "blue", text: "客户端充值" },
-    ADMIN: { color: "green", text: "后台充值" },
+	  const typeConfig = {
+	    CLIENT: { color: "blue", text: "客户端充值" },
+	    ADMIN: { color: "green", text: "后台充值" },
+	  };
+
+  const sourceConfig = {
+    ADMIN_MANUAL: { color: "green", text: "后台手工充值" },
+    CREDIT_APPLICATION: { color: "purple", text: "积分申请审批发放" },
   };
 
   const payTypeConfig: Record<string, { icon: React.ReactNode; color: string; text: string }> = {
@@ -110,7 +144,7 @@ const RechargeRecords: React.FC = () => {
       title: "用户",
       key: "user",
       width: 140,
-      render: (_: any, record: RechargeRecord) => (
+      render: (_: unknown, record: RechargeRecord) => (
         <div>
           <div style={{ fontWeight: 500 }}>{record.user_nickname || record.user_phone}</div>
           {record.user_nickname && (
@@ -170,8 +204,8 @@ const RechargeRecords: React.FC = () => {
         return <code style={{ fontSize: 12, color: "#165DFF" }}>{val}</code>;
       },
     },
-    {
-      title: "操作人",
+	    {
+	      title: "操作人",
       dataIndex: "admin_nickname",
       key: "admin_nickname",
       width: 100,
@@ -179,10 +213,31 @@ const RechargeRecords: React.FC = () => {
         if (record.type === "CLIENT") return "-";
         return val || "管理员";
       },
-    },
+	    },
     {
-      title: "原因/备注",
-      dataIndex: "reason",
+      title: "来源",
+      dataIndex: "source",
+      key: "source",
+      width: 170,
+      render: (val: RechargeRecord["source"], record: RechargeRecord) => {
+        if (record.type !== "ADMIN") return "-";
+        const source = val || "ADMIN_MANUAL";
+        const config = sourceConfig[source];
+        return (
+          <Space direction="vertical" size={0}>
+            <Tag color={config.color}>{record.source_text || config.text}</Tag>
+            {record.application_no && (
+              <code style={{ fontSize: 12, color: "#722ed1" }}>
+                {record.application_no}
+              </code>
+            )}
+          </Space>
+        );
+      },
+    },
+	    {
+	      title: "原因/备注",
+	      dataIndex: "reason",
       key: "reason",
       width: 150,
       ellipsis: true,

@@ -4,8 +4,13 @@
 
 import { Hono } from "hono";
 import { db } from "../db/index.js";
-import { authMiddleware, adminMiddleware } from "../middleware/auth.js";
+import {
+  authMiddleware,
+  adminMiddleware,
+  getAuthUser,
+} from "../middleware/auth.js";
 import { system as difySystem } from "../services/DifyClient.js";
+import type { User } from "../types/index.js";
 
 const adminEnterpriseRoutes = new Hono();
 
@@ -15,9 +20,21 @@ adminEnterpriseRoutes.get(
   authMiddleware,
   adminMiddleware,
   async (c) => {
+    const adminUser = (await getAuthUser(c)) as User;
+    const params: any[] = [];
+    let where = "";
+    if (adminUser.role === "ENTERPRISE_ADMIN") {
+      if (adminUser.enterprise_id == null) {
+        where = "WHERE 1 = 0";
+      } else {
+        where = "WHERE id = ?";
+        params.push(adminUser.enterprise_id);
+      }
+    }
+
     const enterprises = db
-      .prepare("SELECT id, name, code, credit_pool, logo, app_name, top_name, about_name, app_company_name, login_desp FROM enterprises ORDER BY id DESC")
-      .all();
+      .prepare(`SELECT id, name, code, credit_pool, logo, app_name, top_name, about_name, app_company_name, login_desp FROM enterprises ${where} ORDER BY id DESC`)
+      .all(...params);
 
     // Get user count for each enterprise
     const enterprisesWithCount = (enterprises as any[]).map((ent) => {

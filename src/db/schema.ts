@@ -250,10 +250,38 @@ export function initSchema(): void {
       sudorouter_user_id INTEGER,
       sudorouter_success BOOLEAN DEFAULT TRUE,
       sudorouter_error TEXT,
+      source TEXT DEFAULT 'ADMIN_MANUAL',
+      source_id INTEGER,
 
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
       FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (admin_id) REFERENCES users(id)
+    );
+  `);
+
+  // Credit application table (积分申请表)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS credit_applications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      application_no TEXT UNIQUE NOT NULL,
+      user_id INTEGER NOT NULL,
+      enterprise_id INTEGER,
+      requested_points INTEGER NOT NULL,
+      approved_points INTEGER,
+      quota_amount INTEGER,
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      admin_id INTEGER,
+      admin_comment TEXT,
+      sudorouter_user_id INTEGER,
+      sudorouter_success BOOLEAN DEFAULT FALSE,
+      sudorouter_error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      FOREIGN KEY (enterprise_id) REFERENCES enterprises(id),
       FOREIGN KEY (admin_id) REFERENCES users(id)
     );
   `);
@@ -320,7 +348,6 @@ export function initSchema(): void {
   db.run(
     `CREATE INDEX IF NOT EXISTS idx_admin_recharge_records_created_at ON admin_recharge_records(created_at)`,
   );
-
   // ============================================
   // Config Items System Tables (配置项管理系统)
   // ============================================

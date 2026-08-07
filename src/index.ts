@@ -20,6 +20,7 @@ import { thirdPartyAuthRoutes } from "./routes/auth-third-party.js";
 import { userRoutes } from "./routes/user.js";
 import { miscRoutes } from "./routes/misc.js";
 import { rechargeRoutes } from "./routes/recharge.js";
+import { creditApplicationRoutes } from "./routes/credit-applications.js";
 import { proxyRoutes } from "./routes/external-proxy.js";
 import { systemConfigRoutes } from "./routes/system-config.js";
 import { adminDifyRoutes } from "./routes/admin-dify.js";
@@ -94,6 +95,7 @@ app.route("/api/v1/auth", authChangePasswordRoutes);
 app.route("/api/v1/auth", authRegisterPasswordRoutes);
 app.route("/api/v1/user", userRoutes);
 app.route("/api/v1/recharge", rechargeRoutes);
+app.route("/api/v1/credit-applications", creditApplicationRoutes);
 if (qmsEnabled) {
   const qmsApp = new Hono();
 

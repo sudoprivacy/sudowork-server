@@ -58,6 +58,8 @@ const PUBLIC_CONFIG: Record<string, () => unknown> = {
     (process.env.SKILLHUB_BASE_URL || "").replace(/\/+$/, ""),
   scode_auto_model: () => systemConfigService.getScodeAutoModel(),
   third_party_auth: () => systemConfigService.getPublicThirdPartyAuth(),
+  recharge_mode: () => systemConfigService.getRechargeMode(),
+  credit_application: () => systemConfigService.getCreditApplicationConfig(),
 };
 
 function validateThirdPartyAuthConfig(
@@ -183,6 +185,8 @@ systemConfigRoutes.get(
         version_update: systemConfigService.getVersionUpdate(),
         product_improvement: systemConfigService.getProductImprovement(),
         scode_auto_model: systemConfigService.getScodeAutoModel(),
+        recharge_mode: systemConfigService.getRechargeMode(),
+        credit_application: systemConfigService.getCreditApplicationConfig(),
       },
     });
   },
@@ -245,6 +249,24 @@ systemConfigRoutes.put(
       const before = systemConfigService.getLoginMethod();
       systemConfigService.setLoginMethod(login_method);
       changes.login_method = { before, after: login_method };
+    }
+
+    if (body.recharge_mode !== undefined) {
+      const before = systemConfigService.getRechargeMode();
+      systemConfigService.setRechargeMode(body.recharge_mode);
+      changes.recharge_mode = {
+        before,
+        after: systemConfigService.getRechargeMode(),
+      };
+    }
+
+    if (body.credit_application !== undefined) {
+      const before = systemConfigService.getCreditApplicationConfig();
+      systemConfigService.setCreditApplicationConfig(body.credit_application);
+      changes.credit_application = {
+        before,
+        after: systemConfigService.getCreditApplicationConfig(),
+      };
     }
 
     if (body.scode_auto_model !== undefined) {

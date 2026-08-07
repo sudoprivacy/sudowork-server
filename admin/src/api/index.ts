@@ -192,13 +192,37 @@ export const adminApi = {
   getRefundCalc: (orderNo: string) =>
     api.get(`/v1/admin/recharge/refund-calc/${orderNo}`),
 
-  getRechargeRecords: (params?: {
-    keyword?: string;
-    type?: string;
-    payment_method?: string;
-    page?: number;
-    pageSize?: number;
-  }) => api.get("/v1/admin/recharge-records", { params }),
+	  getRechargeRecords: (params?: {
+	    keyword?: string;
+	    type?: string;
+	    payment_method?: string;
+	    page?: number;
+	    pageSize?: number;
+	  }) => api.get("/v1/admin/recharge-records", { params }),
+
+	  getCreditApplications: (params?: {
+	    keyword?: string;
+	    enterprise_id?: number;
+	    status?: string;
+	    page?: number;
+	    pageSize?: number;
+	  }) => api.get("/v1/admin/credit-applications", { params }),
+
+	  getCreditApplicationDetail: (id: number) =>
+	    api.get(`/v1/admin/credit-applications/${id}`),
+
+	  approveCreditApplication: (
+	    id: number,
+	    data: { approved_points?: number; admin_comment?: string },
+	  ) => api.post(`/v1/admin/credit-applications/${id}/approve`, data),
+
+	  rejectCreditApplication: (
+	    id: number,
+	    data: { admin_comment: string },
+	  ) => api.post(`/v1/admin/credit-applications/${id}/reject`, data),
+
+	  retryCreditApplicationSync: (id: number) =>
+	    api.post(`/v1/admin/credit-applications/${id}/retry-sync`),
 
   // Sync pending orders
   syncPendingOrders: () => api.post("/v1/admin/recharge/sync"),
@@ -383,9 +407,15 @@ export const adminApi = {
       enabled: number;
       protocol?: string;
       domain?: string;
-    };
-    scode_auto_model?: string;
-  }) => api.put("/v1/admin/system-config", data),
+	    };
+	    scode_auto_model?: string;
+	    recharge_mode?: "pay" | "approve" | "disabled";
+	    credit_application?: {
+	      min_points?: number;
+	      max_points?: number;
+	      allow_duplicate_pending?: boolean;
+	    };
+	  }) => api.put("/v1/admin/system-config", data),
 
   // Password login user APIs (用户名密码登录方式)
   createPasswordUser: (data: {

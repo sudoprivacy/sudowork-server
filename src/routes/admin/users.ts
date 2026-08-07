@@ -18,6 +18,7 @@ const usersRoutes = new Hono();
 
 // GET /users - User list
 usersRoutes.get("/users", authMiddleware, adminMiddleware, async (c) => {
+  const adminUser = (await getAuthUser(c)) as User;
   const enterpriseId = c.req.query("enterprise_id");
   const status = c.req.query("status");
   const role = c.req.query("role");
@@ -31,9 +32,16 @@ usersRoutes.get("/users", authMiddleware, adminMiddleware, async (c) => {
     LEFT JOIN invitation_codes ic ON u.invitation_code_id = ic.id
     WHERE (u.login_type = ? OR u.role = 'SUPER_ADMIN')
   `;
-  const params: unknown[] = [loginMethod];
+  const params: any[] = [loginMethod];
 
-  if (enterpriseId) {
+  if (adminUser.role === "ENTERPRISE_ADMIN") {
+    if (adminUser.enterprise_id == null) {
+      query += " AND 1 = 0";
+    } else {
+      query += " AND u.enterprise_id = ?";
+      params.push(adminUser.enterprise_id);
+    }
+  } else if (enterpriseId) {
     query += " AND u.enterprise_id = ?";
     params.push(enterpriseId);
   }

@@ -5,6 +5,7 @@ import {
   Card,
   Form,
   Input,
+  InputNumber,
   message,
   Modal,
   Radio,
@@ -57,6 +58,44 @@ interface ThirdPartyAuthConfig {
   providers: ThirdPartyProviderConfig[];
 }
 
+type RechargeMode = "pay" | "approve" | "disabled";
+
+interface CreditApplicationConfig {
+  min_points: number;
+  max_points: number;
+  allow_duplicate_pending: boolean;
+}
+
+interface ApiResponse<T = unknown> {
+  success?: boolean;
+  data?: T;
+  msg?: string;
+}
+
+interface AdminSystemConfigData {
+  login_method: number;
+  sms_configured: boolean;
+  third_party_auth?: unknown;
+  log_report?: {
+    enabled?: number;
+    protocol?: string;
+    domain?: string;
+    key_set?: boolean;
+  };
+  version_update?: {
+    enabled?: number;
+    cos_domain?: string;
+  };
+  product_improvement?: {
+    enabled?: number;
+    protocol?: string;
+    domain?: string;
+  };
+  scode_auto_model?: string;
+  recharge_mode?: unknown;
+  credit_application?: unknown;
+}
+
 const DEFAULT_COMAC_SERVER_CALLBACK_URL =
   "http://127.0.0.1:3000/api/v1/auth/third-party/cas/callback/comac_cas";
 const DEFAULT_COMAC_LOGOUT_SERVICE_URL =
@@ -87,6 +126,40 @@ const DEFAULT_THIRD_PARTY_AUTH: ThirdPartyAuthConfig = {
   ],
 };
 
+const DEFAULT_CREDIT_APPLICATION_CONFIG: CreditApplicationConfig = {
+  min_points: 100,
+  max_points: 1000000,
+  allow_duplicate_pending: false,
+};
+
+function normalizeRechargeMode(value: unknown): RechargeMode {
+  return value === "approve" || value === "disabled" || value === "pay"
+    ? value
+    : "pay";
+}
+
+function normalizeCreditApplicationConfig(
+  value: unknown,
+): CreditApplicationConfig {
+  if (!value || typeof value !== "object") {
+    return DEFAULT_CREDIT_APPLICATION_CONFIG;
+  }
+  const data = value as Partial<CreditApplicationConfig>;
+  const minPoints = Number(data.min_points);
+  const maxPoints = Number(data.max_points);
+  return {
+    min_points:
+      Number.isInteger(minPoints) && minPoints > 0
+        ? minPoints
+        : DEFAULT_CREDIT_APPLICATION_CONFIG.min_points,
+    max_points:
+      Number.isInteger(maxPoints) && maxPoints > 0
+        ? maxPoints
+        : DEFAULT_CREDIT_APPLICATION_CONFIG.max_points,
+    allow_duplicate_pending: data.allow_duplicate_pending === true,
+  };
+}
+
 // 返回确定类型的登录方式描述(避免 Record 索引 possibly undefined)
 function getDesc(m: number): LoginDesc {
   if (m === 2) {
@@ -107,16 +180,27 @@ function getDesc(m: number): LoginDesc {
   };
 }
 
-function normalizeThirdPartyAuthConfig(value: any): ThirdPartyAuthConfig {
-  if (!value?.providers?.length) {
+function normalizeThirdPartyAuthConfig(value: unknown): ThirdPartyAuthConfig {
+  if (!value || typeof value !== "object") {
+    return DEFAULT_THIRD_PARTY_AUTH;
+  }
+
+  const data = value as Partial<ThirdPartyAuthConfig> & {
+    providers?: unknown[];
+  };
+  if (!Array.isArray(data.providers) || data.providers.length === 0) {
     return DEFAULT_THIRD_PARTY_AUTH;
   }
   return {
-    enabled: value.enabled === 0 ? 0 : 1,
+    enabled: data.enabled === 0 ? 0 : 1,
     default_provider:
-      value.default_provider || DEFAULT_THIRD_PARTY_AUTH.default_provider,
-    providers: value.providers.map((provider: any) => {
+      data.default_provider || DEFAULT_THIRD_PARTY_AUTH.default_provider,
+    providers: data.providers.map((providerValue) => {
       const fallback = DEFAULT_THIRD_PARTY_AUTH.providers[0]!;
+      const provider =
+        providerValue && typeof providerValue === "object"
+          ? (providerValue as Partial<ThirdPartyProviderConfig>)
+          : {};
       const providerId = provider.id || fallback.id;
       const serverCallbackUrl =
         provider.server_callback_url || fallback.server_callback_url;
@@ -144,8 +228,10 @@ function normalizeThirdPartyAuthConfig(value: any): ThirdPartyAuthConfig {
   };
 }
 
-function getInputValue(event: any): string {
-  return event?.target?.value ?? "";
+function getInputValue(
+  event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+): string {
+  return event.target.value;
 }
 
 function buildLogoutServiceUrl(
@@ -222,6 +308,10 @@ const SystemConfig: React.FC = () => {
   const [savingThirdParty, setSavingThirdParty] = useState(false);
   const [savingScodeAutoModel, setSavingScodeAutoModel] = useState(false);
   const [scodeAutoModel, setScodeAutoModel] = useState<string>("");
+  const [savingRechargeConfig, setSavingRechargeConfig] = useState(false);
+  const [rechargeMode, setRechargeMode] = useState<RechargeMode>("pay");
+  const [creditApplication, setCreditApplication] =
+    useState<CreditApplicationConfig>(DEFAULT_CREDIT_APPLICATION_CONFIG);
   const [logReport, setLogReport] = useState<SwitchConfigCardValue>({
     enabled: 0,
     protocol: "",
@@ -242,8 +332,9 @@ const SystemConfig: React.FC = () => {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const response = (await adminApi.getAdminSystemConfig()) as any;
-        if (response.success) {
+        const response =
+          (await adminApi.getAdminSystemConfig()) as ApiResponse<AdminSystemConfigData>;
+        if (response.success && response.data) {
           setLoginMethod(response.data.login_method);
           setSmsConfigured(response.data.sms_configured);
           setRadioVal(response.data.login_method);
@@ -279,8 +370,12 @@ const SystemConfig: React.FC = () => {
           if (typeof response.data.scode_auto_model === "string") {
             setScodeAutoModel(response.data.scode_auto_model);
           }
+          setRechargeMode(normalizeRechargeMode(response.data.recharge_mode));
+          setCreditApplication(
+            normalizeCreditApplicationConfig(response.data.credit_application),
+          );
         }
-      } catch (error) {
+      } catch {
         message.error("加载系统配置失败");
       } finally {
         setLoading(false);
@@ -297,7 +392,7 @@ const SystemConfig: React.FC = () => {
         domain: (payload.domain as string) ?? "",
         key: (payload.key as string) ?? "",
       },
-    })) as any;
+    })) as ApiResponse;
     if (!res?.success) {
       throw new Error(res?.msg || "保存失败");
     }
@@ -309,7 +404,7 @@ const SystemConfig: React.FC = () => {
         enabled: payload.enabled,
         cos_domain: (payload.cos_domain as string) ?? "",
       },
-    })) as any;
+    })) as ApiResponse;
     if (!res?.success) {
       throw new Error(res?.msg || "保存失败");
     }
@@ -320,7 +415,7 @@ const SystemConfig: React.FC = () => {
       product_improvement: {
         enabled: payload.enabled,
       },
-    })) as any;
+    })) as ApiResponse;
     if (!res?.success) {
       throw new Error(res?.msg || "保存失败");
     }
@@ -331,13 +426,13 @@ const SystemConfig: React.FC = () => {
     try {
       const res = (await adminApi.updateSystemConfig({
         third_party_auth: thirdPartyAuth,
-      })) as any;
+      })) as ApiResponse;
       if (!res?.success) {
         throw new Error(res?.msg || "保存失败");
       }
       message.success("三方认证配置已保存");
-    } catch (error: any) {
-      message.error(error.response?.data?.msg || error.message || "保存失败");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "保存失败"));
     } finally {
       setSavingThirdParty(false);
     }
@@ -349,7 +444,7 @@ const SystemConfig: React.FC = () => {
     try {
       const res = (await adminApi.updateSystemConfig({
         scode_auto_model: nextModel,
-      })) as { success?: boolean; msg?: string };
+      })) as ApiResponse;
       if (!res?.success) {
         throw new Error(res?.msg || "保存失败");
       }
@@ -359,6 +454,30 @@ const SystemConfig: React.FC = () => {
       message.error(getRequestErrorMessage(error, "保存失败"));
     } finally {
       setSavingScodeAutoModel(false);
+    }
+  };
+  const saveRechargeConfig = async () => {
+    const nextConfig = normalizeCreditApplicationConfig(creditApplication);
+    if (nextConfig.max_points < nextConfig.min_points) {
+      message.error("最大申请积分不能小于最小申请积分");
+      return;
+    }
+
+    setSavingRechargeConfig(true);
+    try {
+      const res = (await adminApi.updateSystemConfig({
+        recharge_mode: rechargeMode,
+        credit_application: nextConfig,
+      })) as ApiResponse;
+      if (!res?.success) {
+        throw new Error(res?.msg || "保存失败");
+      }
+      setCreditApplication(nextConfig);
+      message.success("充值模式配置已保存");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "保存失败"));
+    } finally {
+      setSavingRechargeConfig(false);
     }
   };
 
@@ -419,7 +538,7 @@ const SystemConfig: React.FC = () => {
       const response = (await adminApi.updateSystemConfig({
         login_method: radioVal,
         ...(radioVal === 2 ? { third_party_auth: thirdPartyAuth } : {}),
-      })) as any;
+      })) as ApiResponse;
       if (response.success) {
         setLoginMethod(radioVal);
         setConfirmOpen(false);
@@ -427,8 +546,8 @@ const SystemConfig: React.FC = () => {
       } else {
         message.error(response.msg || "切换失败");
       }
-    } catch (error: any) {
-      message.error(error.response?.data?.msg || "切换失败");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "切换失败"));
     } finally {
       setSaving(false);
     }
@@ -504,6 +623,95 @@ const SystemConfig: React.FC = () => {
               onClick={saveScodeAutoModel}
             >
               保存 Auto 模型
+            </Button>
+          </div>
+        </Form>
+      </Card>
+
+      <Card title="充值模式" style={{ maxWidth: 760, marginTop: 16 }}>
+        <Text type="secondary">
+          控制客户端设置页中的充值入口。选择“积分申请审批”后，客户端显示积分申请表单，管理员在后台“积分申请”菜单审批并发放到
+          Sudorouter；未配置时默认保持支付充值模式。
+        </Text>
+        <Form layout="vertical" style={{ marginTop: 20 }}>
+          <Form.Item label="模式">
+            <Radio.Group
+              value={rechargeMode}
+              onChange={(event) =>
+                setRechargeMode(normalizeRechargeMode(event.target.value))
+              }
+            >
+              <Radio value="pay">支付充值</Radio>
+              <Radio value="approve">积分申请审批</Radio>
+              <Radio value="disabled">关闭入口</Radio>
+            </Radio.Group>
+          </Form.Item>
+          <Space size={12} style={{ width: "100%" }} align="start">
+            <Form.Item label="最小申请积分" style={{ flex: 1 }}>
+              <InputNumber
+                min={1}
+                precision={0}
+                style={{ width: "100%" }}
+                value={creditApplication.min_points}
+                onChange={(value) =>
+                  setCreditApplication((prev) => ({
+                    ...prev,
+                    min_points: Number(value) || prev.min_points,
+                  }))
+                }
+              />
+            </Form.Item>
+            <Form.Item label="最大申请积分" style={{ flex: 1 }}>
+              <InputNumber
+                min={1}
+                precision={0}
+                style={{ width: "100%" }}
+                value={creditApplication.max_points}
+                onChange={(value) =>
+                  setCreditApplication((prev) => ({
+                    ...prev,
+                    max_points: Number(value) || prev.max_points,
+                  }))
+                }
+              />
+            </Form.Item>
+          </Space>
+          <Form.Item label="允许重复待审批申请">
+            <Switch
+              checked={creditApplication.allow_duplicate_pending}
+              onChange={(checked) =>
+                setCreditApplication((prev) => ({
+                  ...prev,
+                  allow_duplicate_pending: checked,
+                }))
+              }
+            />
+          </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            message={
+              rechargeMode === "approve"
+                ? "当前选择:积分申请审批"
+                : rechargeMode === "disabled"
+                  ? "当前选择:关闭充值入口"
+                  : "当前选择:支付充值"
+            }
+            description={
+              rechargeMode === "approve"
+                ? "用户提交积分申请后，由超级管理员或本企业管理员审批；审批通过后自动写入 Sudorouter，并在充值记录中关联申请单。"
+                : rechargeMode === "disabled"
+                  ? "客户端不显示充值入口，也不会展示积分申请入口。"
+                  : "客户端继续显示原充值中心，富友支付链路保持不变。"
+            }
+          />
+          <div style={{ marginTop: 22, textAlign: "right" }}>
+            <Button
+              type="primary"
+              loading={savingRechargeConfig}
+              onClick={saveRechargeConfig}
+            >
+              保存充值模式
             </Button>
           </div>
         </Form>
