@@ -101,6 +101,17 @@ function aclSummary(rows: Array<{ subject_type: string; subject_id: string | nul
   };
 }
 
+function getAdminEnhancementInfo(enterpriseId: number, assistantId: string) {
+  const info = getEnhancementInfo(enterpriseId, assistantId);
+  if (!info.enabled || info.mode === "rag-only") return { enabled: false };
+  return {
+    enabled: true,
+    mode: info.mode,
+    dify_app_id: info.difyAppId,
+    dify_tenant_id: info.difyTenantId,
+  };
+}
+
 // ============================================
 // SSO + binding
 // ============================================
@@ -375,6 +386,14 @@ adminDifyRoutes.get("/enterprise-assistants", async (c) => {
     const binding = bindingByAssistant.get(id);
     const acl = aclByAssistant.get(id) || [];
     const datasetIds = datasetsByAssistant.get(id) || [];
+    const enhancement =
+      binding && binding.dify_app_mode !== "rag-only"
+        ? {
+            enabled: true,
+            mode: binding.dify_app_mode,
+            dify_app_id: binding.dify_app_id,
+          }
+        : { enabled: false };
     return {
       assistant_id: id,
       name: a.name,
@@ -384,13 +403,7 @@ adminDifyRoutes.get("/enterprise-assistants", async (c) => {
       categories: a.categories,
       profession: a.profession,
       status: a.status,
-      enhancement: binding
-        ? {
-            enabled: true,
-            mode: binding.dify_app_mode,
-            dify_app_id: binding.dify_app_id,
-          }
-        : { enabled: false },
+      enhancement,
       // Mutually exclusive with `enhancement.enabled` (see design doc).
       dataset_ids: datasetIds,
       acl_summary: aclSummary(acl),
@@ -549,7 +562,7 @@ adminDifyRoutes.get("/enterprise-assistants/:assistantId", async (c) => {
         assistant: detail.assistant,
         promptText: detail.promptText,
         prompt_text: detail.promptText,
-        enhancement: getEnhancementInfo(enterpriseId, assistantId),
+        enhancement: getAdminEnhancementInfo(enterpriseId, assistantId),
         dataset_ids: listDatasets(enterpriseId, assistantId),
         acl_summary: aclSummary(acl),
       },
@@ -701,7 +714,7 @@ adminDifyRoutes.put("/enterprise-assistants/:assistantId/enhancement", async (c)
 adminDifyRoutes.get("/enterprise-assistants/:assistantId/enhancement", async (c) => {
   const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
   if (typeof enterpriseId !== "number") return enterpriseId;
-  const info = getEnhancementInfo(enterpriseId, c.req.param("assistantId"));
+  const info = getAdminEnhancementInfo(enterpriseId, c.req.param("assistantId"));
   return c.json({ success: true, data: info });
 });
 

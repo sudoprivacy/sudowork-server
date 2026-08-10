@@ -38,8 +38,12 @@ import ReactMarkdown from "react-markdown";
 import { adminApi } from "../api";
 import { useDifyFeatureFlag } from "../hooks/useDifyFeatureFlag";
 
+type DifyEnhancementMode = "agent-chat" | "workflow";
+type EnhancementProbeMode = DifyEnhancementMode | "rag-only";
+type KnowledgeMode = "none" | "datasets" | "enhancement";
+
 /** Display labels for Dify enhancement modes (2026-06-22 P2.5.1: rag-only retired). */
-const ENH_MODE_LABEL: Record<"agent-chat" | "workflow", string> = {
+const ENH_MODE_LABEL: Record<DifyEnhancementMode, string> = {
   "agent-chat": "Agent (完整工具体系)",
   workflow: "工作流 (固定流程)",
 };
@@ -172,8 +176,9 @@ function SectionTitle(props: {
 /** Server returns this annotated row for each sudohub assistant. */
 interface EnhancementInfo {
   enabled: boolean;
-  mode?: "agent-chat" | "workflow";
+  mode?: EnhancementProbeMode;
   dify_app_id?: string;
+  difyAppId?: string;
 }
 interface AclSummary {
   scope: "all" | "specific";
@@ -194,6 +199,44 @@ interface EnterpriseAssistantDetailPayload {
   enhancement?: EnhancementInfo;
   dataset_ids?: string[];
   acl_summary?: AclSummary;
+}
+
+function isDifyEnhancementMode(mode: EnhancementInfo["mode"]): mode is DifyEnhancementMode {
+  return mode === "agent-chat" || mode === "workflow";
+}
+
+function isKnowledgeMode(value: unknown): value is KnowledgeMode {
+  return value === "none" || value === "datasets" || value === "enhancement";
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function getDifyAppId(enhancement: EnhancementInfo | null | undefined): string | undefined {
+  return enhancement?.dify_app_id || enhancement?.difyAppId;
+}
+
+function getDifyAppMode(
+  enhancement: EnhancementInfo | null | undefined,
+): DifyEnhancementMode | undefined {
+  if (!enhancement?.enabled || enhancement.mode === "rag-only" || !getDifyAppId(enhancement)) {
+    return undefined;
+  }
+  return isDifyEnhancementMode(enhancement.mode) ? enhancement.mode : "agent-chat";
+}
+
+function getKnowledgeMode(
+  enhancement: EnhancementInfo | null | undefined,
+  datasetIds: string[],
+): KnowledgeMode {
+  if (datasetIds.length > 0 || enhancement?.mode === "rag-only") return "datasets";
+  if (getDifyAppMode(enhancement)) return "enhancement";
+  return "none";
+}
+
+function hasDifyStudioTarget(enhancement: EnhancementInfo | null | undefined): boolean {
+  return Boolean(getDifyAppMode(enhancement) && getDifyAppId(enhancement));
 }
 
 function readStringField(
@@ -898,11 +941,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       const enh = detail.enhancement ?? enhancementMap[record.id];
       const acl = detail.acl_summary ?? aclMap[record.id];
       const initialDatasets = detail.dataset_ids ?? datasetMap[record.id] ?? [];
-      const initialKnowledgeMode: "none" | "datasets" | "enhancement" = enh?.enabled
-        ? "enhancement"
-        : initialDatasets.length > 0
-          ? "datasets"
-          : "none";
+      const initialKnowledgeMode = getKnowledgeMode(enh, initialDatasets);
       const initialValues = {
         name: mergedRecord.name,
         profession: mergedRecord.profession,
@@ -910,7 +949,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         default_init_prompt: mergedRecord.defaultInitPrompt || "",
         categories: mergedRecord.categories || [],
         knowledge_mode: initialKnowledgeMode,
-        enhancement_mode: enh?.mode || "agent-chat",
+        enhancement_mode: getDifyAppMode(enh) || "agent-chat",
         acl_scope: acl?.scope || "all",
         acl_user_ids: acl?.user_ids || [],
         dataset_ids: initialDatasets,
@@ -939,23 +978,27 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     if (!editingRow || !selectedEnterpriseId) return;
     const values = await drawerForm.validateFields();
     const prevEnh = enhancementMap[editingRow.id];
-    const prevDatasets = datasetMap[editingRow.id] ?? [];
-    const prevMode: "none" | "datasets" | "enhancement" = prevEnh?.enabled
-      ? "enhancement"
-      : prevDatasets.length > 0
-        ? "datasets"
-        : "none";
-    const nextMode: "none" | "datasets" | "enhancement" =
-      values.knowledge_mode || "none";
+    const initialMode = drawerInitialValues.knowledge_mode;
+    const initialDifyAppMode = drawerInitialValues.enhancement_mode;
+    const prevDatasets = datasetMap[editingRow.id] ?? stringArray(drawerInitialValues.dataset_ids);
+    const prevMode = isKnowledgeMode(initialMode)
+      ? initialMode
+      : getKnowledgeMode(prevEnh, prevDatasets);
+    const prevDifyAppMode =
+      getDifyAppMode(prevEnh) ||
+      (isDifyEnhancementMode(initialDifyAppMode as EnhancementInfo["mode"])
+        ? (initialDifyAppMode as DifyEnhancementMode)
+        : undefined);
+    const nextMode: KnowledgeMode = values.knowledge_mode || "none";
     if (nextMode !== prevMode) {
       message.error("增强方式创建后不允许修改");
       return;
     }
     if (
       prevMode === "enhancement" &&
-      prevEnh?.mode &&
+      prevDifyAppMode &&
       values.enhancement_mode &&
-      values.enhancement_mode !== prevEnh.mode
+      values.enhancement_mode !== prevDifyAppMode
     ) {
       message.error("增强模式创建后不允许修改");
       return;
@@ -1046,11 +1089,12 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
    */
   const openInStudio = async (record: Assistant) => {
     const enh = enhancementMap[record.id];
-    if (!enh?.enabled || !enh.dify_app_id) {
+    const difyAppId = getDifyAppId(enh);
+    if (!getDifyAppMode(enh) || !difyAppId) {
       message.info("该智能体未启用 Dify 增强");
       return;
     }
-    const next = `/app/${enh.dify_app_id}/configuration`;
+    const next = `/app/${difyAppId}/configuration`;
     try {
       const res: any = await adminApi.getDifyStudioLink(next, selectedEnterpriseId);
       const url = res?.data?.url;
@@ -1345,12 +1389,13 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       width: 200,
       render: (_, record) => {
         const e = enhancementMap[record.id];
-        if (e?.enabled) {
-          return <Tag color="blue">{ENH_MODE_LABEL[e.mode || "agent-chat"]}</Tag>;
-        }
         const datasets = datasetMap[record.id] ?? [];
-        if (datasets.length > 0) {
-          return <Tag color="cyan">知识库 ({datasets.length})</Tag>;
+        if (datasets.length > 0 || e?.mode === "rag-only") {
+          return <Tag color="cyan">{datasets.length > 0 ? `知识库 (${datasets.length})` : "知识库"}</Tag>;
+        }
+        const difyAppMode = getDifyAppMode(e);
+        if (difyAppMode) {
+          return <Tag color="blue">{ENH_MODE_LABEL[difyAppMode]}</Tag>;
         }
         return <Tag>未启用</Tag>;
       },
@@ -1397,7 +1442,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
             type="link"
             size="small"
             icon={<LinkOutlined />}
-            disabled={difyDisabled || !enhancementMap[record.id]?.enabled}
+            disabled={difyDisabled || !hasDifyStudioTarget(enhancementMap[record.id])}
             onClick={() => openInStudio(record)}
           >
             Dify Studio
@@ -2227,7 +2272,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                             ]}
                           />
                         </Form.Item>
-                        {enhancementMap[editingRow.id]?.dify_app_id && (
+                        {hasDifyStudioTarget(enhancementMap[editingRow.id]) && (
                           <Button
                             block
                             icon={<LinkOutlined />}
