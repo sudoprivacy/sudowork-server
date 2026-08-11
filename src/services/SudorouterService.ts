@@ -528,7 +528,7 @@ class SudorouterService {
       });
 
       const response = await fetchWithTimeout(
-        `${this.config.baseUrl}/api/log/?${params.toString()}`,
+        `${this.config.baseUrl}/api/log/query?${params.toString()}`,
         {
           method: "GET",
           headers: this.getHeaders(),
@@ -570,7 +570,7 @@ class SudorouterService {
           order_by: "created_at",
           desc: "true",
         });
-        return `${this.config.baseUrl}/api/log/?${params.toString()}`;
+        return `${this.config.baseUrl}/api/log/query?${params.toString()}`;
       };
 
       const firstResponse = await fetchWithTimeout(
