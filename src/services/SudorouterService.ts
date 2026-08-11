@@ -128,7 +128,7 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
 class SudorouterService {
   private config: SudorouterConfig;
   private modelsCache: { data: string[]; timestamp: number } | null = null;
-  private modelsCacheTtl = 24 * 60 * 60 * 1000; // 24 小时缓存
+  private modelsCacheTtl = 5 * 60 * 1000; // 5 分钟缓存
 
   constructor() {
     this.config = {
@@ -892,7 +892,7 @@ class SudorouterService {
     return this.config.modelServiceUrl;
   }
 
-  // 获取可用模型列表（带 10 分钟缓存）
+  // 获取可用模型列表（带 5 分钟缓存）
   async getAvailableModels(forceRefresh: boolean = false): Promise<string[]> {
     // 检查缓存是否有效
     if (!forceRefresh && this.modelsCache && Date.now() - this.modelsCache.timestamp < this.modelsCacheTtl) {

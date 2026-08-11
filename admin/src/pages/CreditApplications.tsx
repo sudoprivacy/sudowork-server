@@ -14,6 +14,7 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { adminApi } from "../api";
+import "./CreditApplications.css";
 
 type CreditApplicationStatus =
   | "PENDING"
@@ -216,29 +217,9 @@ function CreditApplications() {
         <Tag color={statusMap[value].color}>{statusMap[value].text}</Tag>
       ),
     },
-    { title: "申请原因", dataIndex: "reason", ellipsis: true },
-    {
-      title: "审批人",
-      width: 150,
-      render: (_, record) => renderText(record.admin_nickname || record.admin_phone),
-    },
-    {
-      title: "审批备注",
-      dataIndex: "admin_comment",
-      width: 220,
-      ellipsis: true,
-      render: (value: string | null) => renderText(value),
-    },
-    {
-      title: "审批时间",
-      dataIndex: "reviewed_at",
-      width: 170,
-      render: (value: string | null) => renderText(value),
-    },
-    { title: "申请时间", dataIndex: "created_at", width: 170 },
     {
       title: "操作",
-      width: 220,
+      width: 160,
       render: (_, record) => (
         <Space size="small">
           {record.status === "PENDING" && (
@@ -259,6 +240,26 @@ function CreditApplications() {
         </Space>
       ),
     },
+    { title: "申请原因", dataIndex: "reason", ellipsis: true },
+    {
+      title: "审批人",
+      width: 150,
+      render: (_, record) => renderText(record.admin_nickname || record.admin_phone),
+    },
+    {
+      title: "审批备注",
+      dataIndex: "admin_comment",
+      width: 220,
+      ellipsis: true,
+      render: (value: string | null) => renderText(value),
+    },
+    {
+      title: "审批时间",
+      dataIndex: "reviewed_at",
+      width: 170,
+      render: (value: string | null) => renderText(value),
+    },
+    { title: "申请时间", dataIndex: "created_at", width: 170 },
   ];
 
   return (
@@ -298,6 +299,7 @@ function CreditApplications() {
       </Card>
       <Card styles={{ body: { padding: 0 } }}>
         <Table
+          className="credit-applications-table"
           columns={columns}
           dataSource={records}
           loading={loading}
