@@ -1,0 +1,30 @@
+.credit-applications-table .ant-table-content,
+.credit-applications-table .ant-table-body {
+  overflow-x: scroll !important;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #8da2c0 #eef2f7;
+}
+
+.credit-applications-table .ant-table-content::-webkit-scrollbar,
+.credit-applications-table .ant-table-body::-webkit-scrollbar {
+  height: 12px;
+}
+
+.credit-applications-table .ant-table-content::-webkit-scrollbar-track,
+.credit-applications-table .ant-table-body::-webkit-scrollbar-track {
+  background: #eef2f7;
+  border-radius: 999px;
+}
+
+.credit-applications-table .ant-table-content::-webkit-scrollbar-thumb,
+.credit-applications-table .ant-table-body::-webkit-scrollbar-thumb {
+  background: #8da2c0;
+  border: 3px solid #eef2f7;
+  border-radius: 999px;
+}
+
+.credit-applications-table .ant-table-content::-webkit-scrollbar-thumb:hover,
+.credit-applications-table .ant-table-body::-webkit-scrollbar-thumb:hover {
+  background: #667a99;
+}
