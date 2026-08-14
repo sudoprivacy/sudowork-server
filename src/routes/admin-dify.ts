@@ -399,6 +399,8 @@ adminDifyRoutes.get("/enterprise-assistants", async (c) => {
       name: a.name,
       display_name: (a as { display_name?: string }).display_name,
       description: a.description,
+      promptsI18n: a.promptsI18n,
+      prompts_i18n: a.prompts_i18n,
       avatar: a.avatar,
       categories: a.categories,
       profession: a.profession,
@@ -516,6 +518,9 @@ adminDifyRoutes.post("/enterprise-assistants", async (c) => {
       profession,
       description: optional("description"),
       defaultInitPrompt: optional("default_init_prompt"),
+      promptsI18n:
+        jsonField<Record<string, string[]>>("promptsI18n") ??
+        jsonField<Record<string, string[]>>("prompts_i18n"),
       categories: jsonField<string[]>("categories"),
       skills: jsonField<string[]>("skills"),
       promptFileBytes: promptFile?.bytes,
@@ -644,6 +649,9 @@ adminDifyRoutes.put("/enterprise-assistants/:assistantId", async (c) => {
       profession,
       description: optional("description") ?? "",
       defaultInitPrompt: optional("default_init_prompt") ?? optional("defaultInitPrompt") ?? "",
+      promptsI18n:
+        jsonField<Record<string, string[]>>("promptsI18n") ??
+        jsonField<Record<string, string[]>>("prompts_i18n"),
       categories: jsonField<string[]>("categories") ?? [],
       skills: jsonField<string[]>("skills") ?? [],
       promptFileBytes: promptFile?.bytes,

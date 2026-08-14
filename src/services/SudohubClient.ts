@@ -227,6 +227,7 @@ export interface CreateAssistantInput {
   changelog?: string;
   description?: string;
   defaultInitPrompt?: string;
+  promptsI18n?: Record<string, string[]>;
   tenantId?: string;
   sortOrder?: number;
   /** 0=审核中, 1=已发布 */
@@ -274,6 +275,9 @@ function appendMultipart(form: FormData, input: CreateAssistantInput) {
   if (input.changelog) form.append("changelog", input.changelog);
   if (input.description) form.append("description", input.description);
   if (input.defaultInitPrompt) form.append("defaultInitPrompt", input.defaultInitPrompt);
+  if (input.promptsI18n !== undefined) {
+    form.append("promptsI18n", JSON.stringify(input.promptsI18n));
+  }
   if (input.tenantId) form.append("tenantId", input.tenantId);
   if (input.sortOrder != null) form.append("sortOrder", String(input.sortOrder));
   if (input.status != null) form.append("status", String(input.status));
@@ -376,6 +380,7 @@ export interface UpdateAssistantInput {
   profession?: string;
   description?: string;
   defaultInitPrompt?: string;
+  promptsI18n?: Record<string, string[]>;
   tenantId?: string;
   sortOrder?: number;
   status?: number;
@@ -399,6 +404,7 @@ export async function updateAssistant(
   if (input.defaultInitPrompt !== undefined) {
     payload.defaultInitPrompt = input.defaultInitPrompt;
   }
+  if (input.promptsI18n !== undefined) payload.promptsI18n = input.promptsI18n;
   if (input.tenantId !== undefined) payload.tenantId = input.tenantId;
   if (input.sortOrder != null) payload.sortOrder = input.sortOrder;
   if (input.status != null) payload.status = input.status;

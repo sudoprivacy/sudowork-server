@@ -268,6 +268,8 @@ agentsRoutes.get("/visible", async (c) => {
           (typeof a.name === "string" ? a.name : undefined),
         profession: a.profession,
         description: a.description,
+        promptsI18n: a.promptsI18n,
+        prompts_i18n: a.prompts_i18n,
         avatar: a.avatar,
         categories: a.categories,
         skills: a.skills,

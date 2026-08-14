@@ -16,7 +16,6 @@ import {
   Descriptions,
   Upload,
   Drawer,
-  Divider,
   Radio,
   Tooltip,
 } from "antd";
@@ -33,6 +32,7 @@ import {
   ProfileOutlined,
   EyeOutlined,
   ThunderboltOutlined,
+  DeleteOutlined,
 } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import { adminApi } from "../api";
@@ -173,6 +173,59 @@ function SectionTitle(props: {
   );
 }
 
+const PROMPT_EXAMPLE_PLACEHOLDERS = [
+  "例如：帮我整理一份采购需求文档",
+  "例如：我们要采购服务器 200 万，用哪种采购方式合适",
+  "例如：帮我起草一封需求澄清邮件",
+];
+
+function PromptExamplesFormList(): React.JSX.Element {
+  return (
+    <Form.Item label="案例提示词">
+      <Form.List name="prompt_examples" initialValue={[""]}>
+        {(fields, { add, remove }) => (
+          <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            {fields.map((field, index) => (
+              <Space
+                key={field.key}
+                align="start"
+                style={{ display: "flex", width: "100%" }}
+              >
+                <Form.Item
+                  {...field}
+                  style={{ flex: 1, marginBottom: 0 }}
+                  rules={[{ max: 200, message: "单条案例不超过 200 字" }]}
+                >
+                  <Input.TextArea
+                    rows={2}
+                    placeholder={
+                      PROMPT_EXAMPLE_PLACEHOLDERS[index % PROMPT_EXAMPLE_PLACEHOLDERS.length]
+                    }
+                    autoSize={false}
+                  />
+                </Form.Item>
+                <Tooltip title="删除">
+                  <Button
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    disabled={fields.length === 1}
+                    onClick={() => remove(field.name)}
+                    style={{ marginTop: 4 }}
+                  />
+                </Tooltip>
+              </Space>
+            ))}
+            <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add("")}>
+              添加案例
+            </Button>
+          </Space>
+        )}
+      </Form.List>
+    </Form.Item>
+  );
+}
+
 /** Server returns this annotated row for each sudohub assistant. */
 interface EnhancementInfo {
   enabled: boolean;
@@ -309,6 +362,45 @@ function readStringArrayField(
   return fallback;
 }
 
+function normalizePromptExamples(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function normalizePromptsI18nValue(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value === "string") {
+    try {
+      return normalizePromptsI18nValue(JSON.parse(value));
+    } catch {
+      return undefined;
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return { "zh-CN": normalizePromptExamples((value as Record<string, unknown>)["zh-CN"]) };
+}
+
+function readPromptsI18nField(
+  record: Record<string, unknown> | null | undefined,
+  fallback?: Record<string, string[]> | null,
+): Record<string, string[]> | undefined {
+  if (!record) return fallback ?? undefined;
+  for (const key of ["promptsI18n", "prompts_i18n"]) {
+    const normalized = normalizePromptsI18nValue(record[key]);
+    if (normalized) return normalized;
+  }
+  return fallback ?? undefined;
+}
+
+function getPromptExamples(promptsI18n?: Record<string, string[]> | null): string[] {
+  return normalizePromptExamples(promptsI18n?.["zh-CN"]);
+}
+
+function buildPromptsI18n(value: unknown): Record<string, string[]> {
+  return { "zh-CN": normalizePromptExamples(value) };
+}
+
 function mergeAssistantDetailRecord(
   row: Assistant,
   detail: Record<string, unknown> | null | undefined,
@@ -328,6 +420,7 @@ function mergeAssistantDetailRecord(
       ["defaultInitPrompt", "default_init_prompt"],
       row.defaultInitPrompt,
     ),
+    promptsI18n: readPromptsI18nField(detail, row.promptsI18n),
     promptFile: readNullableStringField(detail, ["promptFile", "prompt_file"], row.promptFile),
     sourceUrl: readStringField(detail, ["sourceUrl", "source_url"]) ?? row.sourceUrl,
     skills: readStringArrayField(detail, ["skills"], row.skills ?? []),
@@ -394,6 +487,7 @@ interface Assistant {
   avatar: string | null;
   categories: string[];
   defaultInitPrompt: string | null;
+  promptsI18n?: Record<string, string[]> | null;
   promptFile: string | null;
   sourceUrl: string | null;
   source_url?: string | null;
@@ -872,6 +966,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       if (values.description) form.append("description", values.description);
       if (values.default_init_prompt)
         form.append("default_init_prompt", values.default_init_prompt);
+      form.append("promptsI18n", JSON.stringify(buildPromptsI18n(values.prompt_examples)));
       if (values.categories) form.append("categories", JSON.stringify(values.categories));
       if (values.skills) form.append("skills", JSON.stringify(values.skills));
       const aclEntries =
@@ -947,6 +1042,9 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         profession: mergedRecord.profession,
         description: mergedRecord.description || "",
         default_init_prompt: mergedRecord.defaultInitPrompt || "",
+        prompt_examples: getPromptExamples(mergedRecord.promptsI18n).length
+          ? getPromptExamples(mergedRecord.promptsI18n)
+          : [""],
         categories: mergedRecord.categories || [],
         knowledge_mode: initialKnowledgeMode,
         enhancement_mode: getDifyAppMode(enh) || "agent-chat",
@@ -1024,6 +1122,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       form.append("profession", values.profession);
       form.append("description", values.description || "");
       form.append("default_init_prompt", values.default_init_prompt || "");
+      form.append("promptsI18n", JSON.stringify(buildPromptsI18n(values.prompt_examples)));
       form.append("categories", JSON.stringify(values.categories || []));
       form.append("skills", JSON.stringify(editingRow.skills || []));
       if (promptFileToSend) {
@@ -1514,6 +1613,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     }
 
     const record = detailRecord as Assistant;
+    const promptExamples = getPromptExamples(record.promptsI18n);
     return (
       <Descriptions bordered column={1} size="small">
         <Descriptions.Item label="名称">{record.name}</Descriptions.Item>
@@ -1530,6 +1630,28 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
             {formatValue(record.defaultInitPrompt)}
           </div>
+        </Descriptions.Item>
+        <Descriptions.Item label="案例提示词">
+          {promptExamples.length ? (
+            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+              {promptExamples.map((item, index) => (
+                <div
+                  key={`${item}-${index}`}
+                  style={{
+                    border: "1px solid var(--ant-color-border-secondary, #f0f0f0)",
+                    borderRadius: 6,
+                    padding: "6px 8px",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {item}
+                </div>
+              ))}
+            </Space>
+          ) : (
+            "-"
+          )}
         </Descriptions.Item>
         <Descriptions.Item label="提示词文件">{formatValue(record.promptFile)}</Descriptions.Item>
         <Descriptions.Item label="技能列表">
@@ -1783,6 +1905,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
             <Form.Item name="default_init_prompt" label="默认问候语">
               <Input.TextArea rows={2} />
             </Form.Item>
+            <PromptExamplesFormList />
             <Form.Item name="categories" label="分类">
               <Select mode="tags" placeholder="按回车添加" />
             </Form.Item>
@@ -2087,6 +2210,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               <Form.Item name="default_init_prompt" label="默认问候语">
                 <Input.TextArea rows={2} />
               </Form.Item>
+              <PromptExamplesFormList />
               <Form.Item name="categories" label="分类">
                 <Select mode="tags" placeholder="按回车添加" />
               </Form.Item>
