@@ -36,6 +36,7 @@ import { ensureTenantBinding } from "./DifyTenantService.js";
 import { replaceAcl, type AclEntry } from "./DifyAgentService.js";
 import {
   applyAssistantMetadataOverrides,
+  deleteAssistantMetadataOverride,
   upsertAssistantMetadataOverride,
 } from "./AssistantMetadataOverrideService.js";
 
@@ -56,6 +57,8 @@ export type EnhancementMode = "agent-chat" | "workflow";
  */
 export type EnhancementProbeMode = EnhancementMode | "rag-only";
 
+type AssistantPromptsI18n = Record<string, string[]>;
+
 export interface CreateEnterpriseAssistantInput {
   enterpriseId: number;
   /** sudohub multipart fields */
@@ -63,6 +66,7 @@ export interface CreateEnterpriseAssistantInput {
   profession: string;
   description?: string;
   defaultInitPrompt?: string;
+  promptsI18n?: AssistantPromptsI18n;
   categories?: string[];
   skills?: string[];
   promptFileBytes?: Uint8Array | Buffer;
@@ -103,6 +107,7 @@ export interface UpdateEnterpriseAssistantInput {
   profession: string;
   description?: string;
   defaultInitPrompt?: string;
+  promptsI18n?: AssistantPromptsI18n;
   categories?: string[];
   skills?: string[];
   promptFileBytes?: Uint8Array | Buffer;
@@ -332,6 +337,41 @@ function getStringArrayField(obj: Record<string, unknown> | null, keys: string[]
   return [];
 }
 
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function normalizePromptsI18n(value: unknown): AssistantPromptsI18n {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { "zh-CN": [] };
+  }
+  return { "zh-CN": normalizeStringArray((value as Record<string, unknown>)["zh-CN"]) };
+}
+
+function getPromptsI18nField(
+  obj: Record<string, unknown> | null,
+  keys: string[] = ["promptsI18n", "prompts_i18n"],
+): AssistantPromptsI18n {
+  if (!obj) return { "zh-CN": [] };
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "string") {
+      try {
+        return normalizePromptsI18n(JSON.parse(value));
+      } catch {
+        return { "zh-CN": [] };
+      }
+    }
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return normalizePromptsI18n(value);
+    }
+  }
+  return { "zh-CN": [] };
+}
+
 function normalizeSudohubAssistant(raw: unknown): Record<string, unknown> | null {
   const root = asRecord(raw);
   const data = asRecord(root?.data);
@@ -457,21 +497,26 @@ function resolveUploadedAssistantObjectUrl(
   return `${cosBase}/${objectKey}`;
 }
 
-function buildAssistantPackageMetadata(
-  input: UpdateEnterpriseAssistantInput,
-  current: Record<string, unknown> | null,
-  nextVersion: string,
-): Record<string, unknown> {
+interface AssistantPackageMetadataInput {
+  assistantId?: string;
+  name: string;
+  profession: string;
+  description?: string;
+  defaultInitPrompt?: string;
+  promptsI18n?: AssistantPromptsI18n;
+  categories?: string[];
+  skills?: string[];
+  avatar?: string | null;
+  version: string;
+  ruleFile?: string;
+}
+
+function buildAssistantPackageMetadata(input: AssistantPackageMetadataInput): Record<string, unknown> {
   const nowIso = new Date().toISOString();
   const description = input.description ?? "";
   const skills = input.skills ?? [];
   const categories = input.categories ?? [];
-  const avatar =
-    input.avatarBytes
-      ? input.avatarFileName || "avatar.png"
-      : getStringField(current, ["avatar"]);
-  return {
-    id: input.assistantId,
+  const metadata: Record<string, unknown> = {
     name: input.name,
     display_name: input.name,
     profession: input.profession,
@@ -483,7 +528,8 @@ function buildAssistantPackageMetadata(
       "zh-CN": description,
       "en-US": description,
     },
-    avatar,
+    promptsI18n: normalizePromptsI18n(input.promptsI18n),
+    avatar: input.avatar,
     emoji: null,
     presetAgentType: "claude",
     source_type: "tenant",
@@ -495,11 +541,13 @@ function buildAssistantPackageMetadata(
     is_builtin: false,
     enabled: true,
     defaultInitPrompt: input.defaultInitPrompt ?? null,
-    installed_version: nextVersion,
+    installed_version: input.version,
     installed_at: nowIso,
     updated_at: nowIso,
-    ruleFile: input.promptFileBytes ? `${input.name}.md` : undefined,
+    ruleFile: input.ruleFile,
   };
+  if (input.assistantId) metadata.id = input.assistantId;
+  return metadata;
 }
 
 async function buildUpdateSourceZip(
@@ -508,7 +556,19 @@ async function buildUpdateSourceZip(
   nextVersion: string,
 ): Promise<{ bytes: Uint8Array; fileName: string } | undefined> {
   const fileName = packageFileName(input.name, nextVersion);
-  const metadata = buildAssistantPackageMetadata(input, current, nextVersion);
+  const metadata = buildAssistantPackageMetadata({
+    assistantId: input.assistantId,
+    name: input.name,
+    profession: input.profession,
+    description: input.description,
+    defaultInitPrompt: input.defaultInitPrompt,
+    promptsI18n: input.promptsI18n,
+    categories: input.categories,
+    skills: input.skills,
+    avatar: input.avatarBytes ? input.avatarFileName || "avatar.png" : getStringField(current, ["avatar"]),
+    version: nextVersion,
+    ruleFile: input.promptFileBytes ? `${input.name}.md` : undefined,
+  });
   const explicitZip = await ensureSourceZip({
     name: input.name,
     promptFileBytes: input.promptFileBytes,
@@ -567,6 +627,7 @@ async function readPromptTextFromSourceZip(
       ? markdownFiles.find((entry) => entry.name.split("/").pop() === preferredFileName)
       : undefined;
   const selected = preferred ?? markdownFiles[0];
+  if (!selected) return null;
   return selected.async("string");
 }
 
@@ -623,6 +684,7 @@ export async function createEnterpriseAssistant(
   let difyTenantId: string | undefined;
 
   const datasetIds = Array.from(new Set(input.datasetIds ?? [])).filter((id) => id && id.length > 0);
+  const promptsI18n = normalizePromptsI18n(input.promptsI18n);
   if (input.enhancement && datasetIds.length > 0) {
     throw new Error(
       "enhancement and dataset attachment are mutually exclusive (see design doc 「知识增强：两个维度」)",
@@ -634,7 +696,27 @@ export async function createEnterpriseAssistant(
     // upload one. Without this, sudohub records source_url=null and the
     // sudowork client suppresses the install button on the personal-mode
     // 专属智能体 tab.
-    const sourceZip = await ensureSourceZip(input);
+    const sourceZip = await ensureSourceZip({
+      name: input.name,
+      promptFileBytes: input.promptFileBytes,
+      promptFileName: input.promptFileName,
+      avatarBytes: input.avatarBytes,
+      avatarFileName: input.avatarFileName,
+      sourceZipBytes: input.sourceZipBytes,
+      sourceZipFileName: input.sourceZipFileName,
+      metadata: buildAssistantPackageMetadata({
+        name: input.name,
+        profession: input.profession,
+        description: input.description,
+        defaultInitPrompt: input.defaultInitPrompt,
+        promptsI18n,
+        categories: input.categories,
+        skills: input.skills,
+        avatar: input.avatarBytes ? input.avatarFileName || "avatar.png" : undefined,
+        version: "1.0.0",
+        ruleFile: input.promptFileBytes ? `${input.name}.md` : undefined,
+      }),
+    });
 
     // Step 1: sudohub
     const created = await sudohub.createAssistant({
@@ -642,6 +724,7 @@ export async function createEnterpriseAssistant(
       profession: input.profession,
       description: input.description,
       defaultInitPrompt: input.defaultInitPrompt,
+      promptsI18n,
       tenantId: input.tenantCode,
       categories: input.categories,
       skills: input.skills,
@@ -659,6 +742,42 @@ export async function createEnterpriseAssistant(
     log.push({
       step: "sudohub.createAssistant",
       rollback: () => sudohub.deleteAssistant(created.id),
+    });
+
+    const createdRecord = normalizeSudohubAssistant(created.raw);
+    const promptFileUrl =
+      getStringField(createdRecord, ["promptFile", "prompt_file"]) ??
+      (input.promptFileBytes
+        ? resolveUploadedAssistantObjectUrl(
+            createdRecord,
+            created.id,
+            input.promptFileName || "prompt.md",
+          )
+        : null);
+    const avatarUrl =
+      getStringField(createdRecord, ["avatar"]) ??
+      (input.avatarBytes
+        ? resolveUploadedAssistantObjectUrl(createdRecord, created.id, "avatar.png")
+        : null);
+    upsertAssistantMetadataOverride({
+      enterpriseId: input.enterpriseId,
+      assistantId: created.id,
+      name: input.name,
+      profession: input.profession,
+      description: input.description ?? "",
+      defaultInitPrompt: input.defaultInitPrompt ?? "",
+      promptsI18n,
+      categories: input.categories ?? [],
+      skills: input.skills ?? [],
+      promptFile: promptFileUrl,
+      avatar: avatarUrl,
+      skillhubVersion: extractLatestVersion(createdRecord) ?? "1.0.0",
+    });
+    log.push({
+      step: "db.assistant_metadata_overrides.upsert",
+      rollback: async () => {
+        deleteAssistantMetadataOverride(input.enterpriseId, created.id);
+      },
     });
 
     // Step 2a + 2b: Dify enhancement branch (optional, exclusive with 2c).
@@ -792,6 +911,14 @@ export async function updateEnterpriseAssistant(
 
   let nextVersion = bumpPatchVersion(extractLatestVersion(current));
   let sourceZip: { bytes: Uint8Array; fileName: string } | undefined;
+  const currentWithOverrides = current
+    ? (applyAssistantMetadataOverrides(input.enterpriseId, [current])[0] ?? current)
+    : current;
+  const promptsI18n =
+    input.promptsI18n === undefined
+      ? getPromptsI18nField(currentWithOverrides)
+      : normalizePromptsI18n(input.promptsI18n);
+  const inputForVersion: UpdateEnterpriseAssistantInput = { ...input, promptsI18n };
 
   const currentName = getStringField(current, ["name"]) ?? input.name;
   const currentProfession = getStringField(current, ["profession"]) ?? input.profession;
@@ -808,7 +935,7 @@ export async function updateEnterpriseAssistant(
   let versionResult: { id: string; raw: unknown } | undefined;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      sourceZip = await buildUpdateSourceZip(input, current, nextVersion);
+      sourceZip = await buildUpdateSourceZip(inputForVersion, currentWithOverrides, nextVersion);
       if (!sourceZip) {
         throw new Error("unable to build assistant source package for version bump");
       }
@@ -817,6 +944,7 @@ export async function updateEnterpriseAssistant(
         profession: currentProfession,
         description: currentDescription,
         defaultInitPrompt: currentDefaultPrompt,
+        promptsI18n,
         tenantId: input.tenantCode,
         categories: currentCategories,
         skills: currentSkills,
@@ -854,14 +982,14 @@ export async function updateEnterpriseAssistant(
 
   const promptFileUrl = input.promptFileBytes
     ? resolveUploadedAssistantObjectUrl(
-        current,
+        currentWithOverrides,
         input.assistantId,
         input.promptFileName || "prompt.md",
       )
-    : getStringField(current, ["promptFile", "prompt_file"]) ?? null;
+    : getStringField(currentWithOverrides, ["promptFile", "prompt_file"]) ?? null;
   const avatarUrl = input.avatarBytes
-    ? resolveUploadedAssistantObjectUrl(current, input.assistantId, "avatar.png")
-    : getStringField(current, ["avatar"]) ?? null;
+    ? resolveUploadedAssistantObjectUrl(currentWithOverrides, input.assistantId, "avatar.png")
+    : getStringField(currentWithOverrides, ["avatar"]) ?? null;
   const override = upsertAssistantMetadataOverride({
     enterpriseId: input.enterpriseId,
     assistantId: input.assistantId,
@@ -869,6 +997,7 @@ export async function updateEnterpriseAssistant(
     profession: input.profession,
     description: input.description ?? "",
     defaultInitPrompt: input.defaultInitPrompt ?? "",
+    promptsI18n,
     categories: input.categories ?? [],
     skills: input.skills ?? [],
     promptFile: promptFileUrl,

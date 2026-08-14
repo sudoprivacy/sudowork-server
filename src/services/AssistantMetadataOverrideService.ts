@@ -17,6 +17,7 @@ export interface AssistantMetadataOverrideInput {
   profession: string;
   description?: string;
   defaultInitPrompt?: string;
+  promptsI18n?: Record<string, string[]>;
   categories?: string[];
   skills?: string[];
   promptFile?: string | null;
@@ -31,6 +32,7 @@ export interface AssistantMetadataOverride {
   profession: string;
   description: string;
   defaultInitPrompt: string;
+  promptsI18n: Record<string, string[]>;
   categories: string[];
   skills: string[];
   promptFile: string | null;
@@ -46,6 +48,7 @@ interface AssistantMetadataOverrideRow {
   profession: string;
   description: string | null;
   default_init_prompt: string | null;
+  prompts_i18n: string | null;
   categories: string | null;
   skills: string | null;
   prompt_file: string | null;
@@ -70,6 +73,30 @@ function parseStringArray(raw: string | null): string[] {
   }
 }
 
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter((item) => item.length > 0);
+}
+
+function normalizePromptsI18n(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { "zh-CN": [] };
+  }
+  const record = value as Record<string, unknown>;
+  return { "zh-CN": normalizeStringArray(record["zh-CN"]) };
+}
+
+function parsePromptsI18n(raw: string | null): Record<string, string[]> {
+  if (!raw) return { "zh-CN": [] };
+  try {
+    return normalizePromptsI18n(JSON.parse(raw));
+  } catch {
+    return { "zh-CN": [] };
+  }
+}
+
 function toOverride(row: AssistantMetadataOverrideRow): AssistantMetadataOverride {
   return {
     enterpriseId: row.enterprise_id,
@@ -78,6 +105,7 @@ function toOverride(row: AssistantMetadataOverrideRow): AssistantMetadataOverrid
     profession: row.profession,
     description: row.description ?? "",
     defaultInitPrompt: row.default_init_prompt ?? "",
+    promptsI18n: parsePromptsI18n(row.prompts_i18n),
     categories: parseStringArray(row.categories),
     skills: parseStringArray(row.skills),
     promptFile: row.prompt_file,
@@ -94,13 +122,14 @@ export function upsertAssistantMetadataOverride(
   db.prepare(
     `INSERT INTO assistant_metadata_overrides (
        enterprise_id, assistant_id, name, profession, description, default_init_prompt,
-       categories, skills, prompt_file, avatar, skillhub_version, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       prompts_i18n, categories, skills, prompt_file, avatar, skillhub_version, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(enterprise_id, assistant_id) DO UPDATE SET
        name = excluded.name,
        profession = excluded.profession,
        description = excluded.description,
        default_init_prompt = excluded.default_init_prompt,
+       prompts_i18n = excluded.prompts_i18n,
        categories = excluded.categories,
        skills = excluded.skills,
        prompt_file = COALESCE(excluded.prompt_file, assistant_metadata_overrides.prompt_file),
@@ -114,6 +143,7 @@ export function upsertAssistantMetadataOverride(
     input.profession,
     input.description ?? "",
     input.defaultInitPrompt ?? "",
+    JSON.stringify(normalizePromptsI18n(input.promptsI18n)),
     JSON.stringify(input.categories ?? []),
     JSON.stringify(input.skills ?? []),
     input.promptFile ?? null,
@@ -130,6 +160,7 @@ export function upsertAssistantMetadataOverride(
     profession: input.profession,
     description: input.description ?? "",
     defaultInitPrompt: input.defaultInitPrompt ?? "",
+    promptsI18n: normalizePromptsI18n(input.promptsI18n),
     categories: input.categories ?? [],
     skills: input.skills ?? [],
     promptFile: input.promptFile ?? null,
@@ -156,7 +187,7 @@ export function getAssistantMetadataOverrides(
   const rows = db
     .prepare(
       `SELECT enterprise_id, assistant_id, name, profession, description,
-              default_init_prompt, categories, skills, prompt_file, avatar,
+              default_init_prompt, prompts_i18n, categories, skills, prompt_file, avatar,
               skillhub_version, updated_at
          FROM assistant_metadata_overrides
         WHERE enterprise_id = ? AND assistant_id IN (${placeholders})`,
@@ -191,6 +222,8 @@ export function applyAssistantMetadataOverrides<T extends Record<string, unknown
       description: override.description,
       defaultInitPrompt: override.defaultInitPrompt,
       default_init_prompt: override.defaultInitPrompt,
+      promptsI18n: override.promptsI18n,
+      prompts_i18n: override.promptsI18n,
       categories: override.categories,
       skills: override.skills,
       updatedAt: updatedIso,

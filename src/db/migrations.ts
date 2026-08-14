@@ -44,6 +44,7 @@ export function runMigrations(): void {
   // properly-scoped 'app' type token instead of the tenant-wide 'dataset'
   // token (which Dify rejects with 401 for app endpoints).
   addColumnIfNotExists("dify_app_binding", "app_api_key", "TEXT");
+  addColumnIfNotExists("assistant_metadata_overrides", "prompts_i18n", "TEXT");
 
   // Credit application workflow
   addColumnIfNotExists(

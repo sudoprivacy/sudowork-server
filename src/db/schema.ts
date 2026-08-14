@@ -521,6 +521,7 @@ export function initSchema(): void {
       profession TEXT NOT NULL,
       description TEXT,
       default_init_prompt TEXT,
+      prompts_i18n TEXT,
       categories TEXT,
       skills TEXT,
       prompt_file TEXT,
