@@ -69,6 +69,8 @@ export interface CreateEnterpriseAssistantInput {
   promptsI18n?: AssistantPromptsI18n;
   categories?: string[];
   skills?: string[];
+  /** Complete skillhub tenant visibility list. Owner tenant must be first. */
+  tenantIds?: string[];
   promptFileBytes?: Uint8Array | Buffer;
   promptFileName?: string;
   avatarBytes?: Uint8Array | Buffer;
@@ -110,6 +112,8 @@ export interface UpdateEnterpriseAssistantInput {
   promptsI18n?: AssistantPromptsI18n;
   categories?: string[];
   skills?: string[];
+  /** Complete skillhub tenant visibility list. Owner tenant must be first. */
+  tenantIds?: string[];
   promptFileBytes?: Uint8Array | Buffer;
   promptFileName?: string;
   avatarBytes?: Uint8Array | Buffer;
@@ -122,6 +126,7 @@ export interface EnterpriseAssistantSummary {
   assistantId: string;
   enterpriseId: number;
   tenantCode: string;
+  tenantIds?: string[];
   difyAppId?: string;
   difyTenantId?: string;
   difyAppMode?: string;
@@ -134,6 +139,7 @@ export interface EnterpriseAssistantUpdateSummary {
   assistantId: string;
   enterpriseId: number;
   tenantCode: string;
+  tenantIds?: string[];
   version: string;
   raw: unknown;
 }
@@ -183,10 +189,18 @@ function detectSingleTopLevelPrefix(zip: JSZip): string {
   const entries = Object.values(zip.files)
     .filter((entry) => !entry.dir)
     .map((entry) => normalizeZipEntryName(entry.name))
-    .filter((entryName) => !entryName.includes("__MACOSX") && !entryName.endsWith(".DS_Store"))
+    .filter(
+      (entryName) =>
+        !entryName.includes("__MACOSX") && !entryName.endsWith(".DS_Store"),
+    )
     .filter(Boolean);
-  const topLevels = Array.from(new Set(entries.map((entryName) => entryName.split("/")[0])));
-  if (topLevels.length === 1 && entries.every((entryName) => entryName.includes("/"))) {
+  const topLevels = Array.from(
+    new Set(entries.map((entryName) => entryName.split("/")[0])),
+  );
+  if (
+    topLevels.length === 1 &&
+    entries.every((entryName) => entryName.includes("/"))
+  ) {
     return `${topLevels[0]}/`;
   }
   return "";
@@ -215,10 +229,13 @@ function writeAssistantPackageMetadata(
  * is no prompt either we return undefined and let the caller decide whether to
  * fail or proceed (sudohub itself will reject creation without prompt_file).
  */
-async function ensureSourceZip(input: SourceZipBuildInput): Promise<{
-  bytes: Uint8Array;
-  fileName: string;
-} | undefined> {
+async function ensureSourceZip(input: SourceZipBuildInput): Promise<
+  | {
+      bytes: Uint8Array;
+      fileName: string;
+    }
+  | undefined
+> {
   if (input.sourceZipBytes && !input.bumpMarker && !input.metadata) {
     const bytes =
       input.sourceZipBytes instanceof Uint8Array
@@ -240,8 +257,14 @@ async function ensureSourceZip(input: SourceZipBuildInput): Promise<{
       );
     }
     writeAssistantPackageMetadata(zip, prefix, input.metadata);
-    const buffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
-    return { bytes: buffer, fileName: input.sourceZipFileName || `${input.name}.zip` };
+    const buffer = await zip.generateAsync({
+      type: "uint8array",
+      compression: "DEFLATE",
+    });
+    return {
+      bytes: buffer,
+      fileName: input.sourceZipFileName || `${input.name}.zip`,
+    };
   }
   if (!input.promptFileBytes) return undefined;
 
@@ -270,7 +293,10 @@ async function ensureSourceZip(input: SourceZipBuildInput): Promise<{
     );
   }
   writeAssistantPackageMetadata(zip, "", input.metadata);
-  const buffer = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+  const buffer = await zip.generateAsync({
+    type: "uint8array",
+    compression: "DEFLATE",
+  });
   return { bytes: buffer, fileName: `${input.name}.zip` };
 }
 
@@ -304,7 +330,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function getStringField(obj: Record<string, unknown> | null, keys: string[]): string | undefined {
+function getStringField(
+  obj: Record<string, unknown> | null,
+  keys: string[],
+): string | undefined {
   if (!obj) return undefined;
   for (const key of keys) {
     const value = obj[key];
@@ -313,7 +342,10 @@ function getStringField(obj: Record<string, unknown> | null, keys: string[]): st
   return undefined;
 }
 
-function getNumberField(obj: Record<string, unknown> | null, keys: string[]): number | undefined {
+function getNumberField(
+  obj: Record<string, unknown> | null,
+  keys: string[],
+): number | undefined {
   if (!obj) return undefined;
   for (const key of keys) {
     const value = obj[key];
@@ -326,7 +358,10 @@ function getNumberField(obj: Record<string, unknown> | null, keys: string[]): nu
   return undefined;
 }
 
-function getStringArrayField(obj: Record<string, unknown> | null, keys: string[]): string[] {
+function getStringArrayField(
+  obj: Record<string, unknown> | null,
+  keys: string[],
+): string[] {
   if (!obj) return [];
   for (const key of keys) {
     const value = obj[key];
@@ -335,6 +370,58 @@ function getStringArrayField(obj: Record<string, unknown> | null, keys: string[]
     }
   }
   return [];
+}
+
+function normalizeTenantCodes(
+  values: Array<string | null | undefined>,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const value = raw?.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function getAssistantTenantCodes(
+  obj: Record<string, unknown> | null,
+  fallbackTenantCode?: string,
+): string[] {
+  const plural = getStringArrayField(obj, ["tenantIds", "tenant_ids"]);
+  if (plural.length > 0) return normalizeTenantCodes(plural);
+  return normalizeTenantCodes([
+    getStringField(obj, ["tenantId", "tenant_id"]),
+    fallbackTenantCode,
+  ]);
+}
+
+function assertAssistantOwnedByTenant(
+  assistant: Record<string, unknown> | null,
+  assistantId: string,
+  tenantCode: string,
+): string[] {
+  const tenantCodes = getAssistantTenantCodes(assistant, tenantCode);
+  const ownerTenant = tenantCodes[0];
+  if (ownerTenant && ownerTenant !== tenantCode) {
+    throw new Error(
+      `assistant ${assistantId} belongs to tenant ${ownerTenant}, not ${tenantCode}`,
+    );
+  }
+  return tenantCodes.length > 0 ? tenantCodes : [tenantCode];
+}
+
+function withTenantFields(
+  assistant: Record<string, unknown>,
+  tenantCodes: string[],
+): Record<string, unknown> {
+  return {
+    ...assistant,
+    tenantId: tenantCodes[0] ?? null,
+    tenantIds: tenantCodes,
+  };
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -348,7 +435,9 @@ function normalizePromptsI18n(value: unknown): AssistantPromptsI18n {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { "zh-CN": [] };
   }
-  return { "zh-CN": normalizeStringArray((value as Record<string, unknown>)["zh-CN"]) };
+  return {
+    "zh-CN": normalizeStringArray((value as Record<string, unknown>)["zh-CN"]),
+  };
 }
 
 function getPromptsI18nField(
@@ -372,7 +461,9 @@ function getPromptsI18nField(
   return { "zh-CN": [] };
 }
 
-function normalizeSudohubAssistant(raw: unknown): Record<string, unknown> | null {
+function normalizeSudohubAssistant(
+  raw: unknown,
+): Record<string, unknown> | null {
   const root = asRecord(raw);
   const data = asRecord(root?.data);
   const assistant = asRecord(data?.assistant);
@@ -396,11 +487,15 @@ function firstVersionFrom(value: unknown): string | undefined {
   return getStringField(record, ["version"]);
 }
 
-function extractLatestVersion(record: Record<string, unknown> | null): string | undefined {
+function extractLatestVersion(
+  record: Record<string, unknown> | null,
+): string | undefined {
   if (!record) return undefined;
   const direct = getStringField(record, ["version", "latest_version"]);
   if (direct) return direct;
-  const latest = firstVersionFrom(record.latestVersion) || firstVersionFrom(record.latest_version);
+  const latest =
+    firstVersionFrom(record.latestVersion) ||
+    firstVersionFrom(record.latest_version);
   if (latest) return latest;
   const versions = Array.isArray(record.versions) ? record.versions : [];
   return firstVersionFrom(versions[0]);
@@ -420,14 +515,20 @@ function bumpPatchVersion(current?: string): string {
   const major = Number.parseInt(majorRaw, 10);
   const minor = Number.parseInt(minorRaw ?? "0", 10);
   const patch = Number.parseInt(patchRaw ?? "0", 10);
-  if (!Number.isFinite(major) || !Number.isFinite(minor) || !Number.isFinite(patch)) {
+  if (
+    !Number.isFinite(major) ||
+    !Number.isFinite(minor) ||
+    !Number.isFinite(patch)
+  ) {
     return fallback;
   }
   return `${prefix}${major}.${minor}.${patch + 1}`;
 }
 
 function packageFileName(name: string, version: string): string {
-  const safeName = (name.trim() || "assistant").replace(/[\\/]/g, "_").slice(0, 80);
+  const safeName = (name.trim() || "assistant")
+    .replace(/[\\/]/g, "_")
+    .slice(0, 80);
   return `${safeName}-${version}.zip`;
 }
 
@@ -446,18 +547,23 @@ async function downloadHubFile(url: string): Promise<Uint8Array> {
   return new Uint8Array(await resp.arrayBuffer());
 }
 
-function extractSourceUrl(record: Record<string, unknown> | null): string | undefined {
+function extractSourceUrl(
+  record: Record<string, unknown> | null,
+): string | undefined {
   if (!record) return undefined;
   const direct = getStringField(record, ["sourceUrl", "source_url"]);
   if (direct) return direct;
-  const latest = asRecord(record.latestVersion) || asRecord(record.latest_version);
+  const latest =
+    asRecord(record.latestVersion) || asRecord(record.latest_version);
   const latestSource = getStringField(latest, ["sourceUrl", "source_url"]);
   if (latestSource) return latestSource;
   const versions = Array.isArray(record.versions) ? record.versions : [];
   return getStringField(asRecord(versions[0]), ["sourceUrl", "source_url"]);
 }
 
-function extractPromptUrl(record: Record<string, unknown> | null): string | undefined {
+function extractPromptUrl(
+  record: Record<string, unknown> | null,
+): string | undefined {
   return getStringField(record, ["promptFile", "prompt_file"]);
 }
 
@@ -506,16 +612,25 @@ interface AssistantPackageMetadataInput {
   promptsI18n?: AssistantPromptsI18n;
   categories?: string[];
   skills?: string[];
+  tenantId?: string;
+  tenantIds?: string[];
   avatar?: string | null;
   version: string;
   ruleFile?: string;
 }
 
-function buildAssistantPackageMetadata(input: AssistantPackageMetadataInput): Record<string, unknown> {
+function buildAssistantPackageMetadata(
+  input: AssistantPackageMetadataInput,
+): Record<string, unknown> {
   const nowIso = new Date().toISOString();
   const description = input.description ?? "";
   const skills = input.skills ?? [];
   const categories = input.categories ?? [];
+  const tenantIds = normalizeTenantCodes([
+    input.tenantId,
+    ...(input.tenantIds ?? []),
+  ]);
+  const tenantId = tenantIds[0] ?? input.tenantId ?? null;
   const metadata: Record<string, unknown> = {
     name: input.name,
     display_name: input.name,
@@ -534,6 +649,10 @@ function buildAssistantPackageMetadata(input: AssistantPackageMetadataInput): Re
     presetAgentType: "claude",
     source_type: "tenant",
     tag: "tenant",
+    tenantId,
+    tenantIds,
+    tenant_id: tenantId,
+    tenant_ids: tenantIds,
     skills,
     defaultEnabledSkills: skills,
     enabledSkills: skills,
@@ -565,7 +684,11 @@ async function buildUpdateSourceZip(
     promptsI18n: input.promptsI18n,
     categories: input.categories,
     skills: input.skills,
-    avatar: input.avatarBytes ? input.avatarFileName || "avatar.png" : getStringField(current, ["avatar"]),
+    tenantId: input.tenantCode,
+    tenantIds: input.tenantIds,
+    avatar: input.avatarBytes
+      ? input.avatarFileName || "avatar.png"
+      : getStringField(current, ["avatar"]),
     version: nextVersion,
     ruleFile: input.promptFileBytes ? `${input.name}.md` : undefined,
   });
@@ -594,7 +717,10 @@ async function buildUpdateSourceZip(
         metadata,
       });
     } catch (err) {
-      console.warn("sudohub existing source_url download failed; trying prompt_file:", err);
+      console.warn(
+        "sudohub existing source_url download failed; trying prompt_file:",
+        err,
+      );
     }
   }
 
@@ -624,20 +750,27 @@ async function readPromptTextFromSourceZip(
   const preferredFileName = assistantName ? `${assistantName}.md` : "";
   const preferred =
     preferredFileName.length > 0
-      ? markdownFiles.find((entry) => entry.name.split("/").pop() === preferredFileName)
+      ? markdownFiles.find(
+          (entry) => entry.name.split("/").pop() === preferredFileName,
+        )
       : undefined;
   const selected = preferred ?? markdownFiles[0];
   if (!selected) return null;
   return selected.async("string");
 }
 
-async function loadAssistantPromptText(record: Record<string, unknown>): Promise<string | null> {
+async function loadAssistantPromptText(
+  record: Record<string, unknown>,
+): Promise<string | null> {
   const promptUrl = extractPromptUrl(record);
   if (promptUrl) {
     try {
       return new TextDecoder().decode(await downloadHubFile(promptUrl));
     } catch (err) {
-      console.warn("sudohub prompt_file download failed; trying source_url:", err);
+      console.warn(
+        "sudohub prompt_file download failed; trying source_url:",
+        err,
+      );
     }
   }
 
@@ -645,7 +778,10 @@ async function loadAssistantPromptText(record: Record<string, unknown>): Promise
   if (!sourceUrl) return null;
   try {
     const assistantName = getStringField(record, ["name"]);
-    return readPromptTextFromSourceZip(await downloadHubFile(sourceUrl), assistantName);
+    return readPromptTextFromSourceZip(
+      await downloadHubFile(sourceUrl),
+      assistantName,
+    );
   } catch (err) {
     console.warn("sudohub source_url prompt extraction failed:", err);
     return null;
@@ -663,14 +799,17 @@ export async function getEnterpriseAssistantDetail(input: {
     throw new Error(`assistant ${input.assistantId} not found`);
   }
 
-  const currentTenant = getStringField(current, ["tenantId", "tenant_id"]);
-  if (currentTenant && currentTenant !== input.tenantCode) {
-    throw new Error(
-      `assistant ${input.assistantId} belongs to tenant ${currentTenant}, not ${input.tenantCode}`,
-    );
-  }
+  const tenantCodes = assertAssistantOwnedByTenant(
+    current,
+    input.assistantId,
+    input.tenantCode,
+  );
 
-  const assistant = applyAssistantMetadataOverrides(input.enterpriseId, [current])[0] ?? current;
+  const assistant = withTenantFields(
+    applyAssistantMetadataOverrides(input.enterpriseId, [current])[0] ??
+      current,
+    tenantCodes,
+  );
   const promptText = await loadAssistantPromptText(assistant);
   return { assistant, promptText };
 }
@@ -683,8 +822,14 @@ export async function createEnterpriseAssistant(
   let difyAppId: string | undefined;
   let difyTenantId: string | undefined;
 
-  const datasetIds = Array.from(new Set(input.datasetIds ?? [])).filter((id) => id && id.length > 0);
+  const datasetIds = Array.from(new Set(input.datasetIds ?? [])).filter(
+    (id) => id && id.length > 0,
+  );
   const promptsI18n = normalizePromptsI18n(input.promptsI18n);
+  const tenantIds = normalizeTenantCodes([
+    input.tenantCode,
+    ...(input.tenantIds ?? []),
+  ]);
   if (input.enhancement && datasetIds.length > 0) {
     throw new Error(
       "enhancement and dataset attachment are mutually exclusive (see design doc 「知识增强：两个维度」)",
@@ -712,7 +857,11 @@ export async function createEnterpriseAssistant(
         promptsI18n,
         categories: input.categories,
         skills: input.skills,
-        avatar: input.avatarBytes ? input.avatarFileName || "avatar.png" : undefined,
+        tenantId: input.tenantCode,
+        tenantIds,
+        avatar: input.avatarBytes
+          ? input.avatarFileName || "avatar.png"
+          : undefined,
         version: "1.0.0",
         ruleFile: input.promptFileBytes ? `${input.name}.md` : undefined,
       }),
@@ -725,6 +874,7 @@ export async function createEnterpriseAssistant(
       description: input.description,
       defaultInitPrompt: input.defaultInitPrompt,
       promptsI18n,
+      tenantIds,
       tenantId: input.tenantCode,
       categories: input.categories,
       skills: input.skills,
@@ -757,7 +907,11 @@ export async function createEnterpriseAssistant(
     const avatarUrl =
       getStringField(createdRecord, ["avatar"]) ??
       (input.avatarBytes
-        ? resolveUploadedAssistantObjectUrl(createdRecord, created.id, "avatar.png")
+        ? resolveUploadedAssistantObjectUrl(
+            createdRecord,
+            created.id,
+            "avatar.png",
+          )
         : null);
     upsertAssistantMetadataOverride({
       enterpriseId: input.enterpriseId,
@@ -804,7 +958,8 @@ export async function createEnterpriseAssistant(
       difyAppId = created2.app_id;
       log.push({
         step: "dify.createApp",
-        rollback: async () => difySystem.deleteApp(binding.dify_tenant_id, created2.app_id),
+        rollback: async () =>
+          difySystem.deleteApp(binding.dify_tenant_id, created2.app_id),
       });
 
       const stored = persistedMode(input.enhancement.mode);
@@ -846,7 +1001,13 @@ export async function createEnterpriseAssistant(
       const inserted: string[] = [];
       try {
         for (const id of datasetIds) {
-          stmt.run(input.enterpriseId, assistantId, binding.dify_tenant_id, id, now);
+          stmt.run(
+            input.enterpriseId,
+            assistantId,
+            binding.dify_tenant_id,
+            id,
+            now,
+          );
           inserted.push(id);
         }
       } catch (err) {
@@ -885,9 +1046,12 @@ export async function createEnterpriseAssistant(
       assistantId,
       enterpriseId: input.enterpriseId,
       tenantCode: input.tenantCode,
+      tenantIds,
       difyAppId,
       difyTenantId,
-      difyAppMode: input.enhancement ? persistedMode(input.enhancement.mode) : undefined,
+      difyAppMode: input.enhancement
+        ? persistedMode(input.enhancement.mode)
+        : undefined,
       enhancement: input.enhancement ? { mode: input.enhancement.mode } : null,
       datasetIds: input.enhancement ? [] : datasetIds,
     };
@@ -902,27 +1066,37 @@ export async function updateEnterpriseAssistant(
 ): Promise<EnterpriseAssistantUpdateSummary> {
   const currentRaw = await sudohub.getAssistant(input.assistantId);
   const current = normalizeSudohubAssistant(currentRaw);
-  const currentTenant = getStringField(current, ["tenantId", "tenant_id"]);
-  if (currentTenant && currentTenant !== input.tenantCode) {
-    throw new Error(
-      `assistant ${input.assistantId} belongs to tenant ${currentTenant}, not ${input.tenantCode}`,
-    );
-  }
+  const currentTenantCodes = assertAssistantOwnedByTenant(
+    current,
+    input.assistantId,
+    input.tenantCode,
+  );
+  const tenantIds =
+    input.tenantIds !== undefined
+      ? normalizeTenantCodes([input.tenantCode, ...input.tenantIds])
+      : currentTenantCodes;
 
   let nextVersion = bumpPatchVersion(extractLatestVersion(current));
   let sourceZip: { bytes: Uint8Array; fileName: string } | undefined;
   const currentWithOverrides = current
-    ? (applyAssistantMetadataOverrides(input.enterpriseId, [current])[0] ?? current)
+    ? (applyAssistantMetadataOverrides(input.enterpriseId, [current])[0] ??
+      current)
     : current;
   const promptsI18n =
     input.promptsI18n === undefined
       ? getPromptsI18nField(currentWithOverrides)
       : normalizePromptsI18n(input.promptsI18n);
-  const inputForVersion: UpdateEnterpriseAssistantInput = { ...input, promptsI18n };
+  const inputForVersion: UpdateEnterpriseAssistantInput = {
+    ...input,
+    promptsI18n,
+    tenantIds,
+  };
 
   const currentName = getStringField(current, ["name"]) ?? input.name;
-  const currentProfession = getStringField(current, ["profession"]) ?? input.profession;
-  const currentDescription = getStringField(current, ["description"]) ?? input.description ?? "";
+  const currentProfession =
+    getStringField(current, ["profession"]) ?? input.profession;
+  const currentDescription =
+    getStringField(current, ["description"]) ?? input.description ?? "";
   const currentDefaultPrompt =
     getStringField(current, ["defaultInitPrompt", "default_init_prompt"]) ??
     input.defaultInitPrompt ??
@@ -935,9 +1109,15 @@ export async function updateEnterpriseAssistant(
   let versionResult: { id: string; raw: unknown } | undefined;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      sourceZip = await buildUpdateSourceZip(inputForVersion, currentWithOverrides, nextVersion);
+      sourceZip = await buildUpdateSourceZip(
+        inputForVersion,
+        currentWithOverrides,
+        nextVersion,
+      );
       if (!sourceZip) {
-        throw new Error("unable to build assistant source package for version bump");
+        throw new Error(
+          "unable to build assistant source package for version bump",
+        );
       }
       versionResult = await sudohub.createAssistantVersion({
         name: currentName,
@@ -945,6 +1125,7 @@ export async function updateEnterpriseAssistant(
         description: currentDescription,
         defaultInitPrompt: currentDefaultPrompt,
         promptsI18n,
+        tenantIds,
         tenantId: input.tenantCode,
         categories: currentCategories,
         skills: currentSkills,
@@ -980,16 +1161,26 @@ export async function updateEnterpriseAssistant(
     );
   }
 
+  await sudohub.updateAssistant(input.assistantId, {
+    tenantIds,
+    tenantId: input.tenantCode,
+  });
+
   const promptFileUrl = input.promptFileBytes
     ? resolveUploadedAssistantObjectUrl(
         currentWithOverrides,
         input.assistantId,
         input.promptFileName || "prompt.md",
       )
-    : getStringField(currentWithOverrides, ["promptFile", "prompt_file"]) ?? null;
+    : (getStringField(currentWithOverrides, ["promptFile", "prompt_file"]) ??
+      null);
   const avatarUrl = input.avatarBytes
-    ? resolveUploadedAssistantObjectUrl(currentWithOverrides, input.assistantId, "avatar.png")
-    : getStringField(currentWithOverrides, ["avatar"]) ?? null;
+    ? resolveUploadedAssistantObjectUrl(
+        currentWithOverrides,
+        input.assistantId,
+        "avatar.png",
+      )
+    : (getStringField(currentWithOverrides, ["avatar"]) ?? null);
   const override = upsertAssistantMetadataOverride({
     enterpriseId: input.enterpriseId,
     assistantId: input.assistantId,
@@ -1009,6 +1200,7 @@ export async function updateEnterpriseAssistant(
     assistantId: input.assistantId,
     enterpriseId: input.enterpriseId,
     tenantCode: input.tenantCode,
+    tenantIds,
     version: nextVersion,
     raw: {
       skillhubVersion: versionResult.raw,
@@ -1068,8 +1260,7 @@ export async function setEnhancement(args: {
            WHERE enterprise_id = ? AND assistant_id = ?`,
       )
       .get(args.enterpriseId, args.assistantId) as
-      | { dify_app_id: string; dify_app_mode: string }
-      | undefined;
+      { dify_app_id: string; dify_app_mode: string } | undefined;
     if (existing) {
       const desired = persistedMode(args.mode);
       if (existing.dify_app_mode !== desired) {
@@ -1078,7 +1269,10 @@ export async function setEnhancement(args: {
             `disable enhancement first (which deletes the Dify App), then re-enable with the new mode`,
         );
       }
-      return { difyAppId: existing.dify_app_id, difyAppMode: existing.dify_app_mode };
+      return {
+        difyAppId: existing.dify_app_id,
+        difyAppMode: existing.dify_app_mode,
+      };
     }
 
     const created = await difySystem.createApp(
@@ -1120,8 +1314,7 @@ export async function setEnhancement(args: {
          WHERE enterprise_id = ? AND assistant_id = ?`,
     )
     .get(args.enterpriseId, args.assistantId) as
-    | { dify_tenant_id: string; dify_app_id: string }
-    | undefined;
+    { dify_tenant_id: string; dify_app_id: string } | undefined;
   if (!row) return {};
   try {
     await difySystem.deleteApp(row.dify_tenant_id, row.dify_app_id);
@@ -1156,7 +1349,10 @@ export interface EnhancementInfo {
  * so the client invokes `/enhancement/invoke` and the server's RAG branch
  * fires.
  */
-export function getEnhancement(enterpriseId: number, assistantId: string): EnhancementInfo {
+export function getEnhancement(
+  enterpriseId: number,
+  assistantId: string,
+): EnhancementInfo {
   const appRow = db
     .prepare(
       `SELECT dify_tenant_id, dify_app_id, dify_app_mode
@@ -1171,7 +1367,8 @@ export function getEnhancement(enterpriseId: number, assistantId: string): Enhan
     // Defensive: legacy rows may still carry `rag-only` if the migration
     // script hasn't run yet. Treat them as agent-chat so callers don't
     // crash; the migration will rewrite them later.
-    const mode: EnhancementProbeMode = stored === "workflow" ? "workflow" : "agent-chat";
+    const mode: EnhancementProbeMode =
+      stored === "workflow" ? "workflow" : "agent-chat";
     return {
       enabled: true,
       mode,

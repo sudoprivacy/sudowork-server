@@ -32,6 +32,7 @@ import {
   ProfileOutlined,
   EyeOutlined,
   ThunderboltOutlined,
+  ShareAltOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
@@ -41,6 +42,7 @@ import { useDifyFeatureFlag } from "../hooks/useDifyFeatureFlag";
 type DifyEnhancementMode = "agent-chat" | "workflow";
 type EnhancementProbeMode = DifyEnhancementMode | "rag-only";
 type KnowledgeMode = "none" | "datasets" | "enhancement";
+type SharedTenantScope = "none" | "selected";
 
 /** Display labels for Dify enhancement modes (2026-06-22 P2.5.1: rag-only retired). */
 const ENH_MODE_LABEL: Record<DifyEnhancementMode, string> = {
@@ -55,7 +57,10 @@ const ENH_MODE_LABEL: Record<DifyEnhancementMode, string> = {
  * persona definitions. The four flavors map 1:1 to "no enhancement / rag-only /
  * workflow / agent-chat" so the admin gets a coherent starting point per mode.
  */
-const PROMPT_TEMPLATES: Record<"basic" | "rag" | "workflow" | "agent", { label: string; body: string }> = {
+const PROMPT_TEMPLATES: Record<
+  "basic" | "rag" | "workflow" | "agent",
+  { label: string; body: string }
+> = {
   basic: {
     label: "基础模板",
     body: `# 你是 {{name}}，一位 {{profession}}。
@@ -199,7 +204,9 @@ function PromptExamplesFormList(): React.JSX.Element {
                   <Input.TextArea
                     rows={2}
                     placeholder={
-                      PROMPT_EXAMPLE_PLACEHOLDERS[index % PROMPT_EXAMPLE_PLACEHOLDERS.length]
+                      PROMPT_EXAMPLE_PLACEHOLDERS[
+                        index % PROMPT_EXAMPLE_PLACEHOLDERS.length
+                      ]
                     }
                     autoSize={false}
                   />
@@ -216,7 +223,12 @@ function PromptExamplesFormList(): React.JSX.Element {
                 </Tooltip>
               </Space>
             ))}
-            <Button type="dashed" block icon={<PlusOutlined />} onClick={() => add("")}>
+            <Button
+              type="dashed"
+              block
+              icon={<PlusOutlined />}
+              onClick={() => add("")}
+            >
               添加案例
             </Button>
           </Space>
@@ -240,6 +252,9 @@ interface AclSummary {
 interface EnterpriseAssistantMetaRow {
   assistant_id: string;
   enhancement: EnhancementInfo;
+  tenantIds?: string[];
+  shared_tenant_scope?: SharedTenantScope;
+  shared_tenant_ids?: string[];
   /** 纯知识库路径关联的 dataset ids（互斥于 enhancement.enabled）。 */
   dataset_ids?: string[];
   acl_summary: AclSummary;
@@ -250,11 +265,17 @@ interface EnterpriseAssistantDetailPayload {
   promptText?: string | null;
   prompt_text?: string | null;
   enhancement?: EnhancementInfo;
+  tenantIds?: string[];
+  tenant_ids?: string[];
+  shared_tenant_scope?: SharedTenantScope;
+  shared_tenant_ids?: string[];
   dataset_ids?: string[];
   acl_summary?: AclSummary;
 }
 
-function isDifyEnhancementMode(mode: EnhancementInfo["mode"]): mode is DifyEnhancementMode {
+function isDifyEnhancementMode(
+  mode: EnhancementInfo["mode"],
+): mode is DifyEnhancementMode {
   return mode === "agent-chat" || mode === "workflow";
 }
 
@@ -263,32 +284,96 @@ function isKnowledgeMode(value: unknown): value is KnowledgeMode {
 }
 
 function stringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
-function getDifyAppId(enhancement: EnhancementInfo | null | undefined): string | undefined {
+function normalizeSharedTenantScope(
+  value: unknown,
+): SharedTenantScope | undefined {
+  if (value === "selected" || value === "none") return value;
+  return undefined;
+}
+
+function uniqueStringList(values: string[]): string[] {
+  return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
+}
+
+function sharedTenantIdsFromTenantIds(
+  tenantIds: string[] | undefined,
+  ownerTenantId: string | null | undefined,
+): string[] {
+  if (!ownerTenantId) return uniqueStringList(tenantIds ?? []);
+  return uniqueStringList(tenantIds ?? []).filter(
+    (tenantId) => tenantId !== ownerTenantId,
+  );
+}
+
+function inferSharedTenantScope(sharedTenantIds: string[]): SharedTenantScope {
+  if (sharedTenantIds.length === 0) return "none";
+  return "selected";
+}
+
+interface SharedTenantFormValues {
+  shared_tenant_scope?: unknown;
+  shared_tenant_ids?: unknown;
+}
+
+function appendSharedTenantFields(
+  form: FormData,
+  values: SharedTenantFormValues,
+): void {
+  const scope =
+    normalizeSharedTenantScope(values.shared_tenant_scope) ?? "none";
+  form.append("shared_tenant_scope", scope);
+  if (scope === "selected") {
+    const selectedTenantIds = Array.isArray(values.shared_tenant_ids)
+      ? values.shared_tenant_ids.filter(
+          (item): item is string => typeof item === "string",
+        )
+      : [];
+    form.append(
+      "shared_tenant_ids",
+      JSON.stringify(uniqueStringList(selectedTenantIds)),
+    );
+  }
+}
+
+function getDifyAppId(
+  enhancement: EnhancementInfo | null | undefined,
+): string | undefined {
   return enhancement?.dify_app_id || enhancement?.difyAppId;
 }
 
 function getDifyAppMode(
   enhancement: EnhancementInfo | null | undefined,
 ): DifyEnhancementMode | undefined {
-  if (!enhancement?.enabled || enhancement.mode === "rag-only" || !getDifyAppId(enhancement)) {
+  if (
+    !enhancement?.enabled ||
+    enhancement.mode === "rag-only" ||
+    !getDifyAppId(enhancement)
+  ) {
     return undefined;
   }
-  return isDifyEnhancementMode(enhancement.mode) ? enhancement.mode : "agent-chat";
+  return isDifyEnhancementMode(enhancement.mode)
+    ? enhancement.mode
+    : "agent-chat";
 }
 
 function getKnowledgeMode(
   enhancement: EnhancementInfo | null | undefined,
   datasetIds: string[],
 ): KnowledgeMode {
-  if (datasetIds.length > 0 || enhancement?.mode === "rag-only") return "datasets";
+  if (datasetIds.length > 0 || enhancement?.mode === "rag-only")
+    return "datasets";
   if (getDifyAppMode(enhancement)) return "enhancement";
   return "none";
 }
 
-function hasDifyStudioTarget(enhancement: EnhancementInfo | null | undefined): boolean {
+function hasDifyStudioTarget(
+  enhancement: EnhancementInfo | null | undefined,
+): boolean {
   return Boolean(getDifyAppMode(enhancement) && getDifyAppId(enhancement));
 }
 
@@ -349,7 +434,9 @@ function readStringArrayField(
       try {
         const parsed = JSON.parse(value);
         if (Array.isArray(parsed)) {
-          return parsed.filter((item): item is string => typeof item === "string");
+          return parsed.filter(
+            (item): item is string => typeof item === "string",
+          );
         }
       } catch {
         return value
@@ -369,7 +456,9 @@ function normalizePromptExamples(value: unknown): string[] {
     .filter((item) => item.length > 0);
 }
 
-function normalizePromptsI18nValue(value: unknown): Record<string, string[]> | undefined {
+function normalizePromptsI18nValue(
+  value: unknown,
+): Record<string, string[]> | undefined {
   if (typeof value === "string") {
     try {
       return normalizePromptsI18nValue(JSON.parse(value));
@@ -377,8 +466,13 @@ function normalizePromptsI18nValue(value: unknown): Record<string, string[]> | u
       return undefined;
     }
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  return { "zh-CN": normalizePromptExamples((value as Record<string, unknown>)["zh-CN"]) };
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  return {
+    "zh-CN": normalizePromptExamples(
+      (value as Record<string, unknown>)["zh-CN"],
+    ),
+  };
 }
 
 function readPromptsI18nField(
@@ -393,7 +487,9 @@ function readPromptsI18nField(
   return fallback ?? undefined;
 }
 
-function getPromptExamples(promptsI18n?: Record<string, string[]> | null): string[] {
+function getPromptExamples(
+  promptsI18n?: Record<string, string[]> | null,
+): string[] {
   return normalizePromptExamples(promptsI18n?.["zh-CN"]);
 }
 
@@ -414,21 +510,42 @@ function mergeAssistantDetailRecord(
     profession: readStringField(detail, ["profession"]) ?? row.profession,
     description: readStringField(detail, ["description"]) ?? row.description,
     avatar: readNullableStringField(detail, ["avatar"], row.avatar),
-    categories: readStringArrayField(detail, ["categories"], row.categories ?? []),
+    categories: readStringArrayField(
+      detail,
+      ["categories"],
+      row.categories ?? [],
+    ),
     defaultInitPrompt: readNullableStringField(
       detail,
       ["defaultInitPrompt", "default_init_prompt"],
       row.defaultInitPrompt,
     ),
     promptsI18n: readPromptsI18nField(detail, row.promptsI18n),
-    promptFile: readNullableStringField(detail, ["promptFile", "prompt_file"], row.promptFile),
-    sourceUrl: readStringField(detail, ["sourceUrl", "source_url"]) ?? row.sourceUrl,
+    promptFile: readNullableStringField(
+      detail,
+      ["promptFile", "prompt_file"],
+      row.promptFile,
+    ),
+    sourceUrl:
+      readStringField(detail, ["sourceUrl", "source_url"]) ?? row.sourceUrl,
     skills: readStringArrayField(detail, ["skills"], row.skills ?? []),
-    sortOrder: readNumberField(detail, ["sortOrder", "sort_order"]) ?? row.sortOrder,
+    sortOrder:
+      readNumberField(detail, ["sortOrder", "sort_order"]) ?? row.sortOrder,
     status: readNumberField(detail, ["status"]) ?? row.status,
-    tenantId: readNullableStringField(detail, ["tenantId", "tenant_id"], row.tenantId),
-    createdAt: readStringField(detail, ["createdAt", "created_at"]) ?? row.createdAt,
-    updatedAt: readStringField(detail, ["updatedAt", "updated_at"]) ?? row.updatedAt,
+    tenantId: readNullableStringField(
+      detail,
+      ["tenantId", "tenant_id"],
+      row.tenantId,
+    ),
+    tenantIds: readStringArrayField(
+      detail,
+      ["tenantIds", "tenant_ids"],
+      row.tenantIds ?? (row.tenantId ? [row.tenantId] : []),
+    ),
+    createdAt:
+      readStringField(detail, ["createdAt", "created_at"]) ?? row.createdAt,
+    updatedAt:
+      readStringField(detail, ["updatedAt", "updated_at"]) ?? row.updatedAt,
   };
 }
 
@@ -495,6 +612,7 @@ interface Assistant {
   sortOrder: number;
   status: number;
   tenantId: string | null;
+  tenantIds?: string[];
   createdAt: string;
   updatedAt: string;
   latestVersion?: AssistantVersion | null;
@@ -505,13 +623,17 @@ interface Assistant {
 function getAssistantLatestVersion(record: Assistant): AssistantVersion | null {
   if (record.latestVersion) return record.latestVersion;
   if (record.latest_version) return record.latest_version;
-  return typeof record.version === "object" && record.version ? record.version : null;
+  return typeof record.version === "object" && record.version
+    ? record.version
+    : null;
 }
 
 function getAssistantVersionText(record: Assistant): string {
   const latest = getAssistantLatestVersion(record);
   if (latest?.version) return latest.version;
-  return typeof record.version === "string" && record.version.trim() ? record.version : "-";
+  return typeof record.version === "string" && record.version.trim()
+    ? record.version
+    : "-";
 }
 
 function getAssistantSourceUrl(record: Assistant): string | undefined {
@@ -542,21 +664,31 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [enterprises, setEnterprises] = useState<Enterprise[]>([]);
   const [approvingSkillId, setApprovingSkillId] = useState<string | null>(null);
-  const [approvingAssistantId, setApprovingAssistantId] = useState<string | null>(null);
+  const [approvingAssistantId, setApprovingAssistantId] = useState<
+    string | null
+  >(null);
   const [deletingSkillId, setDeletingSkillId] = useState<string | null>(null);
-  const [deletingAssistantId, setDeletingAssistantId] = useState<string | null>(null);
+  const [deletingAssistantId, setDeletingAssistantId] = useState<string | null>(
+    null,
+  );
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedEnterprise, setSelectedEnterprise] = useState<string | number | null>(null);
-  const [detailRecord, setDetailRecord] = useState<Skill | Assistant | null>(null);
+  const [selectedEnterprise, setSelectedEnterprise] = useState<string | null>(
+    null,
+  );
+  const [detailRecord, setDetailRecord] = useState<Skill | Assistant | null>(
+    null,
+  );
   const [detailOpen, setDetailOpen] = useState(false);
   const [filterForm] = Form.useForm();
 
   // Dify-enhancement annotations for the assistants tab. Loaded once per
   // tenant change so each list page costs at most one extra request. Keyed
   // by sudohub assistant_id so the columns can short-circuit on lookup.
-  const [enhancementMap, setEnhancementMap] = useState<Record<string, EnhancementInfo>>({});
+  const [enhancementMap, setEnhancementMap] = useState<
+    Record<string, EnhancementInfo>
+  >({});
   const [aclMap, setAclMap] = useState<Record<string, AclSummary>>({});
   // 2026-06-22 P2.5.1: per-assistant dataset attachment (mutually exclusive
   // with enhancement). Drives the new "知识增强" Radio in the create modal /
@@ -577,9 +709,13 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   // Prompt editor: inline-edit (default) mirrors the client-side AssistantEditDrawer
   // (Edit / Preview tabs over a single Markdown TextArea). Upload remains a fallback
   // for admins who already have a curated .md file.
-  const [promptInputMode, setPromptInputMode] = useState<"inline" | "upload">("inline");
+  const [promptInputMode, setPromptInputMode] = useState<"inline" | "upload">(
+    "inline",
+  );
   const [promptText, setPromptText] = useState<string>("");
-  const [promptViewMode, setPromptViewMode] = useState<"edit" | "preview">("edit");
+  const [promptViewMode, setPromptViewMode] = useState<"edit" | "preview">(
+    "edit",
+  );
   const [creating, setCreating] = useState(false);
 
   // -- Edit drawer state (Phase 3 port) --
@@ -593,16 +729,26 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   // form and gets dropped. Instead we snapshot the initial values into state
   // and pass them via Form's `initialValues` prop, which the freshly-mounted
   // form reads on registration.
-  const [drawerInitialValues, setDrawerInitialValues] = useState<Record<string, unknown>>({});
+  const [drawerInitialValues, setDrawerInitialValues] = useState<
+    Record<string, unknown>
+  >({});
   const [editPromptFile, setEditPromptFile] = useState<UploadFile | null>(null);
   const [editAvatarFile, setEditAvatarFile] = useState<UploadFile | null>(null);
-  const [editPromptInputMode, setEditPromptInputMode] = useState<"inline" | "upload">("inline");
+  const [editPromptInputMode, setEditPromptInputMode] = useState<
+    "inline" | "upload"
+  >("inline");
   const [editPromptText, setEditPromptText] = useState<string>("");
-  const [editPromptViewMode, setEditPromptViewMode] = useState<"edit" | "preview">("edit");
+  const [editPromptViewMode, setEditPromptViewMode] = useState<
+    "edit" | "preview"
+  >("edit");
 
   // -- Picker data (users for ACL + datasets for binding) --
-  const [users, setUsers] = useState<Array<{ id: number; phone: string; nickname: string }>>([]);
-  const [datasets, setDatasets] = useState<Array<{ id: string; name: string }>>([]);
+  const [users, setUsers] = useState<
+    Array<{ id: number; phone: string; nickname: string }>
+  >([]);
+  const [datasets, setDatasets] = useState<Array<{ id: string; name: string }>>(
+    [],
+  );
 
   const userStr = localStorage.getItem("admin_user");
   let currentUser: any = {};
@@ -614,6 +760,9 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
 
   const isSuperAdmin = currentUser.role === "SUPER_ADMIN";
   const currentTenantId = currentUser.enterprise_code || currentUser.tenant_id;
+  const activeTenantId = (
+    isSuperAdmin ? selectedEnterprise : currentTenantId
+  ) as string | null;
   const isSkillsPage = assetType === "skills";
   const pageTitle = isSkillsPage ? "专属技能" : "专属智能体";
 
@@ -638,18 +787,23 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       return match?.id;
     }
     return (currentUser.enterprise_id as number | undefined) ?? undefined;
-  }, [isSuperAdmin, selectedEnterprise, enterprises, currentUser.enterprise_id]);
+  }, [
+    isSuperAdmin,
+    selectedEnterprise,
+    enterprises,
+    currentUser.enterprise_id,
+  ]);
 
   const isCursorResponseSuccess = (response: any) =>
     response?.success === true || response?.status === "success";
 
   useEffect(() => {
-    if (isSuperAdmin) {
+    if (isSuperAdmin || !isSkillsPage) {
       void loadEnterprises();
     } else if (currentTenantId) {
-      setSelectedEnterprise(currentTenantId as any);
+      setSelectedEnterprise(currentTenantId);
     }
-  }, []);
+  }, [currentTenantId, isSkillsPage, isSuperAdmin]);
 
   useEffect(() => {
     if (selectedEnterprise || currentTenantId) {
@@ -714,7 +868,13 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     return () => {
       cancelled = true;
     };
-  }, [isSkillsPage, difyDisabled, selectedEnterpriseId, assetType, annotationsTick]);
+  }, [
+    isSkillsPage,
+    difyDisabled,
+    selectedEnterpriseId,
+    assetType,
+    annotationsTick,
+  ]);
 
   // Load users (for the ACL "specific users" picker). One pass per tenant
   // change. Failure here is non-fatal — admin can still pick "全员可见".
@@ -727,11 +887,15 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     let cancelled = false;
     (async () => {
       try {
-        const resp = (await adminApi.getUsers({ enterprise_id: selectedEnterpriseId })) as any;
+        const resp = (await adminApi.getUsers({
+          enterprise_id: selectedEnterpriseId,
+        })) as any;
         if (cancelled) return;
         if (resp?.success) {
           // adminApi.getUsers shape may be { data: User[] } or { data: { list: [] }}
-          const list = Array.isArray(resp.data) ? resp.data : resp.data?.list ?? [];
+          const list = Array.isArray(resp.data)
+            ? resp.data
+            : (resp.data?.list ?? []);
           setUsers(list);
         }
       } catch {
@@ -793,8 +957,89 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     }
   };
 
-  const getTenantId = () =>
-    (isSuperAdmin ? selectedEnterprise : currentTenantId) as string | null;
+  const getTenantId = useCallback(() => activeTenantId, [activeTenantId]);
+
+  const tenantNameByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const enterprise of enterprises) {
+      map.set(enterprise.code, enterprise.name);
+    }
+    return map;
+  }, [enterprises]);
+
+  const shareableTenantOptions = useMemo(
+    () =>
+      enterprises
+        .filter(
+          (enterprise) => enterprise.code && enterprise.code !== activeTenantId,
+        )
+        .map((enterprise) => ({
+          label: `${enterprise.name} (${enterprise.code})`,
+          value: enterprise.code,
+        })),
+    [enterprises, activeTenantId],
+  );
+
+  const formatTenantName = (tenantId: string): string =>
+    tenantNameByCode.get(tenantId)
+      ? `${tenantNameByCode.get(tenantId)} (${tenantId})`
+      : tenantId;
+
+  const getRecordSharedTenantIds = (record: Assistant): string[] =>
+    sharedTenantIdsFromTenantIds(record.tenantIds, activeTenantId);
+
+  const getRecordSharedTenantScope = (record: Assistant): SharedTenantScope =>
+    inferSharedTenantScope(getRecordSharedTenantIds(record));
+
+  const renderSharedTenantFormItems = () => (
+    <>
+      <SectionTitle
+        icon={<ShareAltOutlined />}
+        text="跨租户分享"
+        color="#1677ff"
+      />
+      <Form.Item
+        name="shared_tenant_scope"
+        label="分享范围"
+        initialValue="none"
+      >
+        <Radio.Group
+          options={[
+            { label: "不分享", value: "none" },
+            {
+              label: "指定租户",
+              value: "selected",
+              disabled: shareableTenantOptions.length === 0,
+            },
+          ]}
+        />
+      </Form.Item>
+      <Form.Item
+        noStyle
+        shouldUpdate={(prev, current) =>
+          prev.shared_tenant_scope !== current.shared_tenant_scope
+        }
+      >
+        {({ getFieldValue }) =>
+          getFieldValue("shared_tenant_scope") === "selected" ? (
+            <Form.Item
+              name="shared_tenant_ids"
+              label="分享租户"
+              rules={[{ required: true, message: "请选择至少一个租户" }]}
+            >
+              <Select
+                mode="multiple"
+                showSearch
+                optionFilterProp="label"
+                options={shareableTenantOptions}
+                placeholder="选择租户"
+              />
+            </Form.Item>
+          ) : null
+        }
+      </Form.Item>
+    </>
+  );
 
   const resetAndLoadData = (query: string = searchQuery) => {
     if (isSkillsPage) {
@@ -829,12 +1074,16 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           message.error((response as any).message || "加载技能列表失败");
         }
       } catch (error: any) {
-        message.error(error?.response?.data?.message || error?.message || "加载技能列表失败，请刷新重试");
+        message.error(
+          error?.response?.data?.message ||
+            error?.message ||
+            "加载技能列表失败，请刷新重试",
+        );
       } finally {
         setLoading(false);
       }
     },
-    [selectedEnterprise, currentTenantId, isSuperAdmin]
+    [getTenantId],
   );
 
   const loadAssistants = useCallback(
@@ -852,19 +1101,25 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         if (isCursorResponseSuccess(response)) {
           const data = (response as any).data;
           const newAssistants = (data.assistants || []) as Assistant[];
-          setAssistants((prev) => (cursor ? [...prev, ...newAssistants] : newAssistants));
+          setAssistants((prev) =>
+            cursor ? [...prev, ...newAssistants] : newAssistants,
+          );
           setNextCursor(data.next_cursor);
           setHasMore(data.has_more);
         } else {
           message.error((response as any).message || "加载智能体列表失败");
         }
       } catch (error: any) {
-        message.error(error?.response?.data?.message || error?.message || "加载智能体列表失败，请刷新重试");
+        message.error(
+          error?.response?.data?.message ||
+            error?.message ||
+            "加载智能体列表失败，请刷新重试",
+        );
       } finally {
         setLoading(false);
       }
     },
-    [selectedEnterprise, currentTenantId, isSuperAdmin]
+    [getTenantId],
   );
 
   const loadData = useCallback(
@@ -875,7 +1130,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         await loadAssistants(cursor, query);
       }
     },
-    [isSkillsPage, loadSkills, loadAssistants]
+    [isSkillsPage, loadSkills, loadAssistants],
   );
 
   const handleSearch = (value: string) => {
@@ -947,7 +1202,9 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       const blob = new Blob([promptText], { type: "text/markdown" });
       const baseName =
         (typeof values.name === "string" && values.name.trim()) || "prompt";
-      promptFileToSend = new File([blob], `${baseName}.md`, { type: "text/markdown" });
+      promptFileToSend = new File([blob], `${baseName}.md`, {
+        type: "text/markdown",
+      });
     } else {
       if (!promptFile?.originFileObj) {
         message.error("请上传提示词文件 (.md)");
@@ -966,9 +1223,14 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       if (values.description) form.append("description", values.description);
       if (values.default_init_prompt)
         form.append("default_init_prompt", values.default_init_prompt);
-      form.append("promptsI18n", JSON.stringify(buildPromptsI18n(values.prompt_examples)));
-      if (values.categories) form.append("categories", JSON.stringify(values.categories));
+      form.append(
+        "promptsI18n",
+        JSON.stringify(buildPromptsI18n(values.prompt_examples)),
+      );
+      if (values.categories)
+        form.append("categories", JSON.stringify(values.categories));
       if (values.skills) form.append("skills", JSON.stringify(values.skills));
+      if (isSuperAdmin) appendSharedTenantFields(form, values);
       const aclEntries =
         values.acl_scope === "specific"
           ? (values.acl_user_ids || []).map((id: string) => ({
@@ -989,14 +1251,23 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         // even with initialValue="agent-chat" the form value may be
         // undefined if the user enabled the toggle and submitted within the
         // same React tick.
-        form.append("enhancement_mode", values.enhancement_mode || "agent-chat");
+        form.append(
+          "enhancement_mode",
+          values.enhancement_mode || "agent-chat",
+        );
       } else if (knowledgeMode === "datasets") {
-        const datasetIds = Array.isArray(values.dataset_ids) ? values.dataset_ids : [];
+        const datasetIds = Array.isArray(values.dataset_ids)
+          ? values.dataset_ids
+          : [];
         form.append("dataset_ids", JSON.stringify(datasetIds));
       }
       form.append("prompt_file", promptFileToSend, promptFileToSend.name);
       if (avatarFile?.originFileObj) {
-        form.append("avatar", avatarFile.originFileObj as File, avatarFile.name);
+        form.append(
+          "avatar",
+          avatarFile.originFileObj as File,
+          avatarFile.name,
+        );
       }
 
       const res: any = await adminApi.createEnterpriseAssistant(form);
@@ -1036,6 +1307,15 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       const enh = detail.enhancement ?? enhancementMap[record.id];
       const acl = detail.acl_summary ?? aclMap[record.id];
       const initialDatasets = detail.dataset_ids ?? datasetMap[record.id] ?? [];
+      const sharedTenantIds =
+        detail.shared_tenant_ids ??
+        sharedTenantIdsFromTenantIds(
+          detail.tenantIds ?? detail.tenant_ids ?? mergedRecord.tenantIds,
+          activeTenantId,
+        );
+      const sharedTenantScope =
+        normalizeSharedTenantScope(detail.shared_tenant_scope) ??
+        inferSharedTenantScope(sharedTenantIds);
       const initialKnowledgeMode = getKnowledgeMode(enh, initialDatasets);
       const initialValues = {
         name: mergedRecord.name,
@@ -1051,6 +1331,8 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         acl_scope: acl?.scope || "all",
         acl_user_ids: acl?.user_ids || [],
         dataset_ids: initialDatasets,
+        shared_tenant_scope: sharedTenantScope,
+        shared_tenant_ids: sharedTenantIds,
       };
 
       setDrawerInitialValues(initialValues);
@@ -1066,7 +1348,9 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         drawerForm.setFieldsValue(initialValues);
       }, 0);
     } catch (err: any) {
-      message.error(err?.response?.data?.msg || err?.message || "加载智能体详情失败");
+      message.error(
+        err?.response?.data?.msg || err?.message || "加载智能体详情失败",
+      );
     } finally {
       setOpeningDrawerId(null);
     }
@@ -1078,7 +1362,8 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     const prevEnh = enhancementMap[editingRow.id];
     const initialMode = drawerInitialValues.knowledge_mode;
     const initialDifyAppMode = drawerInitialValues.enhancement_mode;
-    const prevDatasets = datasetMap[editingRow.id] ?? stringArray(drawerInitialValues.dataset_ids);
+    const prevDatasets =
+      datasetMap[editingRow.id] ?? stringArray(drawerInitialValues.dataset_ids);
     const prevMode = isKnowledgeMode(initialMode)
       ? initialMode
       : getKnowledgeMode(prevEnh, prevDatasets);
@@ -1107,8 +1392,12 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       if (editPromptText.trim()) {
         const blob = new Blob([editPromptText], { type: "text/markdown" });
         const baseName =
-          (typeof values.name === "string" && values.name.trim()) || editingRow.name || "prompt";
-        promptFileToSend = new File([blob], `${baseName}.md`, { type: "text/markdown" });
+          (typeof values.name === "string" && values.name.trim()) ||
+          editingRow.name ||
+          "prompt";
+        promptFileToSend = new File([blob], `${baseName}.md`, {
+          type: "text/markdown",
+        });
       }
     } else if (editPromptFile?.originFileObj) {
       promptFileToSend = editPromptFile.originFileObj as File;
@@ -1122,16 +1411,27 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       form.append("profession", values.profession);
       form.append("description", values.description || "");
       form.append("default_init_prompt", values.default_init_prompt || "");
-      form.append("promptsI18n", JSON.stringify(buildPromptsI18n(values.prompt_examples)));
+      form.append(
+        "promptsI18n",
+        JSON.stringify(buildPromptsI18n(values.prompt_examples)),
+      );
       form.append("categories", JSON.stringify(values.categories || []));
       form.append("skills", JSON.stringify(editingRow.skills || []));
+      if (isSuperAdmin) appendSharedTenantFields(form, values);
       if (promptFileToSend) {
         form.append("prompt_file", promptFileToSend, promptFileToSend.name);
       }
       if (editAvatarFile?.originFileObj) {
-        form.append("avatar", editAvatarFile.originFileObj as File, editAvatarFile.name);
+        form.append(
+          "avatar",
+          editAvatarFile.originFileObj as File,
+          editAvatarFile.name,
+        );
       }
-      const updateRes: any = await adminApi.updateEnterpriseAssistant(editingRow.id, form);
+      const updateRes: any = await adminApi.updateEnterpriseAssistant(
+        editingRow.id,
+        form,
+      );
       if (!updateRes?.success) {
         throw new Error(updateRes?.msg || "基础信息保存失败");
       }
@@ -1146,7 +1446,11 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           desired.length !== prevDatasets.length ||
           desired.some((id, idx) => prevDatasets[idx] !== id);
         if (changed) {
-          await adminApi.setAgentDatasets(editingRow.id, desired, selectedEnterpriseId);
+          await adminApi.setAgentDatasets(
+            editingRow.id,
+            desired,
+            selectedEnterpriseId,
+          );
         }
       }
 
@@ -1158,7 +1462,11 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               subject_id: id,
             }))
           : [];
-      await adminApi.setAgentAcl(editingRow.id, aclEntries, selectedEnterpriseId);
+      await adminApi.setAgentAcl(
+        editingRow.id,
+        aclEntries,
+        selectedEnterpriseId,
+      );
 
       message.success("已保存");
       setDrawerOpen(false);
@@ -1195,7 +1503,10 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     }
     const next = `/app/${difyAppId}/configuration`;
     try {
-      const res: any = await adminApi.getDifyStudioLink(next, selectedEnterpriseId);
+      const res: any = await adminApi.getDifyStudioLink(
+        next,
+        selectedEnterpriseId,
+      );
       const url = res?.data?.url;
       if (!res?.success || !url) {
         message.error(res?.msg || "无法获取 SSO 链接");
@@ -1218,16 +1529,33 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         try {
           const response = await adminApi.approveSkill(record.id);
           if (isActionSuccess(response)) {
-            message.success((response as any).msg || (response as any).message || "审批上线成功");
-            if (detailRecord && "id" in detailRecord && detailRecord.id === record.id) {
+            message.success(
+              (response as any).msg ||
+                (response as any).message ||
+                "审批上线成功",
+            );
+            if (
+              detailRecord &&
+              "id" in detailRecord &&
+              detailRecord.id === record.id
+            ) {
               setDetailRecord({ ...record, status: 1 });
             }
             resetAndLoadData();
           } else {
-            message.error((response as any).msg || (response as any).message || "审批上线失败");
+            message.error(
+              (response as any).msg ||
+                (response as any).message ||
+                "审批上线失败",
+            );
           }
         } catch (error: any) {
-          message.error(error?.response?.data?.msg || error?.response?.data?.message || error?.message || "审批上线失败");
+          message.error(
+            error?.response?.data?.msg ||
+              error?.response?.data?.message ||
+              error?.message ||
+              "审批上线失败",
+          );
         } finally {
           setApprovingSkillId(null);
         }
@@ -1247,16 +1575,29 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         try {
           const response = await adminApi.deleteSkill(record.id);
           if (isActionSuccess(response)) {
-            message.success((response as any).msg || (response as any).message || "删除成功");
-            if (detailRecord && "id" in detailRecord && detailRecord.id === record.id) {
+            message.success(
+              (response as any).msg || (response as any).message || "删除成功",
+            );
+            if (
+              detailRecord &&
+              "id" in detailRecord &&
+              detailRecord.id === record.id
+            ) {
               closeDetail();
             }
             resetAndLoadData();
           } else {
-            message.error((response as any).msg || (response as any).message || "删除失败");
+            message.error(
+              (response as any).msg || (response as any).message || "删除失败",
+            );
           }
         } catch (error: any) {
-          message.error(error?.response?.data?.msg || error?.response?.data?.message || error?.message || "删除失败");
+          message.error(
+            error?.response?.data?.msg ||
+              error?.response?.data?.message ||
+              error?.message ||
+              "删除失败",
+          );
         } finally {
           setDeletingSkillId(null);
         }
@@ -1275,16 +1616,33 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         try {
           const response = await adminApi.approveAssistant(record.id);
           if (isActionSuccess(response)) {
-            message.success((response as any).msg || (response as any).message || "审批发布成功");
-            if (detailRecord && "id" in detailRecord && detailRecord.id === record.id) {
+            message.success(
+              (response as any).msg ||
+                (response as any).message ||
+                "审批发布成功",
+            );
+            if (
+              detailRecord &&
+              "id" in detailRecord &&
+              detailRecord.id === record.id
+            ) {
               setDetailRecord({ ...record, status: 1 });
             }
             resetAndLoadData();
           } else {
-            message.error((response as any).msg || (response as any).message || "审批发布失败");
+            message.error(
+              (response as any).msg ||
+                (response as any).message ||
+                "审批发布失败",
+            );
           }
         } catch (error: any) {
-          message.error(error?.response?.data?.msg || error?.response?.data?.message || error?.message || "审批发布失败");
+          message.error(
+            error?.response?.data?.msg ||
+              error?.response?.data?.message ||
+              error?.message ||
+              "审批发布失败",
+          );
         } finally {
           setApprovingAssistantId(null);
         }
@@ -1304,16 +1662,29 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         try {
           const response = await adminApi.deleteAssistant(record.id);
           if (isActionSuccess(response)) {
-            message.success((response as any).msg || (response as any).message || "删除成功");
-            if (detailRecord && "id" in detailRecord && detailRecord.id === record.id) {
+            message.success(
+              (response as any).msg || (response as any).message || "删除成功",
+            );
+            if (
+              detailRecord &&
+              "id" in detailRecord &&
+              detailRecord.id === record.id
+            ) {
               closeDetail();
             }
             resetAndLoadData();
           } else {
-            message.error((response as any).msg || (response as any).message || "删除失败");
+            message.error(
+              (response as any).msg || (response as any).message || "删除失败",
+            );
           }
         } catch (error: any) {
-          message.error(error?.response?.data?.msg || error?.response?.data?.message || error?.message || "删除失败");
+          message.error(
+            error?.response?.data?.msg ||
+              error?.response?.data?.message ||
+              error?.message ||
+              "删除失败",
+          );
         } finally {
           setDeletingAssistantId(null);
         }
@@ -1339,19 +1710,26 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     return "审核中";
   };
 
-  const getStatusColor = (status: number) => (status === 1 ? "green" : "orange");
+  const getStatusColor = (status: number) =>
+    status === 1 ? "green" : "orange";
 
   const parseStructuredText = (value?: string | null) => {
     if (!value) return "-";
     try {
       const parsed = JSON.parse(value);
       return (
-        <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+        <pre
+          style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+        >
           {JSON.stringify(parsed, null, 2)}
         </pre>
       );
     } catch {
-      return <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{value}</div>;
+      return (
+        <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+          {value}
+        </div>
+      );
     }
   };
 
@@ -1391,7 +1769,11 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       title: "状态",
       key: "status",
       width: 120,
-      render: (_, record) => <Tag color={getStatusColor(record.status)}>{getStatusLabel(record.status)}</Tag>,
+      render: (_, record) => (
+        <Tag color={getStatusColor(record.status)}>
+          {getStatusLabel(record.status)}
+        </Tag>
+      ),
     },
     {
       title: "更新时间",
@@ -1421,13 +1803,22 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
             <Button
               type="link"
               icon={<DownloadOutlined />}
-              onClick={() => triggerDownload(record.latestVersion?.source_url, `${record.name || "skill"}.zip`)}
+              onClick={() =>
+                triggerDownload(
+                  record.latestVersion?.source_url,
+                  `${record.name || "skill"}.zip`,
+                )
+              }
             >
               下载
             </Button>
           )}
           {record.homepage && (
-            <Button type="link" icon={<LinkOutlined />} onClick={() => openExternalUrl(record.homepage)}>
+            <Button
+              type="link"
+              icon={<LinkOutlined />}
+              onClick={() => openExternalUrl(record.homepage)}
+            >
               链接
             </Button>
           )}
@@ -1455,7 +1846,11 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       // fixed-width columns (added with Dify integration) exceed the table's
       // intrinsic content width.
       render: (_, record) => (
-        <Space direction="vertical" size={0} style={{ wordBreak: "break-word" }}>
+        <Space
+          direction="vertical"
+          size={0}
+          style={{ wordBreak: "break-word" }}
+        >
           <Text strong>{record.name}</Text>
           <Text type="secondary">{record.profession || "-"}</Text>
         </Space>
@@ -1490,7 +1885,11 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         const e = enhancementMap[record.id];
         const datasets = datasetMap[record.id] ?? [];
         if (datasets.length > 0 || e?.mode === "rag-only") {
-          return <Tag color="cyan">{datasets.length > 0 ? `知识库 (${datasets.length})` : "知识库"}</Tag>;
+          return (
+            <Tag color="cyan">
+              {datasets.length > 0 ? `知识库 (${datasets.length})` : "知识库"}
+            </Tag>
+          );
         }
         const difyAppMode = getDifyAppMode(e);
         if (difyAppMode) {
@@ -1510,10 +1909,29 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       },
     },
     {
+      title: "跨租户分享",
+      key: "tenantShare",
+      width: 160,
+      render: (_, record) => {
+        const sharedTenantIds = getRecordSharedTenantIds(record);
+        const scope = getRecordSharedTenantScope(record);
+        if (scope === "none") return <Tag>不分享</Tag>;
+        return (
+          <Tooltip title={sharedTenantIds.map(formatTenantName).join("、")}>
+            <Tag color="geekblue">{sharedTenantIds.length} 个租户</Tag>
+          </Tooltip>
+        );
+      },
+    },
+    {
       title: "状态",
       key: "status",
       width: 120,
-      render: (_, record) => <Tag color={getStatusColor(record.status)}>{getStatusLabel(record.status)}</Tag>,
+      render: (_, record) => (
+        <Tag color={getStatusColor(record.status)}>
+          {getStatusLabel(record.status)}
+        </Tag>
+      ),
     },
     {
       title: "更新时间",
@@ -1541,7 +1959,9 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
             type="link"
             size="small"
             icon={<LinkOutlined />}
-            disabled={difyDisabled || !hasDifyStudioTarget(enhancementMap[record.id])}
+            disabled={
+              difyDisabled || !hasDifyStudioTarget(enhancementMap[record.id])
+            }
             onClick={() => openInStudio(record)}
           >
             Dify Studio
@@ -1564,7 +1984,12 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               type="link"
               size="small"
               icon={<DownloadOutlined />}
-              onClick={() => triggerDownload(getAssistantSourceUrl(record), `${record.name || "assistant"}.zip`)}
+              onClick={() =>
+                triggerDownload(
+                  getAssistantSourceUrl(record),
+                  `${record.name || "assistant"}.zip`,
+                )
+              }
             >
               下载
             </Button>
@@ -1590,24 +2015,52 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       const record = detailRecord as Skill;
       return (
         <Descriptions bordered column={1} size="small">
-          <Descriptions.Item label="名称">{record.display_name || record.name}</Descriptions.Item>
-          <Descriptions.Item label="标识">{formatValue(record.name)}</Descriptions.Item>
-          <Descriptions.Item label="版本">{formatValue(record.latestVersion?.version)}</Descriptions.Item>
+          <Descriptions.Item label="名称">
+            {record.display_name || record.name}
+          </Descriptions.Item>
+          <Descriptions.Item label="标识">
+            {formatValue(record.name)}
+          </Descriptions.Item>
+          <Descriptions.Item label="版本">
+            {formatValue(record.latestVersion?.version)}
+          </Descriptions.Item>
           <Descriptions.Item label="状态">
-            <Tag color={getStatusColor(record.status)}>{getStatusLabel(record.status)}</Tag>
+            <Tag color={getStatusColor(record.status)}>
+              {getStatusLabel(record.status)}
+            </Tag>
           </Descriptions.Item>
           <Descriptions.Item label="分类">
-            {record.categories?.length ? record.categories.join(", ") : formatValue(record.category)}
+            {record.categories?.length
+              ? record.categories.join(", ")
+              : formatValue(record.category)}
           </Descriptions.Item>
-          <Descriptions.Item label="描述">{formatValue(record.description)}</Descriptions.Item>
-          <Descriptions.Item label="核心功能">{parseStructuredText(record.core_features)}</Descriptions.Item>
-          <Descriptions.Item label="适用场景">{parseStructuredText(record.applicable_scenarios)}</Descriptions.Item>
-          <Descriptions.Item label="作者">{formatValue(record.author_id)}</Descriptions.Item>
-          <Descriptions.Item label="租户">{formatValue(record.tenant_id)}</Descriptions.Item>
-          <Descriptions.Item label="资源地址">{formatValue(record.latestVersion?.source_url)}</Descriptions.Item>
-          <Descriptions.Item label="链接">{formatValue(record.homepage)}</Descriptions.Item>
-          <Descriptions.Item label="创建时间">{formatValue(record.created_at)}</Descriptions.Item>
-          <Descriptions.Item label="更新时间">{formatValue(record.updated_at)}</Descriptions.Item>
+          <Descriptions.Item label="描述">
+            {formatValue(record.description)}
+          </Descriptions.Item>
+          <Descriptions.Item label="核心功能">
+            {parseStructuredText(record.core_features)}
+          </Descriptions.Item>
+          <Descriptions.Item label="适用场景">
+            {parseStructuredText(record.applicable_scenarios)}
+          </Descriptions.Item>
+          <Descriptions.Item label="作者">
+            {formatValue(record.author_id)}
+          </Descriptions.Item>
+          <Descriptions.Item label="租户">
+            {formatValue(record.tenant_id)}
+          </Descriptions.Item>
+          <Descriptions.Item label="资源地址">
+            {formatValue(record.latestVersion?.source_url)}
+          </Descriptions.Item>
+          <Descriptions.Item label="链接">
+            {formatValue(record.homepage)}
+          </Descriptions.Item>
+          <Descriptions.Item label="创建时间">
+            {formatValue(record.created_at)}
+          </Descriptions.Item>
+          <Descriptions.Item label="更新时间">
+            {formatValue(record.updated_at)}
+          </Descriptions.Item>
         </Descriptions>
       );
     }
@@ -1617,15 +2070,23 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     return (
       <Descriptions bordered column={1} size="small">
         <Descriptions.Item label="名称">{record.name}</Descriptions.Item>
-        <Descriptions.Item label="职业">{formatValue(record.profession)}</Descriptions.Item>
-        <Descriptions.Item label="版本">{getAssistantVersionText(record)}</Descriptions.Item>
+        <Descriptions.Item label="职业">
+          {formatValue(record.profession)}
+        </Descriptions.Item>
+        <Descriptions.Item label="版本">
+          {getAssistantVersionText(record)}
+        </Descriptions.Item>
         <Descriptions.Item label="状态">
-          <Tag color={getStatusColor(record.status)}>{getStatusLabel(record.status)}</Tag>
+          <Tag color={getStatusColor(record.status)}>
+            {getStatusLabel(record.status)}
+          </Tag>
         </Descriptions.Item>
         <Descriptions.Item label="分类">
           {record.categories?.length ? record.categories.join(", ") : "-"}
         </Descriptions.Item>
-        <Descriptions.Item label="描述">{formatValue(record.description)}</Descriptions.Item>
+        <Descriptions.Item label="描述">
+          {formatValue(record.description)}
+        </Descriptions.Item>
         <Descriptions.Item label="默认提示词">
           <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
             {formatValue(record.defaultInitPrompt)}
@@ -1638,7 +2099,8 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                 <div
                   key={`${item}-${index}`}
                   style={{
-                    border: "1px solid var(--ant-color-border-secondary, #f0f0f0)",
+                    border:
+                      "1px solid var(--ant-color-border-secondary, #f0f0f0)",
                     borderRadius: 6,
                     padding: "6px 8px",
                     whiteSpace: "pre-wrap",
@@ -1653,14 +2115,29 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
             "-"
           )}
         </Descriptions.Item>
-        <Descriptions.Item label="提示词文件">{formatValue(record.promptFile)}</Descriptions.Item>
+        <Descriptions.Item label="提示词文件">
+          {formatValue(record.promptFile)}
+        </Descriptions.Item>
         <Descriptions.Item label="技能列表">
           {record.skills?.length ? record.skills.join(", ") : "-"}
         </Descriptions.Item>
-        <Descriptions.Item label="租户">{formatValue(record.tenantId)}</Descriptions.Item>
-        <Descriptions.Item label="资源地址">{formatValue(getAssistantSourceUrl(record))}</Descriptions.Item>
-        <Descriptions.Item label="创建时间">{formatValue(record.createdAt)}</Descriptions.Item>
-        <Descriptions.Item label="更新时间">{formatValue(record.updatedAt)}</Descriptions.Item>
+        <Descriptions.Item label="租户">
+          {formatValue(record.tenantId)}
+        </Descriptions.Item>
+        <Descriptions.Item label="分享租户">
+          {getRecordSharedTenantIds(record).length
+            ? getRecordSharedTenantIds(record).map(formatTenantName).join("、")
+            : "-"}
+        </Descriptions.Item>
+        <Descriptions.Item label="资源地址">
+          {formatValue(getAssistantSourceUrl(record))}
+        </Descriptions.Item>
+        <Descriptions.Item label="创建时间">
+          {formatValue(record.createdAt)}
+        </Descriptions.Item>
+        <Descriptions.Item label="更新时间">
+          {formatValue(record.updatedAt)}
+        </Descriptions.Item>
       </Descriptions>
     );
   };
@@ -1669,7 +2146,13 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginBottom: 12,
+        }}
+      >
         <Title level={2} style={{ margin: 0 }}>
           {pageTitle}
         </Title>
@@ -1762,12 +2245,12 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                 }
                 loading={loading}
                 pagination={false}
-                // Fixed-column widths now total ~1640 (name 220 + version 100
-                // + categories 160 + enhancement 170 + acl 140 + status 120
-                // + updated 200 + actions 530). Give scroll.x some slack so a
+                // Fixed-column widths now total ~1800 (name 220 + version 100
+                // + categories 160 + enhancement 170 + acl 140 + share 160
+                // + status 120 + updated 200 + actions 530). Give scroll.x some slack so a
                 // narrow viewport simply triggers horizontal scrolling rather
                 // than squashing the cells.
-                scroll={{ x: 1700 }}
+                scroll={{ x: 1900 }}
               />
             )}
             {dataSource.length > 0 && (
@@ -1796,83 +2279,101 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         onCancel={closeDetail}
         width={820}
         footer={
-          detailRecord ? [
-            isSkillsPage && (detailRecord as Skill).status !== 1 ? (
-              <Button
-                key="approve"
-                type="primary"
-                loading={approvingSkillId === (detailRecord as Skill).id}
-                onClick={() => handleApproveSkill(detailRecord as Skill)}
-              >
-                审批上线
-              </Button>
-            ) : null,
-            isSkillsPage ? (
-              <Button
-                key="delete"
-                danger
-                loading={deletingSkillId === (detailRecord as Skill).id}
-                onClick={() => handleDeleteSkill(detailRecord as Skill)}
-              >
-                删除技能
-              </Button>
-            ) : null,
-            isSkillsPage && (detailRecord as Skill).latestVersion?.source_url ? (
-              <Button
-                key="download"
-                icon={<DownloadOutlined />}
-                onClick={() =>
-                  triggerDownload((detailRecord as Skill).latestVersion?.source_url, `${(detailRecord as Skill).name}.zip`)
-                }
-              >
-                下载资源
-              </Button>
-            ) : !isSkillsPage && getAssistantSourceUrl(detailRecord as Assistant) ? (
-              <Button
-                key="download"
-                icon={<DownloadOutlined />}
-                onClick={() =>
-                  triggerDownload(getAssistantSourceUrl(detailRecord as Assistant), `${(detailRecord as Assistant).name}.zip`)
-                }
-              >
-                下载资源
-              </Button>
-            ) : null,
-            !isSkillsPage && (detailRecord as Assistant).promptFile ? (
-              <Button
-                key="prompt"
-                icon={<DownloadOutlined />}
-                onClick={() =>
-                  triggerDownload((detailRecord as Assistant).promptFile, `${(detailRecord as Assistant).name}-prompt.txt`)
-                }
-              >
-                下载提示词
-              </Button>
-            ) : null,
-            !isSkillsPage && (detailRecord as Assistant).status !== 1 ? (
-              <Button
-                key="approve"
-                type="primary"
-                loading={approvingAssistantId === (detailRecord as Assistant).id}
-                onClick={() => handleApproveAssistant(detailRecord as Assistant)}
-              >
-                审批发布
-              </Button>
-            ) : null,
-            isSkillsPage && (detailRecord as Skill).homepage ? (
-              <Button
-                key="link"
-                icon={<LinkOutlined />}
-                onClick={() => openExternalUrl((detailRecord as Skill).homepage)}
-              >
-                访问链接
-              </Button>
-            ) : null,
-            <Button key="close" type="primary" onClick={closeDetail}>
-              关闭
-            </Button>,
-          ].filter(Boolean) as React.ReactNode[]
-          : undefined
+          detailRecord
+            ? ([
+                isSkillsPage && (detailRecord as Skill).status !== 1 ? (
+                  <Button
+                    key="approve"
+                    type="primary"
+                    loading={approvingSkillId === (detailRecord as Skill).id}
+                    onClick={() => handleApproveSkill(detailRecord as Skill)}
+                  >
+                    审批上线
+                  </Button>
+                ) : null,
+                isSkillsPage ? (
+                  <Button
+                    key="delete"
+                    danger
+                    loading={deletingSkillId === (detailRecord as Skill).id}
+                    onClick={() => handleDeleteSkill(detailRecord as Skill)}
+                  >
+                    删除技能
+                  </Button>
+                ) : null,
+                isSkillsPage &&
+                (detailRecord as Skill).latestVersion?.source_url ? (
+                  <Button
+                    key="download"
+                    icon={<DownloadOutlined />}
+                    onClick={() =>
+                      triggerDownload(
+                        (detailRecord as Skill).latestVersion?.source_url,
+                        `${(detailRecord as Skill).name}.zip`,
+                      )
+                    }
+                  >
+                    下载资源
+                  </Button>
+                ) : !isSkillsPage &&
+                  getAssistantSourceUrl(detailRecord as Assistant) ? (
+                  <Button
+                    key="download"
+                    icon={<DownloadOutlined />}
+                    onClick={() =>
+                      triggerDownload(
+                        getAssistantSourceUrl(detailRecord as Assistant),
+                        `${(detailRecord as Assistant).name}.zip`,
+                      )
+                    }
+                  >
+                    下载资源
+                  </Button>
+                ) : null,
+                !isSkillsPage && (detailRecord as Assistant).promptFile ? (
+                  <Button
+                    key="prompt"
+                    icon={<DownloadOutlined />}
+                    onClick={() =>
+                      triggerDownload(
+                        (detailRecord as Assistant).promptFile,
+                        `${(detailRecord as Assistant).name}-prompt.txt`,
+                      )
+                    }
+                  >
+                    下载提示词
+                  </Button>
+                ) : null,
+                !isSkillsPage && (detailRecord as Assistant).status !== 1 ? (
+                  <Button
+                    key="approve"
+                    type="primary"
+                    loading={
+                      approvingAssistantId === (detailRecord as Assistant).id
+                    }
+                    onClick={() =>
+                      handleApproveAssistant(detailRecord as Assistant)
+                    }
+                  >
+                    审批发布
+                  </Button>
+                ) : null,
+                isSkillsPage && (detailRecord as Skill).homepage ? (
+                  <Button
+                    key="link"
+                    icon={<LinkOutlined />}
+                    onClick={() =>
+                      openExternalUrl((detailRecord as Skill).homepage)
+                    }
+                  >
+                    访问链接
+                  </Button>
+                ) : null,
+                <Button key="close" type="primary" onClick={closeDetail}>
+                  关闭
+                </Button>,
+              ].filter(Boolean) as React.ReactNode[])
+            : undefined
         }
       >
         {renderDetailContent()}
@@ -1893,10 +2394,18 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
         >
           <Form form={createForm} layout="vertical">
             <SectionTitle icon={<ProfileOutlined />} text="基础信息" />
-            <Form.Item name="name" label="智能体名称" rules={[{ required: true }]}>
+            <Form.Item
+              name="name"
+              label="智能体名称"
+              rules={[{ required: true }]}
+            >
               <Input placeholder="例如 recruitment_expert" />
             </Form.Item>
-            <Form.Item name="profession" label="职业 / 角色" rules={[{ required: true }]}>
+            <Form.Item
+              name="profession"
+              label="职业 / 角色"
+              rules={[{ required: true }]}
+            >
               <Input placeholder="例如 招聘专家" />
             </Form.Item>
             <Form.Item name="description" label="描述">
@@ -1928,44 +2437,46 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                       <Text type="secondary" style={{ fontSize: 12 }}>
                         插入模板：
                       </Text>
-                      {(Object.keys(PROMPT_TEMPLATES) as Array<keyof typeof PROMPT_TEMPLATES>).map(
-                        (key) => (
-                          <Tooltip
-                            key={key}
-                            title={`使用「${PROMPT_TEMPLATES[key].label}」覆盖当前编辑框内容`}
+                      {(
+                        Object.keys(PROMPT_TEMPLATES) as Array<
+                          keyof typeof PROMPT_TEMPLATES
+                        >
+                      ).map((key) => (
+                        <Tooltip
+                          key={key}
+                          title={`使用「${PROMPT_TEMPLATES[key].label}」覆盖当前编辑框内容`}
+                        >
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              const apply = () => {
+                                const formValues = createForm.getFieldsValue();
+                                setPromptText(
+                                  renderPromptTemplate(key, {
+                                    name: formValues.name,
+                                    profession: formValues.profession,
+                                    description: formValues.description,
+                                  }),
+                                );
+                                setPromptViewMode("edit");
+                              };
+                              if (promptText.trim()) {
+                                Modal.confirm({
+                                  title: "替换当前提示词？",
+                                  content: "当前编辑框内容会被模板覆盖。",
+                                  okText: "替换",
+                                  cancelText: "取消",
+                                  onOk: apply,
+                                });
+                              } else {
+                                apply();
+                              }
+                            }}
                           >
-                            <Button
-                              size="small"
-                              onClick={() => {
-                                const apply = () => {
-                                  const formValues = createForm.getFieldsValue();
-                                  setPromptText(
-                                    renderPromptTemplate(key, {
-                                      name: formValues.name,
-                                      profession: formValues.profession,
-                                      description: formValues.description,
-                                    }),
-                                  );
-                                  setPromptViewMode("edit");
-                                };
-                                if (promptText.trim()) {
-                                  Modal.confirm({
-                                    title: "替换当前提示词？",
-                                    content: "当前编辑框内容会被模板覆盖。",
-                                    okText: "替换",
-                                    cancelText: "取消",
-                                    onOk: apply,
-                                  });
-                                } else {
-                                  apply();
-                                }
-                              }}
-                            >
-                              {PROMPT_TEMPLATES[key].label}
-                            </Button>
-                          </Tooltip>
-                        ),
-                      )}
+                            {PROMPT_TEMPLATES[key].label}
+                          </Button>
+                        </Tooltip>
+                      ))}
                     </Space>
                     {/* Visual style mirrors the sudowork client's AssistantEditDrawer:
                         bordered box with an Edit/Preview tab bar on top. Edit mode is
@@ -1985,8 +2496,10 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                         style={{
                           display: "flex",
                           height: 36,
-                          borderBottom: "1px solid var(--ant-color-border, #d9d9d9)",
-                          background: "var(--ant-color-fill-quaternary, #fafafa)",
+                          borderBottom:
+                            "1px solid var(--ant-color-border, #d9d9d9)",
+                          background:
+                            "var(--ant-color-fill-quaternary, #fafafa)",
                           flexShrink: 0,
                         }}
                       >
@@ -2043,14 +2556,22 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                         ) : (
                           <div
                             className="prompt-md-preview"
-                            style={{ padding: 16, fontSize: 13, lineHeight: 1.7 }}
+                            style={{
+                              padding: 16,
+                              fontSize: 13,
+                              lineHeight: 1.7,
+                            }}
                           >
                             {promptText.trim() ? (
                               <ReactMarkdown>{promptText}</ReactMarkdown>
                             ) : (
                               <Text
                                 type="secondary"
-                                style={{ display: "block", textAlign: "center", padding: "32px 0" }}
+                                style={{
+                                  display: "block",
+                                  textAlign: "center",
+                                  padding: "32px 0",
+                                }}
                               >
                                 无内容可预览
                               </Text>
@@ -2066,7 +2587,9 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                     maxCount={1}
                     beforeUpload={() => false}
                     fileList={promptFile ? [promptFile] : []}
-                    onChange={({ fileList }) => setPromptFile(fileList[0] || null)}
+                    onChange={({ fileList }) =>
+                      setPromptFile(fileList[0] || null)
+                    }
                   >
                     <Button icon={<UploadOutlined />}>选择文件</Button>
                   </Upload>
@@ -2085,7 +2608,11 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               </Upload>
             </Form.Item>
 
-            <SectionTitle icon={<EyeOutlined />} text="可见范围" color="#52c41a" />
+            <SectionTitle
+              icon={<EyeOutlined />}
+              text="可见范围"
+              color="#52c41a"
+            />
             <Form.Item name="acl_scope" label="可见范围" initialValue="all">
               <Select
                 options={[
@@ -2094,7 +2621,10 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                 ]}
               />
             </Form.Item>
-            <Form.Item noStyle shouldUpdate={(p, c) => p.acl_scope !== c.acl_scope}>
+            <Form.Item
+              noStyle
+              shouldUpdate={(p, c) => p.acl_scope !== c.acl_scope}
+            >
               {({ getFieldValue }) =>
                 getFieldValue("acl_scope") === "specific" ? (
                   <Form.Item
@@ -2114,7 +2644,13 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               }
             </Form.Item>
 
-            <SectionTitle icon={<ThunderboltOutlined />} text="知识增强 (可选)" color="#fa8c16" />
+            {isSuperAdmin && renderSharedTenantFormItems()}
+
+            <SectionTitle
+              icon={<ThunderboltOutlined />}
+              text="知识增强 (可选)"
+              color="#fa8c16"
+            />
             <Form.Item
               name="knowledge_mode"
               label="增强方式"
@@ -2140,14 +2676,19 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                     <Form.Item
                       name="dataset_ids"
                       label="关联知识库"
-                      rules={[{ required: true, message: "请选择至少一个知识库" }]}
+                      rules={[
+                        { required: true, message: "请选择至少一个知识库" },
+                      ]}
                       tooltip="运行时 sudowork-server 会调 Dify retrieve API 取片段，作为 <knowledge_context> 注入"
                     >
                       <Select
                         mode="multiple"
                         showSearch
                         optionFilterProp="label"
-                        options={datasets.map((d) => ({ label: d.name, value: d.id }))}
+                        options={datasets.map((d) => ({
+                          label: d.name,
+                          value: d.id,
+                        }))}
                         placeholder="选择知识库（来自 Dify）"
                       />
                     </Form.Item>
@@ -2163,7 +2704,10 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                     >
                       <Select
                         options={[
-                          { label: ENH_MODE_LABEL["agent-chat"], value: "agent-chat" },
+                          {
+                            label: ENH_MODE_LABEL["agent-chat"],
+                            value: "agent-chat",
+                          },
                           { label: ENH_MODE_LABEL.workflow, value: "workflow" },
                         ]}
                       />
@@ -2198,10 +2742,18 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               initialValues={drawerInitialValues}
             >
               <SectionTitle icon={<ProfileOutlined />} text="基础信息" />
-              <Form.Item name="name" label="智能体名称" rules={[{ required: true }]}>
+              <Form.Item
+                name="name"
+                label="智能体名称"
+                rules={[{ required: true }]}
+              >
                 <Input placeholder="例如 recruitment_expert" />
               </Form.Item>
-              <Form.Item name="profession" label="职业 / 角色" rules={[{ required: true }]}>
+              <Form.Item
+                name="profession"
+                label="职业 / 角色"
+                rules={[{ required: true }]}
+              >
                 <Input placeholder="例如 招聘专家" />
               </Form.Item>
               <Form.Item name="description" label="描述">
@@ -2242,8 +2794,10 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                         style={{
                           display: "flex",
                           height: 36,
-                          borderBottom: "1px solid var(--ant-color-border, #d9d9d9)",
-                          background: "var(--ant-color-fill-quaternary, #fafafa)",
+                          borderBottom:
+                            "1px solid var(--ant-color-border, #d9d9d9)",
+                          background:
+                            "var(--ant-color-fill-quaternary, #fafafa)",
                           flexShrink: 0,
                         }}
                       >
@@ -2300,14 +2854,22 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                         ) : (
                           <div
                             className="prompt-md-preview"
-                            style={{ padding: 16, fontSize: 13, lineHeight: 1.7 }}
+                            style={{
+                              padding: 16,
+                              fontSize: 13,
+                              lineHeight: 1.7,
+                            }}
                           >
                             {editPromptText.trim() ? (
                               <ReactMarkdown>{editPromptText}</ReactMarkdown>
                             ) : (
                               <Text
                                 type="secondary"
-                                style={{ display: "block", textAlign: "center", padding: "32px 0" }}
+                                style={{
+                                  display: "block",
+                                  textAlign: "center",
+                                  padding: "32px 0",
+                                }}
                               >
                                 无内容可预览
                               </Text>
@@ -2322,7 +2884,9 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                       maxCount={1}
                       beforeUpload={() => false}
                       fileList={editPromptFile ? [editPromptFile] : []}
-                      onChange={({ fileList }) => setEditPromptFile(fileList[0] || null)}
+                      onChange={({ fileList }) =>
+                        setEditPromptFile(fileList[0] || null)
+                      }
                     >
                       <Button icon={<UploadOutlined />}>选择文件</Button>
                     </Upload>
@@ -2335,13 +2899,19 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                   maxCount={1}
                   beforeUpload={() => false}
                   fileList={editAvatarFile ? [editAvatarFile] : []}
-                  onChange={({ fileList }) => setEditAvatarFile(fileList[0] || null)}
+                  onChange={({ fileList }) =>
+                    setEditAvatarFile(fileList[0] || null)
+                  }
                 >
                   <Button icon={<UploadOutlined />}>选择头像</Button>
                 </Upload>
               </Form.Item>
 
-              <SectionTitle icon={<ThunderboltOutlined />} text="知识增强" color="#fa8c16" />
+              <SectionTitle
+                icon={<ThunderboltOutlined />}
+                text="知识增强"
+                color="#fa8c16"
+              />
               <Form.Item
                 name="knowledge_mode"
                 label="增强方式"
@@ -2367,13 +2937,18 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                       <Form.Item
                         name="dataset_ids"
                         label="关联知识库"
-                        rules={[{ required: true, message: "请选择至少一个知识库" }]}
+                        rules={[
+                          { required: true, message: "请选择至少一个知识库" },
+                        ]}
                       >
                         <Select
                           mode="multiple"
                           showSearch
                           optionFilterProp="label"
-                          options={datasets.map((d) => ({ label: d.name, value: d.id }))}
+                          options={datasets.map((d) => ({
+                            label: d.name,
+                            value: d.id,
+                          }))}
                           placeholder="选择知识库（来自 Dify）"
                         />
                       </Form.Item>
@@ -2391,8 +2966,14 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                           <Select
                             disabled
                             options={[
-                              { label: ENH_MODE_LABEL["agent-chat"], value: "agent-chat" },
-                              { label: ENH_MODE_LABEL.workflow, value: "workflow" },
+                              {
+                                label: ENH_MODE_LABEL["agent-chat"],
+                                value: "agent-chat",
+                              },
+                              {
+                                label: ENH_MODE_LABEL.workflow,
+                                value: "workflow",
+                              },
                             ]}
                           />
                         </Form.Item>
@@ -2413,7 +2994,11 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                 }}
               </Form.Item>
 
-              <SectionTitle icon={<EyeOutlined />} text="可见范围" color="#52c41a" />
+              <SectionTitle
+                icon={<EyeOutlined />}
+                text="可见范围"
+                color="#52c41a"
+              />
               <Form.Item name="acl_scope" label="可见范围">
                 <Select
                   options={[
@@ -2422,13 +3007,18 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                   ]}
                 />
               </Form.Item>
-              <Form.Item noStyle shouldUpdate={(p, c) => p.acl_scope !== c.acl_scope}>
+              <Form.Item
+                noStyle
+                shouldUpdate={(p, c) => p.acl_scope !== c.acl_scope}
+              >
                 {({ getFieldValue }) =>
                   getFieldValue("acl_scope") === "specific" ? (
                     <Form.Item
                       name="acl_user_ids"
                       label="选择用户"
-                      rules={[{ required: true, message: "请选择至少一位用户" }]}
+                      rules={[
+                        { required: true, message: "请选择至少一位用户" },
+                      ]}
                     >
                       <Select
                         mode="multiple"
@@ -2440,6 +3030,8 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                   ) : null
                 }
               </Form.Item>
+
+              {isSuperAdmin && renderSharedTenantFormItems()}
             </Form>
           )}
         </Drawer>

@@ -38,7 +38,9 @@ const SUDOHUB_BASE_URL = (
   "https://sudoworkhub.sudoprivacy.com"
 ).replace(/\/+$/, "");
 const SUDOHUB_AUTH =
-  process.env.SUDOHUB_AUTH_TOKEN || process.env.SKILLHUB_API_TOKEN || "sud0@sudo";
+  process.env.SUDOHUB_AUTH_TOKEN ||
+  process.env.SKILLHUB_API_TOKEN ||
+  "sud0@sudo";
 
 export class SudohubClientError extends Error {
   status: number;
@@ -56,6 +58,21 @@ function headersJson(): Record<string, string> {
 
 function headersBare(): Record<string, string> {
   return { Authorization: SUDOHUB_AUTH };
+}
+
+function normalizeTenantIds(
+  tenantIds: string[] | undefined,
+): string[] | undefined {
+  if (tenantIds === undefined) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tenantIds) {
+    const tenantId = raw.trim();
+    if (!tenantId || seen.has(tenantId)) continue;
+    seen.add(tenantId);
+    out.push(tenantId);
+  }
+  return out;
 }
 
 async function parseBody(resp: Response): Promise<unknown> {
@@ -102,15 +119,22 @@ function buildCursorQs(args: AssistantListQuery): string {
   return s ? `?${s}` : "";
 }
 
-export async function listAssistants(args: AssistantListQuery = {}): Promise<unknown> {
-  const resp = await fetch(`${SUDOHUB_BASE_URL}/api/assistants/cursor${buildCursorQs(args)}`, {
-    method: "GET",
-    headers: headersJson(),
-  });
+export async function listAssistants(
+  args: AssistantListQuery = {},
+): Promise<unknown> {
+  const resp = await fetch(
+    `${SUDOHUB_BASE_URL}/api/assistants/cursor${buildCursorQs(args)}`,
+    {
+      method: "GET",
+      headers: headersJson(),
+    },
+  );
   return expectOk(resp, "GET /api/assistants/cursor");
 }
 
-export async function listAssistantsAdmin(args: AssistantListQuery = {}): Promise<unknown> {
+export async function listAssistantsAdmin(
+  args: AssistantListQuery = {},
+): Promise<unknown> {
   const resp = await fetch(
     `${SUDOHUB_BASE_URL}/api/assistants/admin/cursor${buildCursorQs(args)}`,
     {
@@ -146,27 +170,26 @@ export async function listAssistantsByIds(args: {
       cursor,
       limit: 100,
       tenantId: args.tenantId,
-    })) as
-      | {
-          data?:
-            | Array<{ id: string }>
-            | {
-                assistants?: Array<{ id: string }>;
-                next_cursor?: string | null;
-                has_more?: boolean;
-              };
-          next_cursor?: string | null;
-          has_more?: boolean;
-        }
-      | null;
+    })) as {
+      data?:
+        | Array<{ id: string }>
+        | {
+            assistants?: Array<{ id: string }>;
+            next_cursor?: string | null;
+            has_more?: boolean;
+          };
+      next_cursor?: string | null;
+      has_more?: boolean;
+    } | null;
     const dataField = body?.data;
     const rows: Array<{ id: string }> = Array.isArray(dataField)
       ? dataField
       : Array.isArray((dataField as { assistants?: unknown })?.assistants)
-        ? ((dataField as { assistants: Array<{ id: string }> }).assistants)
+        ? (dataField as { assistants: Array<{ id: string }> }).assistants
         : [];
     for (const row of rows) {
-      if (row && typeof row.id === "string" && wanted.has(row.id)) out.push(row);
+      if (row && typeof row.id === "string" && wanted.has(row.id))
+        out.push(row);
     }
     if (out.length === wanted.size) break;
     const hasMore = Array.isArray(dataField)
@@ -186,18 +209,24 @@ export async function listAssistantsByIds(args: {
 // ============================================================================
 
 export async function getAssistant(assistantId: string): Promise<unknown> {
-  const resp = await fetch(`${SUDOHUB_BASE_URL}/api/assistants/${assistantId}`, {
-    method: "GET",
-    headers: headersJson(),
-  });
+  const resp = await fetch(
+    `${SUDOHUB_BASE_URL}/api/assistants/${assistantId}`,
+    {
+      method: "GET",
+      headers: headersJson(),
+    },
+  );
   return expectOk(resp, `GET /api/assistants/${assistantId}`);
 }
 
 export async function deleteAssistant(assistantId: string): Promise<void> {
-  const resp = await fetch(`${SUDOHUB_BASE_URL}/api/assistants/${assistantId}`, {
-    method: "DELETE",
-    headers: headersJson(),
-  });
+  const resp = await fetch(
+    `${SUDOHUB_BASE_URL}/api/assistants/${assistantId}`,
+    {
+      method: "DELETE",
+      headers: headersJson(),
+    },
+  );
   if (!resp.ok && resp.status !== 204) {
     const body = await parseBody(resp);
     throw new SudohubClientError(
@@ -209,10 +238,13 @@ export async function deleteAssistant(assistantId: string): Promise<void> {
 }
 
 export async function approveAssistant(assistantId: string): Promise<unknown> {
-  const resp = await fetch(`${SUDOHUB_BASE_URL}/api/assistants/${assistantId}/approve`, {
-    method: "POST",
-    headers: headersJson(),
-  });
+  const resp = await fetch(
+    `${SUDOHUB_BASE_URL}/api/assistants/${assistantId}/approve`,
+    {
+      method: "POST",
+      headers: headersJson(),
+    },
+  );
   return expectOk(resp, `POST /api/assistants/${assistantId}/approve`);
 }
 
@@ -228,6 +260,8 @@ export interface CreateAssistantInput {
   description?: string;
   defaultInitPrompt?: string;
   promptsI18n?: Record<string, string[]>;
+  /** New skillhub multi-tenant field. When set, this is authoritative. */
+  tenantIds?: string[];
   tenantId?: string;
   sortOrder?: number;
   /** 0=审核中, 1=已发布 */
@@ -259,9 +293,17 @@ function bytesToBlobPart(bytes: Uint8Array | Buffer): ArrayBuffer {
 }
 
 function describeFormValue(value: unknown): unknown {
-  if (value && typeof value === "object" && "name" in value && "size" in value) {
+  if (
+    value &&
+    typeof value === "object" &&
+    "name" in value &&
+    "size" in value
+  ) {
     const maybeFile = value as { name?: unknown; size?: unknown };
-    if (typeof maybeFile.name === "string" && typeof maybeFile.size === "number") {
+    if (
+      typeof maybeFile.name === "string" &&
+      typeof maybeFile.size === "number"
+    ) {
       return `<file ${maybeFile.name} ${maybeFile.size}B>`;
     }
   }
@@ -274,12 +316,17 @@ function appendMultipart(form: FormData, input: CreateAssistantInput) {
   if (input.version) form.append("version", input.version);
   if (input.changelog) form.append("changelog", input.changelog);
   if (input.description) form.append("description", input.description);
-  if (input.defaultInitPrompt) form.append("defaultInitPrompt", input.defaultInitPrompt);
+  if (input.defaultInitPrompt)
+    form.append("defaultInitPrompt", input.defaultInitPrompt);
   if (input.promptsI18n !== undefined) {
     form.append("promptsI18n", JSON.stringify(input.promptsI18n));
   }
+  const tenantIds = normalizeTenantIds(input.tenantIds);
+  if (tenantIds !== undefined)
+    form.append("tenantIds", JSON.stringify(tenantIds));
   if (input.tenantId) form.append("tenantId", input.tenantId);
-  if (input.sortOrder != null) form.append("sortOrder", String(input.sortOrder));
+  if (input.sortOrder != null)
+    form.append("sortOrder", String(input.sortOrder));
   if (input.status != null) form.append("status", String(input.status));
   if (input.categories && input.categories.length > 0) {
     // sudohub accepts JSON string OR comma-separated. We pick JSON because
@@ -290,15 +337,21 @@ function appendMultipart(form: FormData, input: CreateAssistantInput) {
     form.append("skills", input.skills.join(","));
   }
   if (input.promptFileBytes) {
-    const blob = new Blob([bytesToBlobPart(input.promptFileBytes)], { type: "text/markdown" });
+    const blob = new Blob([bytesToBlobPart(input.promptFileBytes)], {
+      type: "text/markdown",
+    });
     form.append("prompt_file", blob, input.promptFileName || "prompt.md");
   }
   if (input.avatarBytes) {
-    const blob = new Blob([bytesToBlobPart(input.avatarBytes)], { type: "image/png" });
+    const blob = new Blob([bytesToBlobPart(input.avatarBytes)], {
+      type: "image/png",
+    });
     form.append("avatar", blob, input.avatarFileName || "avatar.png");
   }
   if (input.sourceZipBytes) {
-    const blob = new Blob([bytesToBlobPart(input.sourceZipBytes)], { type: "application/zip" });
+    const blob = new Blob([bytesToBlobPart(input.sourceZipBytes)], {
+      type: "application/zip",
+    });
     form.append("source_url", blob, input.sourceZipFileName || "source.zip");
   }
 }
@@ -310,7 +363,9 @@ export async function createAssistant(input: CreateAssistantInput): Promise<{
   return postAssistantMultipart(input, "createAssistant");
 }
 
-export async function createAssistantVersion(input: CreateAssistantVersionInput): Promise<{
+export async function createAssistantVersion(
+  input: CreateAssistantVersionInput,
+): Promise<{
   id: string;
   raw: unknown;
 }> {
@@ -342,23 +397,25 @@ async function postAssistantMultipart(
       `[sudohub.${label}] sudohub ${resp.status} body:`,
       JSON.stringify(body),
     );
-    throw new SudohubClientError(resp.status, "POST /api/assistants failed", body);
+    throw new SudohubClientError(
+      resp.status,
+      "POST /api/assistants failed",
+      body,
+    );
   }
   // Observed sudohub shape (as of 2026-06-20):
   //   { success: true, data: { assistant: { id, name, ... }, version: ... } }
   // We also accept the historical shapes `{ id }` / `{ data: { id } }` so
   // a sudohub version bump doesn't break us at the call site.
-  const ok = body as
-    | {
-        id?: string;
-        assistant_id?: string;
-        data?: {
-          id?: string;
-          assistant_id?: string;
-          assistant?: { id?: string };
-        };
-      }
-    | null;
+  const ok = body as {
+    id?: string;
+    assistant_id?: string;
+    data?: {
+      id?: string;
+      assistant_id?: string;
+      assistant?: { id?: string };
+    };
+  } | null;
   const id =
     ok?.id ||
     ok?.assistant_id ||
@@ -381,6 +438,8 @@ export interface UpdateAssistantInput {
   description?: string;
   defaultInitPrompt?: string;
   promptsI18n?: Record<string, string[]>;
+  /** New skillhub multi-tenant field. When set, this is authoritative. */
+  tenantIds?: string[];
   tenantId?: string;
   sortOrder?: number;
   status?: number;
@@ -405,24 +464,33 @@ export async function updateAssistant(
     payload.defaultInitPrompt = input.defaultInitPrompt;
   }
   if (input.promptsI18n !== undefined) payload.promptsI18n = input.promptsI18n;
+  const tenantIds = normalizeTenantIds(input.tenantIds);
+  if (tenantIds !== undefined) payload.tenantIds = tenantIds;
   if (input.tenantId !== undefined) payload.tenantId = input.tenantId;
   if (input.sortOrder != null) payload.sortOrder = input.sortOrder;
   if (input.status != null) payload.status = input.status;
   if (input.categories !== undefined) payload.categories = input.categories;
   if (input.skills !== undefined) payload.skills = input.skills;
 
-  const resp = await fetch(`${SUDOHUB_BASE_URL}/api/assistants/${assistantId}`, {
-    method: "PUT",
-    headers: headersJson(),
-    body: JSON.stringify(payload),
-  });
+  const resp = await fetch(
+    `${SUDOHUB_BASE_URL}/api/assistants/${assistantId}`,
+    {
+      method: "PUT",
+      headers: headersJson(),
+      body: JSON.stringify(payload),
+    },
+  );
   if (!resp.ok) {
     const body = await parseBody(resp);
     console.error(
       `[sudohub.updateAssistant] sudohub ${resp.status} body:`,
       JSON.stringify(body),
     );
-    throw new SudohubClientError(resp.status, `PUT /api/assistants/${assistantId} failed`, body);
+    throw new SudohubClientError(
+      resp.status,
+      `PUT /api/assistants/${assistantId} failed`,
+      body,
+    );
   }
   return parseBody(resp);
 }
