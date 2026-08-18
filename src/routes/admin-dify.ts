@@ -54,7 +54,10 @@ import {
   type EnhancementMode,
 } from "../services/EnterpriseAssistantService.js";
 import { buildSsoLink } from "../services/DifySsoService.js";
-import { ensureTenantBinding, findBinding } from "../services/DifyTenantService.js";
+import {
+  ensureTenantBinding,
+  findBinding,
+} from "../services/DifyTenantService.js";
 import { db } from "../db/index.js";
 import * as sudohub from "../services/SudohubClient.js";
 import { system as difySystem } from "../services/DifyClient.js";
@@ -89,15 +92,115 @@ function loadEnterpriseCode(enterpriseId: number): string {
   return row.code;
 }
 
-function aclSummary(rows: Array<{ subject_type: string; subject_id: string | null }>): {
+function loadAllEnterpriseCodes(): string[] {
+  const rows = db
+    .prepare(
+      `SELECT code FROM enterprises WHERE code IS NOT NULL AND code <> '' ORDER BY id ASC`,
+    )
+    .all() as Array<{ code: string }>;
+  return rows.map((row) => row.code);
+}
+
+function normalizeTenantCodes(
+  values: Array<string | null | undefined>,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const value = raw?.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function readTenantCodes(
+  record: Record<string, unknown>,
+  fallbackTenantCode: string,
+): string[] {
+  const rawPlural = record.tenantIds ?? record.tenant_ids;
+  if (Array.isArray(rawPlural)) {
+    const tenantCodes = normalizeTenantCodes(
+      rawPlural.map((item) => (typeof item === "string" ? item : undefined)),
+    );
+    if (tenantCodes.length > 0) return tenantCodes;
+  }
+  const rawSingular = record.tenantId ?? record.tenant_id;
+  return normalizeTenantCodes([
+    typeof rawSingular === "string" ? rawSingular : undefined,
+    fallbackTenantCode,
+  ]);
+}
+
+function tenantSharingState(
+  record: Record<string, unknown>,
+  ownerTenantCode: string,
+): {
+  tenantIds: string[];
+  sharedTenantScope: "none" | "selected";
+  sharedTenantIds: string[];
+} {
+  const tenantIds = readTenantCodes(record, ownerTenantCode);
+  const sharedTenantIds = tenantIds.filter((id) => id !== ownerTenantCode);
+  const sharedTenantScope = sharedTenantIds.length > 0 ? "selected" : "none";
+  return { tenantIds, sharedTenantScope, sharedTenantIds };
+}
+
+function parseSharedTenantScope(
+  raw: string | undefined,
+): "none" | "selected" | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === "all") {
+    throw new Error(
+      "shared_tenant_scope=all is no longer supported; select tenants explicitly",
+    );
+  }
+  return raw === "selected" ? raw : "none";
+}
+
+function resolveTenantIdsForSharing(args: {
+  ownerTenantCode: string;
+  scope: "none" | "selected" | undefined;
+  selectedTenantIds: string[] | undefined;
+}): string[] | undefined {
+  if (args.scope === undefined) return undefined;
+  const allCodes = loadAllEnterpriseCodes();
+  const knownCodes = new Set(allCodes);
+  const ownerTenantCode = args.ownerTenantCode;
+  const selected = normalizeTenantCodes(args.selectedTenantIds ?? []).filter(
+    (code) => code !== ownerTenantCode,
+  );
+  for (const code of selected) {
+    if (!knownCodes.has(code)) {
+      throw new Error(`tenant ${code} not found`);
+    }
+  }
+  if (args.scope === "selected") {
+    if (selected.length === 0) {
+      throw new Error(
+        "shared_tenant_ids is required when shared_tenant_scope is selected",
+      );
+    }
+    return normalizeTenantCodes([ownerTenantCode, ...selected]);
+  }
+  return [ownerTenantCode];
+}
+
+function aclSummary(
+  rows: Array<{ subject_type: string; subject_id: string | null }>,
+): {
   scope: "all" | "specific";
   user_ids: string[];
 } {
   if (rows.length === 0) return { scope: "all", user_ids: [] };
-  if (rows.some((r) => r.subject_type === "all")) return { scope: "all", user_ids: [] };
+  if (rows.some((r) => r.subject_type === "all"))
+    return { scope: "all", user_ids: [] };
   return {
     scope: "specific",
-    user_ids: rows.filter((r) => r.subject_type === "user" && r.subject_id).map((r) => r.subject_id!),
+    user_ids: rows
+      .filter((r) => r.subject_type === "user" && r.subject_id)
+      .map((r) => r.subject_id!),
   };
 }
 
@@ -151,7 +254,10 @@ adminDifyRoutes.get("/sso", async (c) => {
     if (c.req.query("format") === "redirect") {
       return c.redirect(link.url, 302);
     }
-    return c.json({ success: true, data: { url: link.url, expires_at: link.expiresAt } });
+    return c.json({
+      success: true,
+      data: { url: link.url, expires_at: link.expiresAt },
+    });
   } catch (err: any) {
     return c.json({ success: false, msg: err?.message || "sso failed" }, 500);
   }
@@ -176,9 +282,9 @@ adminDifyRoutes.get("/binding", async (c) => {
 
 /** POST /admin/dify/binding/provision — explicit provisioning trigger. */
 adminDifyRoutes.post("/binding/provision", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as
-    | { enterprise_id?: number | string }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    enterprise_id?: number | string;
+  } | null;
   const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
   if (typeof enterpriseId !== "number") return enterpriseId;
   try {
@@ -191,7 +297,10 @@ adminDifyRoutes.post("/binding/provision", async (c) => {
       },
     });
   } catch (err: any) {
-    return c.json({ success: false, msg: err?.message || "provision failed" }, 500);
+    return c.json(
+      { success: false, msg: err?.message || "provision failed" },
+      500,
+    );
   }
 });
 
@@ -207,18 +316,16 @@ adminDifyRoutes.get("/agents", async (c) => {
 });
 
 adminDifyRoutes.post("/agents", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as
-    | {
-        enterprise_id?: number | string;
-        name?: string;
-        description?: string;
-        mode?: AgentMode;
-        icon?: string;
-        icon_type?: string;
-        icon_background?: string;
-        assistant_id?: string;
-      }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    enterprise_id?: number | string;
+    name?: string;
+    description?: string;
+    mode?: AgentMode;
+    icon?: string;
+    icon_type?: string;
+    icon_background?: string;
+    assistant_id?: string;
+  } | null;
   const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
   if (typeof enterpriseId !== "number") return enterpriseId;
   if (!body?.name) {
@@ -237,7 +344,10 @@ adminDifyRoutes.post("/agents", async (c) => {
     });
     return c.json({ success: true, data: agent });
   } catch (err: any) {
-    return c.json({ success: false, msg: err?.message || "create failed" }, 500);
+    return c.json(
+      { success: false, msg: err?.message || "create failed" },
+      500,
+    );
   }
 });
 
@@ -263,7 +373,12 @@ adminDifyRoutes.delete("/agents/:assistantId", async (c) => {
   const fromQuery = resolveFromQuery(c);
   const enterpriseId = resolveOrFail(
     c,
-    fromQuery.ok ? fromQuery : resolveFromBody(c, bodyRaw as { enterprise_id?: number | string } | null),
+    fromQuery.ok
+      ? fromQuery
+      : resolveFromBody(
+          c,
+          bodyRaw as { enterprise_id?: number | string } | null,
+        ),
   );
   if (typeof enterpriseId !== "number") return enterpriseId;
   await deleteAgent(enterpriseId, c.req.param("assistantId"));
@@ -271,12 +386,13 @@ adminDifyRoutes.delete("/agents/:assistantId", async (c) => {
 });
 
 adminDifyRoutes.put("/agents/:assistantId/acl", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as
-    | {
-        enterprise_id?: number | string;
-        entries?: Array<{ subject_type: AclSubjectType; subject_id?: string | null }>;
-      }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    enterprise_id?: number | string;
+    entries?: Array<{
+      subject_type: AclSubjectType;
+      subject_id?: string | null;
+    }>;
+  } | null;
   const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
   if (typeof enterpriseId !== "number") return enterpriseId;
   if (!body?.entries) {
@@ -317,22 +433,31 @@ adminDifyRoutes.get("/enterprise-assistants", async (c) => {
     const body = (await sudohub.listAssistantsAdmin({
       tenantId: enterpriseRow.code,
       limit: 100,
-    })) as
-      | {
-          data?:
-            | Array<Record<string, unknown>>
-            | { assistants?: Array<Record<string, unknown>> };
-        }
-      | null;
+    })) as {
+      data?:
+        | Array<Record<string, unknown>>
+        | { assistants?: Array<Record<string, unknown>> };
+    } | null;
     const data = body?.data;
     sudohubAssistants = Array.isArray(data)
       ? data
       : Array.isArray((data as { assistants?: unknown })?.assistants)
-        ? ((data as { assistants: Array<Record<string, unknown>> }).assistants)
+        ? (data as { assistants: Array<Record<string, unknown>> }).assistants
         : [];
-    sudohubAssistants = applyAssistantMetadataOverrides(enterpriseId, sudohubAssistants);
+    sudohubAssistants = applyAssistantMetadataOverrides(
+      enterpriseId,
+      sudohubAssistants,
+    );
+    sudohubAssistants = sudohubAssistants.filter(
+      (assistant) =>
+        readTenantCodes(assistant, enterpriseRow.code)[0] ===
+        enterpriseRow.code,
+    );
   } catch (err) {
-    return c.json({ success: false, msg: `sudohub list failed: ${(err as Error).message}` }, 502);
+    return c.json(
+      { success: false, msg: `sudohub list failed: ${(err as Error).message}` },
+      502,
+    );
   }
 
   const bindings = db
@@ -353,7 +478,10 @@ adminDifyRoutes.get("/enterprise-assistants", async (c) => {
     .prepare(
       `SELECT assistant_id, dify_dataset_id FROM dify_dataset_binding WHERE enterprise_id = ?`,
     )
-    .all(enterpriseId) as Array<{ assistant_id: string; dify_dataset_id: string }>;
+    .all(enterpriseId) as Array<{
+    assistant_id: string;
+    dify_dataset_id: string;
+  }>;
   const datasetsByAssistant = new Map<string, string[]>();
   for (const row of datasetRows) {
     const list = datasetsByAssistant.get(row.assistant_id) ?? [];
@@ -386,6 +514,7 @@ adminDifyRoutes.get("/enterprise-assistants", async (c) => {
     const binding = bindingByAssistant.get(id);
     const acl = aclByAssistant.get(id) || [];
     const datasetIds = datasetsByAssistant.get(id) || [];
+    const sharing = tenantSharingState(a, enterpriseRow.code);
     const enhancement =
       binding && binding.dify_app_mode !== "rag-only"
         ? {
@@ -404,6 +533,10 @@ adminDifyRoutes.get("/enterprise-assistants", async (c) => {
       avatar: a.avatar,
       categories: a.categories,
       profession: a.profession,
+      tenantId: sharing.tenantIds[0] ?? null,
+      tenantIds: sharing.tenantIds,
+      shared_tenant_scope: sharing.sharedTenantScope,
+      shared_tenant_ids: sharing.sharedTenantIds,
       status: a.status,
       enhancement,
       // Mutually exclusive with `enhancement.enabled` (see design doc).
@@ -426,13 +559,19 @@ adminDifyRoutes.get("/datasets", async (c) => {
   try {
     binding = await ensureTenantBinding(enterpriseId);
   } catch (err) {
-    return c.json({ success: false, msg: `provisioning failed: ${(err as Error).message}` }, 500);
+    return c.json(
+      { success: false, msg: `provisioning failed: ${(err as Error).message}` },
+      500,
+    );
   }
   try {
     const datasets = await difySystem.listDatasets(binding.dify_tenant_id);
     return c.json({ success: true, data: datasets });
   } catch (err) {
-    return c.json({ success: false, msg: `dataset list failed: ${(err as Error).message}` }, 502);
+    return c.json(
+      { success: false, msg: `dataset list failed: ${(err as Error).message}` },
+      502,
+    );
   }
 });
 
@@ -470,20 +609,29 @@ adminDifyRoutes.post("/enterprise-assistants", async (c) => {
   // Resolve enterprise from the form field (super admin) or JWT (enterprise admin).
   const enterpriseId = resolveOrFail(
     c,
-    resolveAdminEnterpriseId(c, { kind: "body", value: optional("enterprise_id") }),
+    resolveAdminEnterpriseId(c, {
+      kind: "body",
+      value: optional("enterprise_id"),
+    }),
   );
   if (typeof enterpriseId !== "number") return enterpriseId;
 
   const name = required("name");
   const profession = required("profession");
   if (!name || !profession) {
-    return c.json({ success: false, msg: "name and profession are required" }, 400);
+    return c.json(
+      { success: false, msg: "name and profession are required" },
+      400,
+    );
   }
 
-  const enhancementModeRaw = optional("enhancement_mode") as EnhancementMode | undefined;
+  const enhancementModeRaw = optional("enhancement_mode") as
+    EnhancementMode | undefined;
   const enhancementEnabled = optional("enable_enhancement") === "true";
   const enhancement =
-    enhancementEnabled && enhancementModeRaw ? { mode: enhancementModeRaw } : undefined;
+    enhancementEnabled && enhancementModeRaw
+      ? { mode: enhancementModeRaw }
+      : undefined;
 
   // 2026-06-22 P2.5.1: dataset_ids is the "纯知识库" path. Mutually exclusive
   // with Dify enhancement — reject the conflicting combo early so the
@@ -509,11 +657,41 @@ adminDifyRoutes.post("/enterprise-assistants", async (c) => {
   } catch (err) {
     return c.json({ success: false, msg: (err as Error).message }, 500);
   }
+  let sharedTenantScope: "none" | "selected" | undefined;
+  try {
+    sharedTenantScope = parseSharedTenantScope(optional("shared_tenant_scope"));
+  } catch (err) {
+    return c.json({ success: false, msg: (err as Error).message }, 400);
+  }
+  if (
+    sharedTenantScope &&
+    sharedTenantScope !== "none" &&
+    c.get("user").role !== "SUPER_ADMIN"
+  ) {
+    return c.json(
+      {
+        success: false,
+        msg: "only super admin can share assistants across tenants",
+      },
+      403,
+    );
+  }
+  let tenantIds: string[] | undefined;
+  try {
+    tenantIds = resolveTenantIdsForSharing({
+      ownerTenantCode: tenantCode,
+      scope: sharedTenantScope,
+      selectedTenantIds: jsonField<string[]>("shared_tenant_ids"),
+    });
+  } catch (err) {
+    return c.json({ success: false, msg: (err as Error).message }, 400);
+  }
 
   try {
     const summary = await createEnterpriseAssistant({
       enterpriseId,
       tenantCode,
+      tenantIds,
       name,
       profession,
       description: optional("description"),
@@ -535,7 +713,10 @@ adminDifyRoutes.post("/enterprise-assistants", async (c) => {
     });
     return c.json({ success: true, data: summary });
   } catch (err: any) {
-    return c.json({ success: false, msg: err?.message || "create failed" }, 500);
+    return c.json(
+      { success: false, msg: err?.message || "create failed" },
+      500,
+    );
   }
 });
 
@@ -557,6 +738,7 @@ adminDifyRoutes.get("/enterprise-assistants/:assistantId", async (c) => {
       tenantCode,
       assistantId,
     });
+    const sharing = tenantSharingState(detail.assistant, tenantCode);
     const acl = listAcl(enterpriseId, assistantId).map((entry) => ({
       subject_type: entry.subjectType,
       subject_id: entry.subjectId ?? null,
@@ -565,6 +747,10 @@ adminDifyRoutes.get("/enterprise-assistants/:assistantId", async (c) => {
       success: true,
       data: {
         assistant: detail.assistant,
+        tenantIds: sharing.tenantIds,
+        tenant_ids: sharing.tenantIds,
+        shared_tenant_scope: sharing.sharedTenantScope,
+        shared_tenant_ids: sharing.sharedTenantIds,
         promptText: detail.promptText,
         prompt_text: detail.promptText,
         enhancement: getAdminEnhancementInfo(enterpriseId, assistantId),
@@ -573,7 +759,10 @@ adminDifyRoutes.get("/enterprise-assistants/:assistantId", async (c) => {
       },
     });
   } catch (err: any) {
-    console.error("[admin.dify.getEnterpriseAssistantDetail] load failed:", err);
+    console.error(
+      "[admin.dify.getEnterpriseAssistantDetail] load failed:",
+      err,
+    );
     return c.json(
       {
         success: false,
@@ -619,14 +808,20 @@ adminDifyRoutes.put("/enterprise-assistants/:assistantId", async (c) => {
 
   const enterpriseId = resolveOrFail(
     c,
-    resolveAdminEnterpriseId(c, { kind: "body", value: optional("enterprise_id") }),
+    resolveAdminEnterpriseId(c, {
+      kind: "body",
+      value: optional("enterprise_id"),
+    }),
   );
   if (typeof enterpriseId !== "number") return enterpriseId;
 
   const name = required("name");
   const profession = required("profession");
   if (!name || !profession) {
-    return c.json({ success: false, msg: "name and profession are required" }, 400);
+    return c.json(
+      { success: false, msg: "name and profession are required" },
+      400,
+    );
   }
 
   let tenantCode: string;
@@ -634,6 +829,35 @@ adminDifyRoutes.put("/enterprise-assistants/:assistantId", async (c) => {
     tenantCode = loadEnterpriseCode(enterpriseId);
   } catch (err) {
     return c.json({ success: false, msg: (err as Error).message }, 500);
+  }
+  let sharedTenantScope: "none" | "selected" | undefined;
+  try {
+    sharedTenantScope = parseSharedTenantScope(optional("shared_tenant_scope"));
+  } catch (err) {
+    return c.json({ success: false, msg: (err as Error).message }, 400);
+  }
+  if (
+    sharedTenantScope &&
+    sharedTenantScope !== "none" &&
+    c.get("user").role !== "SUPER_ADMIN"
+  ) {
+    return c.json(
+      {
+        success: false,
+        msg: "only super admin can share assistants across tenants",
+      },
+      403,
+    );
+  }
+  let tenantIds: string[] | undefined;
+  try {
+    tenantIds = resolveTenantIdsForSharing({
+      ownerTenantCode: tenantCode,
+      scope: sharedTenantScope,
+      selectedTenantIds: jsonField<string[]>("shared_tenant_ids"),
+    });
+  } catch (err) {
+    return c.json({ success: false, msg: (err as Error).message }, 400);
   }
 
   const promptFile = await fileBytes("prompt_file");
@@ -644,11 +868,13 @@ adminDifyRoutes.put("/enterprise-assistants/:assistantId", async (c) => {
     const summary = await updateEnterpriseAssistant({
       enterpriseId,
       tenantCode,
+      tenantIds,
       assistantId: c.req.param("assistantId"),
       name,
       profession,
       description: optional("description") ?? "",
-      defaultInitPrompt: optional("default_init_prompt") ?? optional("defaultInitPrompt") ?? "",
+      defaultInitPrompt:
+        optional("default_init_prompt") ?? optional("defaultInitPrompt") ?? "",
       promptsI18n:
         jsonField<Record<string, string[]>>("promptsI18n") ??
         jsonField<Record<string, string[]>>("prompts_i18n"),
@@ -675,56 +901,72 @@ adminDifyRoutes.put("/enterprise-assistants/:assistantId", async (c) => {
   }
 });
 
-adminDifyRoutes.put("/enterprise-assistants/:assistantId/enhancement", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as
-    | {
-        enterprise_id?: number | string;
-        enable: boolean;
-        mode?: EnhancementMode;
-        app_name?: string;
-      }
-    | null;
-  const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
-  if (typeof enterpriseId !== "number") return enterpriseId;
-  if (!body || typeof body.enable !== "boolean") {
-    return c.json({ success: false, msg: "enable (boolean) required" }, 400);
-  }
-  const current = getEnhancementInfo(enterpriseId, c.req.param("assistantId"));
-  const desiredEnabled = body.enable;
-  const desiredMode = body.mode;
-  const changesExistingMethod =
-    current.enabled !== desiredEnabled ||
-    (current.enabled &&
-      desiredEnabled &&
-      current.mode !== "rag-only" &&
-      desiredMode !== undefined &&
-      desiredMode !== current.mode);
-  if (changesExistingMethod) {
-    return c.json(
-      { success: false, msg: "enhancement method cannot be changed after creation" },
-      400,
-    );
-  }
-  try {
-    const result = await setEnhancement({
+adminDifyRoutes.put(
+  "/enterprise-assistants/:assistantId/enhancement",
+  async (c) => {
+    const body = (await c.req.json().catch(() => null)) as {
+      enterprise_id?: number | string;
+      enable: boolean;
+      mode?: EnhancementMode;
+      app_name?: string;
+    } | null;
+    const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
+    if (typeof enterpriseId !== "number") return enterpriseId;
+    if (!body || typeof body.enable !== "boolean") {
+      return c.json({ success: false, msg: "enable (boolean) required" }, 400);
+    }
+    const current = getEnhancementInfo(
       enterpriseId,
-      assistantId: c.req.param("assistantId"),
-      enable: body.enable,
-      mode: body.mode,
-      appName: body.app_name,
-    });
-    return c.json({ success: true, data: result });
-  } catch (err: any) {
-    return c.json({ success: false, msg: err?.message || "update failed" }, 500);
-  }
-});
+      c.req.param("assistantId"),
+    );
+    const desiredEnabled = body.enable;
+    const desiredMode = body.mode;
+    const changesExistingMethod =
+      current.enabled !== desiredEnabled ||
+      (current.enabled &&
+        desiredEnabled &&
+        current.mode !== "rag-only" &&
+        desiredMode !== undefined &&
+        desiredMode !== current.mode);
+    if (changesExistingMethod) {
+      return c.json(
+        {
+          success: false,
+          msg: "enhancement method cannot be changed after creation",
+        },
+        400,
+      );
+    }
+    try {
+      const result = await setEnhancement({
+        enterpriseId,
+        assistantId: c.req.param("assistantId"),
+        enable: body.enable,
+        mode: body.mode,
+        appName: body.app_name,
+      });
+      return c.json({ success: true, data: result });
+    } catch (err: any) {
+      return c.json(
+        { success: false, msg: err?.message || "update failed" },
+        500,
+      );
+    }
+  },
+);
 
-adminDifyRoutes.get("/enterprise-assistants/:assistantId/enhancement", async (c) => {
-  const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
-  if (typeof enterpriseId !== "number") return enterpriseId;
-  const info = getAdminEnhancementInfo(enterpriseId, c.req.param("assistantId"));
-  return c.json({ success: true, data: info });
-});
+adminDifyRoutes.get(
+  "/enterprise-assistants/:assistantId/enhancement",
+  async (c) => {
+    const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
+    if (typeof enterpriseId !== "number") return enterpriseId;
+    const info = getAdminEnhancementInfo(
+      enterpriseId,
+      c.req.param("assistantId"),
+    );
+    return c.json({ success: true, data: info });
+  },
+);
 
 adminDifyRoutes.get("/agents/:assistantId/datasets", async (c) => {
   const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
@@ -734,12 +976,10 @@ adminDifyRoutes.get("/agents/:assistantId/datasets", async (c) => {
 });
 
 adminDifyRoutes.put("/agents/:assistantId/datasets", async (c) => {
-  const body = (await c.req.json().catch(() => null)) as
-    | {
-        enterprise_id?: number | string;
-        dataset_ids?: string[];
-      }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    enterprise_id?: number | string;
+    dataset_ids?: string[];
+  } | null;
   const enterpriseId = resolveOrFail(c, resolveFromBody(c, body));
   if (typeof enterpriseId !== "number") return enterpriseId;
   if (!body || !Array.isArray(body.dataset_ids)) {
@@ -750,13 +990,19 @@ adminDifyRoutes.put("/agents/:assistantId/datasets", async (c) => {
     const currentDatasets = listDatasets(enterpriseId, assistantId);
     if (currentDatasets.length === 0 && body.dataset_ids.length > 0) {
       return c.json(
-        { success: false, msg: "enhancement method cannot be changed after creation" },
+        {
+          success: false,
+          msg: "enhancement method cannot be changed after creation",
+        },
         400,
       );
     }
     if (currentDatasets.length > 0 && body.dataset_ids.length === 0) {
       return c.json(
-        { success: false, msg: "enhancement method cannot be changed after creation" },
+        {
+          success: false,
+          msg: "enhancement method cannot be changed after creation",
+        },
         400,
       );
     }

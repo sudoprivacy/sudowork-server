@@ -56,7 +56,10 @@ agentsRoutes.use("*", requireDifyConfigured);
  * user gets their own conversation history & token-usage attribution while
  * still consuming zero Account seats.
  */
-function endUserId(user: { id: number; enterprise_id?: number | null }): string {
+function endUserId(user: {
+  id: number;
+  enterprise_id?: number | null;
+}): string {
   const ent = user.enterprise_id ?? 0;
   return `sudowork:${ent}:${user.id}`;
 }
@@ -119,7 +122,12 @@ function failure(c: any, status: number, msg: string) {
 function wrapClientError(c: any, err: unknown) {
   if (err instanceof DifyClientError) {
     return c.json(
-      { success: false, msg: err.message, status: err.status, detail: err.detail },
+      {
+        success: false,
+        msg: err.message,
+        status: err.status,
+        detail: err.detail,
+      },
       // Hono wants a strict status union; runtime values map fine.
       (err.status as 400) || 502,
     );
@@ -168,22 +176,26 @@ agentsRoutes.get("/visible", async (c) => {
     const body = (await sudohub.listAssistants({
       tenantId: enterpriseRow.code,
       limit: 100,
-    })) as
-      | {
-          data?:
-            | Array<Record<string, unknown>>
-            | { assistants?: Array<Record<string, unknown>> };
-        }
-      | null;
+    })) as {
+      data?:
+        | Array<Record<string, unknown>>
+        | { assistants?: Array<Record<string, unknown>> };
+    } | null;
     const data = body?.data;
     sudohubAssistants = Array.isArray(data)
       ? data
       : Array.isArray((data as { assistants?: unknown })?.assistants)
-        ? ((data as { assistants: Array<Record<string, unknown>> }).assistants)
+        ? (data as { assistants: Array<Record<string, unknown>> }).assistants
         : [];
-    sudohubAssistants = applyAssistantMetadataOverrides(user.enterprise_id, sudohubAssistants);
+    sudohubAssistants = applyAssistantMetadataOverrides(
+      user.enterprise_id,
+      sudohubAssistants,
+    );
   } catch (err) {
-    return c.json({ success: false, msg: `sudohub list failed: ${(err as Error).message}` }, 502);
+    return c.json(
+      { success: false, msg: `sudohub list failed: ${(err as Error).message}` },
+      502,
+    );
   }
 
   // 2. ACL rows (group by assistant_id)
@@ -205,7 +217,8 @@ agentsRoutes.get("/visible", async (c) => {
     list.push({ subject_type: row.subject_type, subject_id: row.subject_id });
     aclByAssistant.set(row.assistant_id, list);
   }
-  const isAdmin = user.role === "SUPER_ADMIN" || user.role === "ENTERPRISE_ADMIN";
+  const isAdmin =
+    user.role === "SUPER_ADMIN" || user.role === "ENTERPRISE_ADMIN";
   function passesAcl(assistantId: string): boolean {
     const rules = aclByAssistant.get(assistantId);
     if (!rules || rules.length === 0) return true; // no ACL = visible to all enterprise users
@@ -229,7 +242,9 @@ agentsRoutes.get("/visible", async (c) => {
     dify_app_mode: string;
     dify_tenant_id: string;
   }>;
-  const bindingByAssistant = new Map(bindingRows.map((r) => [r.assistant_id, r]));
+  const bindingByAssistant = new Map(
+    bindingRows.map((r) => [r.assistant_id, r]),
+  );
 
   // 4. merge
   const out = sudohubAssistants
@@ -238,6 +253,17 @@ agentsRoutes.get("/visible", async (c) => {
       const id = a.id as string;
       const binding = bindingByAssistant.get(id);
       const versions = Array.isArray(a.versions) ? a.versions : [];
+      const tenantIds = Array.isArray(a.tenantIds)
+        ? a.tenantIds.filter((item): item is string => typeof item === "string")
+        : Array.isArray(a.tenant_ids)
+          ? a.tenant_ids.filter(
+              (item): item is string => typeof item === "string",
+            )
+          : typeof a.tenantId === "string"
+            ? [a.tenantId]
+            : typeof a.tenant_id === "string"
+              ? [a.tenant_id]
+              : [enterpriseRow.code];
       const latestVersion =
         (a.latestVersion as Record<string, unknown> | undefined) ??
         (a.latest_version as Record<string, unknown> | undefined) ??
@@ -268,6 +294,10 @@ agentsRoutes.get("/visible", async (c) => {
           (typeof a.name === "string" ? a.name : undefined),
         profession: a.profession,
         description: a.description,
+        tenantId: tenantIds[0] ?? null,
+        tenantIds,
+        tenant_id: tenantIds[0] ?? null,
+        tenant_ids: tenantIds,
         promptsI18n: a.promptsI18n,
         prompts_i18n: a.prompts_i18n,
         avatar: a.avatar,
@@ -380,9 +410,10 @@ agentsRoutes.post("/:assistantId/enhancement/invoke", async (c) => {
   // assistants might be enhanced later; visibility is enforced by /visible
   // and the client should only call this for assistants it knows are visible.
   // Cheap guard: enhancement must exist.
-  const body = (await c.req.json().catch(() => null)) as
-    | { query: string; conversation_id?: string }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    query: string;
+    conversation_id?: string;
+  } | null;
   if (!body || typeof body.query !== "string" || body.query.length === 0) {
     return failure(c, 400, "query is required");
   }
@@ -415,9 +446,10 @@ agentsRoutes.post("/:assistantId/enhancement/invoke-stream", async (c) => {
   if (user.enterprise_id == null) {
     return failure(c, 400, "user has no enterprise");
   }
-  const body = (await c.req.json().catch(() => null)) as
-    | { query: string; conversation_id?: string }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    query: string;
+    conversation_id?: string;
+  } | null;
   if (!body || typeof body.query !== "string" || body.query.length === 0) {
     return failure(c, 400, "query is required");
   }
@@ -436,7 +468,9 @@ agentsRoutes.post("/:assistantId/enhancement/invoke-stream", async (c) => {
       const encoder = new TextEncoder();
       function emit(event: string, payload: unknown) {
         controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`),
+          encoder.encode(
+            `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`,
+          ),
         );
       }
       try {
@@ -487,13 +521,21 @@ agentsRoutes.post("/:assistantId/chat", async (c) => {
       },
     });
   } catch (err) {
-    return failure(c, 502, `upstream connect failed: ${(err as Error).message}`);
+    return failure(
+      c,
+      502,
+      `upstream connect failed: ${(err as Error).message}`,
+    );
   }
 
   if (!upstream.ok || !upstream.body) {
     const errText = await upstream.text().catch(() => "");
     return c.json(
-      { success: false, status: upstream.status, msg: errText || "dify upstream error" },
+      {
+        success: false,
+        status: upstream.status,
+        msg: errText || "dify upstream error",
+      },
       (upstream.status as 400) || 502,
     );
   }
@@ -555,9 +597,10 @@ agentsRoutes.get("/:assistantId/conversations", async (c) => {
 agentsRoutes.patch("/:assistantId/conversations/:conversationId", async (c) => {
   const built = buildRuntimeContext(c, c.req.param("assistantId"));
   if (!built.ok) return failure(c, built.status, built.msg);
-  const body = (await c.req.json().catch(() => null)) as
-    | { name?: string; auto_generate?: boolean }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    name?: string;
+    auto_generate?: boolean;
+  } | null;
   try {
     const data = await difyService.renameConversation({
       apiKey: built.ctx.apiKey,
@@ -572,48 +615,55 @@ agentsRoutes.patch("/:assistantId/conversations/:conversationId", async (c) => {
   }
 });
 
-agentsRoutes.delete("/:assistantId/conversations/:conversationId", async (c) => {
-  const built = buildRuntimeContext(c, c.req.param("assistantId"));
-  if (!built.ok) return failure(c, built.status, built.msg);
-  try {
-    await difyService.deleteConversation({
-      apiKey: built.ctx.apiKey,
-      conversationId: c.req.param("conversationId"),
-      user: built.ctx.user,
-    });
-    return c.json({ success: true });
-  } catch (err) {
-    return wrapClientError(c, err);
-  }
-});
+agentsRoutes.delete(
+  "/:assistantId/conversations/:conversationId",
+  async (c) => {
+    const built = buildRuntimeContext(c, c.req.param("assistantId"));
+    if (!built.ok) return failure(c, built.status, built.msg);
+    try {
+      await difyService.deleteConversation({
+        apiKey: built.ctx.apiKey,
+        conversationId: c.req.param("conversationId"),
+        user: built.ctx.user,
+      });
+      return c.json({ success: true });
+    } catch (err) {
+      return wrapClientError(c, err);
+    }
+  },
+);
 
 // ============================================================================
 // Messages + feedback + suggested
 // ============================================================================
 
-agentsRoutes.get("/:assistantId/conversations/:conversationId/messages", async (c) => {
-  const built = buildRuntimeContext(c, c.req.param("assistantId"));
-  if (!built.ok) return failure(c, built.status, built.msg);
-  try {
-    const data = await difyService.listMessages({
-      apiKey: built.ctx.apiKey,
-      conversationId: c.req.param("conversationId"),
-      user: built.ctx.user,
-      firstId: c.req.query("first_id") || undefined,
-      limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
-    });
-    return c.json({ success: true, data });
-  } catch (err) {
-    return wrapClientError(c, err);
-  }
-});
+agentsRoutes.get(
+  "/:assistantId/conversations/:conversationId/messages",
+  async (c) => {
+    const built = buildRuntimeContext(c, c.req.param("assistantId"));
+    if (!built.ok) return failure(c, built.status, built.msg);
+    try {
+      const data = await difyService.listMessages({
+        apiKey: built.ctx.apiKey,
+        conversationId: c.req.param("conversationId"),
+        user: built.ctx.user,
+        firstId: c.req.query("first_id") || undefined,
+        limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
+      });
+      return c.json({ success: true, data });
+    } catch (err) {
+      return wrapClientError(c, err);
+    }
+  },
+);
 
 agentsRoutes.post("/:assistantId/messages/:messageId/feedback", async (c) => {
   const built = buildRuntimeContext(c, c.req.param("assistantId"));
   if (!built.ok) return failure(c, built.status, built.msg);
-  const body = (await c.req.json().catch(() => null)) as
-    | { rating?: "like" | "dislike" | null; content?: string }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    rating?: "like" | "dislike" | null;
+    content?: string;
+  } | null;
   if (!body) return failure(c, 400, "body is required");
   try {
     const data = await difyService.feedback({
@@ -681,13 +731,18 @@ agentsRoutes.post("/:assistantId/files", async (c) => {
   const formData = await c.req.formData().catch(() => null);
   if (!formData) return failure(c, 400, "expected multipart/form-data");
   const file = formData.get("file");
-  if (!(file instanceof File)) return failure(c, 400, "field 'file' is required");
+  if (!(file instanceof File))
+    return failure(c, 400, "field 'file' is required");
 
   try {
     const data = await difyService.uploadFile({
       apiKey: built.ctx.apiKey,
       user: built.ctx.user,
-      file: { name: file.name, type: file.type || "application/octet-stream", bytes: file },
+      file: {
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        bytes: file,
+      },
     });
     return c.json({ success: true, data });
   } catch (err) {
@@ -701,7 +756,8 @@ agentsRoutes.post("/:assistantId/audio-to-text", async (c) => {
   const formData = await c.req.formData().catch(() => null);
   if (!formData) return failure(c, 400, "expected multipart/form-data");
   const file = formData.get("file");
-  if (!(file instanceof File)) return failure(c, 400, "field 'file' is required");
+  if (!(file instanceof File))
+    return failure(c, 400, "field 'file' is required");
   try {
     const data = await difyService.audioToText({
       apiKey: built.ctx.apiKey,
@@ -717,9 +773,12 @@ agentsRoutes.post("/:assistantId/audio-to-text", async (c) => {
 agentsRoutes.post("/:assistantId/text-to-audio", async (c) => {
   const built = buildRuntimeContext(c, c.req.param("assistantId"));
   if (!built.ok) return failure(c, built.status, built.msg);
-  const body = (await c.req.json().catch(() => null)) as
-    | { message_id?: string; text?: string; voice?: string; streaming?: boolean }
-    | null;
+  const body = (await c.req.json().catch(() => null)) as {
+    message_id?: string;
+    text?: string;
+    voice?: string;
+    streaming?: boolean;
+  } | null;
   if (!body || (!body.message_id && !body.text)) {
     return failure(c, 400, "message_id or text is required");
   }
@@ -739,7 +798,11 @@ agentsRoutes.post("/:assistantId/text-to-audio", async (c) => {
   if (!upstream.ok || !upstream.body) {
     const errText = await upstream.text().catch(() => "");
     return c.json(
-      { success: false, status: upstream.status, msg: errText || "text-to-audio failed" },
+      {
+        success: false,
+        status: upstream.status,
+        msg: errText || "text-to-audio failed",
+      },
       (upstream.status as 400) || 502,
     );
   }
