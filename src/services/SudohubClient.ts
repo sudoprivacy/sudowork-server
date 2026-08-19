@@ -315,8 +315,8 @@ function appendMultipart(form: FormData, input: CreateAssistantInput) {
   form.append("profession", input.profession);
   if (input.version) form.append("version", input.version);
   if (input.changelog) form.append("changelog", input.changelog);
-  if (input.description) form.append("description", input.description);
-  if (input.defaultInitPrompt)
+  if (input.description !== undefined) form.append("description", input.description);
+  if (input.defaultInitPrompt !== undefined)
     form.append("defaultInitPrompt", input.defaultInitPrompt);
   if (input.promptsI18n !== undefined) {
     form.append("promptsI18n", JSON.stringify(input.promptsI18n));
@@ -328,7 +328,7 @@ function appendMultipart(form: FormData, input: CreateAssistantInput) {
   if (input.sortOrder != null)
     form.append("sortOrder", String(input.sortOrder));
   if (input.status != null) form.append("status", String(input.status));
-  if (input.categories && input.categories.length > 0) {
+  if (input.categories !== undefined) {
     // sudohub accepts JSON string OR comma-separated. We pick JSON because
     // it's lossless for unusual characters in category names.
     form.append("categories", JSON.stringify(input.categories));

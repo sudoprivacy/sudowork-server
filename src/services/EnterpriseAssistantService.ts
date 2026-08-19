@@ -1092,17 +1092,6 @@ export async function updateEnterpriseAssistant(
     tenantIds,
   };
 
-  const currentName = getStringField(current, ["name"]) ?? input.name;
-  const currentProfession =
-    getStringField(current, ["profession"]) ?? input.profession;
-  const currentDescription =
-    getStringField(current, ["description"]) ?? input.description ?? "";
-  const currentDefaultPrompt =
-    getStringField(current, ["defaultInitPrompt", "default_init_prompt"]) ??
-    input.defaultInitPrompt ??
-    "";
-  const currentCategories = getStringArrayField(current, ["categories"]);
-  const currentSkills = getStringArrayField(current, ["skills"]);
   const status = getNumberField(current, ["status"]) ?? 1;
   const sortOrder = getNumberField(current, ["sortOrder", "sort_order"]);
 
@@ -1120,15 +1109,15 @@ export async function updateEnterpriseAssistant(
         );
       }
       versionResult = await sudohub.createAssistantVersion({
-        name: currentName,
-        profession: currentProfession,
-        description: currentDescription,
-        defaultInitPrompt: currentDefaultPrompt,
+        name: input.name,
+        profession: input.profession,
+        description: input.description ?? "",
+        defaultInitPrompt: input.defaultInitPrompt ?? "",
         promptsI18n,
         tenantIds,
         tenantId: input.tenantCode,
-        categories: currentCategories,
-        skills: currentSkills,
+        categories: input.categories ?? [],
+        skills: input.skills ?? [],
         status,
         sortOrder,
         version: nextVersion,

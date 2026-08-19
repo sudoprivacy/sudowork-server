@@ -135,6 +135,109 @@ function wrapClientError(c: any, err: unknown) {
   return c.json({ success: false, msg: (err as Error).message }, 502);
 }
 
+function normalizeTenantCodes(
+  values: Array<string | null | undefined>,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    const value = raw?.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+function getStringArrayField(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function readAssistantTenantCodes(
+  record: Record<string, unknown>,
+  fallbackTenantCode: string,
+): string[] {
+  const plural = getStringArrayField(record.tenantIds).concat(
+    getStringArrayField(record.tenant_ids),
+  );
+  if (plural.length > 0) return normalizeTenantCodes(plural);
+
+  return normalizeTenantCodes([
+    typeof record.tenantId === "string" ? record.tenantId : undefined,
+    typeof record.tenant_id === "string" ? record.tenant_id : undefined,
+    fallbackTenantCode,
+  ]);
+}
+
+function loadEnterpriseIdsByTenantCode(
+  tenantCodes: string[],
+): Map<string, number> {
+  const codes = normalizeTenantCodes(tenantCodes);
+  if (codes.length === 0) return new Map();
+
+  const placeholders = codes.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT id, code FROM enterprises WHERE code IN (${placeholders})`)
+    .all(...codes) as Array<{ id: number; code: string }>;
+  return new Map(rows.map((row) => [row.code, row.id]));
+}
+
+function applyOwnerAssistantMetadataOverrides<T extends Record<string, unknown>>(
+  viewerEnterpriseId: number,
+  viewerTenantCode: string,
+  assistants: T[],
+): T[] {
+  const ownerTenantCodeByAssistantId = new Map<string, string>();
+  const ownerTenantCodes: string[] = [];
+
+  for (const assistant of assistants) {
+    if (typeof assistant.id !== "string") continue;
+    const ownerTenantCode =
+      readAssistantTenantCodes(assistant, viewerTenantCode)[0] ??
+      viewerTenantCode;
+    ownerTenantCodeByAssistantId.set(assistant.id, ownerTenantCode);
+    ownerTenantCodes.push(ownerTenantCode);
+  }
+
+  const enterpriseIdByTenantCode =
+    loadEnterpriseIdsByTenantCode(ownerTenantCodes);
+  if (!enterpriseIdByTenantCode.has(viewerTenantCode)) {
+    enterpriseIdByTenantCode.set(viewerTenantCode, viewerEnterpriseId);
+  }
+
+  const assistantsByOwnerEnterpriseId = new Map<number, T[]>();
+  for (const assistant of assistants) {
+    if (typeof assistant.id !== "string") continue;
+    const ownerTenantCode = ownerTenantCodeByAssistantId.get(assistant.id);
+    const ownerEnterpriseId =
+      (ownerTenantCode
+        ? enterpriseIdByTenantCode.get(ownerTenantCode)
+        : undefined) ?? viewerEnterpriseId;
+    const group = assistantsByOwnerEnterpriseId.get(ownerEnterpriseId) ?? [];
+    group.push(assistant);
+    assistantsByOwnerEnterpriseId.set(ownerEnterpriseId, group);
+  }
+
+  const mergedByAssistantId = new Map<string, T>();
+  for (const [ownerEnterpriseId, group] of assistantsByOwnerEnterpriseId) {
+    for (const assistant of applyAssistantMetadataOverrides(
+      ownerEnterpriseId,
+      group,
+    )) {
+      if (typeof assistant.id === "string") {
+        mergedByAssistantId.set(assistant.id, assistant);
+      }
+    }
+  }
+
+  return assistants.map((assistant) =>
+    typeof assistant.id === "string"
+      ? (mergedByAssistantId.get(assistant.id) ?? assistant)
+      : assistant,
+  );
+}
+
 // ============================================================================
 // Visibility / list
 // ============================================================================
@@ -187,8 +290,9 @@ agentsRoutes.get("/visible", async (c) => {
       : Array.isArray((data as { assistants?: unknown })?.assistants)
         ? (data as { assistants: Array<Record<string, unknown>> }).assistants
         : [];
-    sudohubAssistants = applyAssistantMetadataOverrides(
+    sudohubAssistants = applyOwnerAssistantMetadataOverrides(
       user.enterprise_id,
+      enterpriseRow.code,
       sudohubAssistants,
     );
   } catch (err) {
