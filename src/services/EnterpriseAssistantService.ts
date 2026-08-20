@@ -1082,12 +1082,15 @@ export async function updateEnterpriseAssistant(
     ? (applyAssistantMetadataOverrides(input.enterpriseId, [current])[0] ??
       current)
     : current;
+  const currentName =
+    getStringField(currentWithOverrides, ["name"]) || input.name;
   const promptsI18n =
     input.promptsI18n === undefined
       ? getPromptsI18nField(currentWithOverrides)
       : normalizePromptsI18n(input.promptsI18n);
   const inputForVersion: UpdateEnterpriseAssistantInput = {
     ...input,
+    name: currentName,
     promptsI18n,
     tenantIds,
   };
@@ -1109,23 +1112,23 @@ export async function updateEnterpriseAssistant(
         );
       }
       versionResult = await sudohub.createAssistantVersion({
-        name: input.name,
-        profession: input.profession,
-        description: input.description ?? "",
-        defaultInitPrompt: input.defaultInitPrompt ?? "",
+        name: inputForVersion.name,
+        profession: inputForVersion.profession,
+        description: inputForVersion.description ?? "",
+        defaultInitPrompt: inputForVersion.defaultInitPrompt ?? "",
         promptsI18n,
         tenantIds,
-        tenantId: input.tenantCode,
-        categories: input.categories ?? [],
-        skills: input.skills ?? [],
+        tenantId: inputForVersion.tenantCode,
+        categories: inputForVersion.categories ?? [],
+        skills: inputForVersion.skills ?? [],
         status,
         sortOrder,
         version: nextVersion,
         changelog: "Updated from sudowork-server admin",
-        promptFileBytes: input.promptFileBytes,
-        promptFileName: input.promptFileName,
-        avatarBytes: input.avatarBytes,
-        avatarFileName: input.avatarFileName,
+        promptFileBytes: inputForVersion.promptFileBytes,
+        promptFileName: inputForVersion.promptFileName,
+        avatarBytes: inputForVersion.avatarBytes,
+        avatarFileName: inputForVersion.avatarFileName,
         sourceZipBytes: sourceZip.bytes,
         sourceZipFileName: sourceZip.fileName,
       });
@@ -1173,7 +1176,7 @@ export async function updateEnterpriseAssistant(
   const override = upsertAssistantMetadataOverride({
     enterpriseId: input.enterpriseId,
     assistantId: input.assistantId,
-    name: input.name,
+    name: inputForVersion.name,
     profession: input.profession,
     description: input.description ?? "",
     defaultInitPrompt: input.defaultInitPrompt ?? "",

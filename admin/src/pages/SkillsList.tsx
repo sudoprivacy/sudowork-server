@@ -191,14 +191,19 @@ function PromptExamplesFormList(): React.JSX.Element {
         {(fields, { add, remove }) => (
           <Space direction="vertical" size={8} style={{ width: "100%" }}>
             {fields.map((field, index) => (
-              <Space
+              <div
                 key={field.key}
-                align="start"
-                style={{ display: "flex", width: "100%" }}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) 32px",
+                  gap: 8,
+                  alignItems: "start",
+                  width: "100%",
+                }}
               >
                 <Form.Item
                   {...field}
-                  style={{ flex: 1, marginBottom: 0 }}
+                  style={{ marginBottom: 0, minWidth: 0 }}
                   rules={[{ max: 200, message: "单条案例不超过 200 字" }]}
                 >
                   <Input.TextArea
@@ -209,6 +214,7 @@ function PromptExamplesFormList(): React.JSX.Element {
                       ]
                     }
                     autoSize={false}
+                    style={{ width: "100%" }}
                   />
                 </Form.Item>
                 <Tooltip title="删除">
@@ -221,7 +227,7 @@ function PromptExamplesFormList(): React.JSX.Element {
                     style={{ marginTop: 4 }}
                   />
                 </Tooltip>
-              </Space>
+              </div>
             ))}
             <Button
               type="dashed"
@@ -1391,10 +1397,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     if (editPromptInputMode === "inline") {
       if (editPromptText.trim()) {
         const blob = new Blob([editPromptText], { type: "text/markdown" });
-        const baseName =
-          (typeof values.name === "string" && values.name.trim()) ||
-          editingRow.name ||
-          "prompt";
+        const baseName = editingRow.name || "prompt";
         promptFileToSend = new File([blob], `${baseName}.md`, {
           type: "text/markdown",
         });
@@ -1407,7 +1410,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     try {
       const form = new FormData();
       form.append("enterprise_id", String(selectedEnterpriseId));
-      form.append("name", values.name);
+      form.append("name", editingRow.name);
       form.append("profession", values.profession);
       form.append("description", values.description || "");
       form.append("default_init_prompt", values.default_init_prompt || "");
@@ -2745,9 +2748,10 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               <Form.Item
                 name="name"
                 label="智能体名称"
+                tooltip="智能体创建后名称不可修改"
                 rules={[{ required: true }]}
               >
-                <Input placeholder="例如 recruitment_expert" />
+                <Input disabled />
               </Form.Item>
               <Form.Item
                 name="profession"
