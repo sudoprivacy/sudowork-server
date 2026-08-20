@@ -459,6 +459,10 @@ export const adminApi = {
   getEnterpriseAssistants: (params?: { enterprise_id?: number }) =>
     api.get("/v1/admin/dify/enterprise-assistants", { params }),
 
+  /** List tenant options that can receive cross-tenant assistant sharing. */
+  getShareableTenants: (params?: { enterprise_id?: number }) =>
+    api.get("/v1/admin/dify/shareable-tenants", { params }),
+
   /** Load one enterprise assistant with editable metadata and prompt content. */
   getEnterpriseAssistant: (
     assistantId: string,

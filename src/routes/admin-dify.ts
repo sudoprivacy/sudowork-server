@@ -101,6 +101,21 @@ function loadAllEnterpriseCodes(): string[] {
   return rows.map((row) => row.code);
 }
 
+function loadShareableTenants(): Array<{
+  id: number;
+  name: string;
+  code: string;
+}> {
+  return db
+    .prepare(
+      `SELECT id, name, code
+         FROM enterprises
+        WHERE code IS NOT NULL AND code <> ''
+        ORDER BY id ASC`,
+    )
+    .all() as Array<{ id: number; name: string; code: string }>;
+}
+
 function normalizeTenantCodes(
   values: Array<string | null | undefined>,
 ): string[] {
@@ -549,6 +564,20 @@ adminDifyRoutes.get("/enterprise-assistants", async (c) => {
 });
 
 /**
+ * List tenants that can be selected as cross-tenant assistant share targets.
+ *
+ * `/admin/enterprises` intentionally scopes ENTERPRISE_ADMIN to their own
+ * enterprise. Sharing needs a separate read-only list of tenant names/codes so
+ * enterprise admins can target other tenants without gaining enterprise
+ * management access.
+ */
+adminDifyRoutes.get("/shareable-tenants", async (c) => {
+  const enterpriseId = resolveOrFail(c, resolveFromQuery(c));
+  if (typeof enterpriseId !== "number") return enterpriseId;
+  return c.json({ success: true, data: loadShareableTenants() });
+});
+
+/**
  * List datasets visible to the resolved tenant. Used by the dataset-binding
  * UI in the admin form. We do not cache; admins iterate rarely.
  */
@@ -662,19 +691,6 @@ adminDifyRoutes.post("/enterprise-assistants", async (c) => {
     sharedTenantScope = parseSharedTenantScope(optional("shared_tenant_scope"));
   } catch (err) {
     return c.json({ success: false, msg: (err as Error).message }, 400);
-  }
-  if (
-    sharedTenantScope &&
-    sharedTenantScope !== "none" &&
-    c.get("user").role !== "SUPER_ADMIN"
-  ) {
-    return c.json(
-      {
-        success: false,
-        msg: "only super admin can share assistants across tenants",
-      },
-      403,
-    );
   }
   let tenantIds: string[] | undefined;
   try {
@@ -835,19 +851,6 @@ adminDifyRoutes.put("/enterprise-assistants/:assistantId", async (c) => {
     sharedTenantScope = parseSharedTenantScope(optional("shared_tenant_scope"));
   } catch (err) {
     return c.json({ success: false, msg: (err as Error).message }, 400);
-  }
-  if (
-    sharedTenantScope &&
-    sharedTenantScope !== "none" &&
-    c.get("user").role !== "SUPER_ADMIN"
-  ) {
-    return c.json(
-      {
-        success: false,
-        msg: "only super admin can share assistants across tenants",
-      },
-      403,
-    );
   }
   let tenantIds: string[] | undefined;
   try {
