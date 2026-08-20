@@ -669,6 +669,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [enterprises, setEnterprises] = useState<Enterprise[]>([]);
+  const [shareableTenants, setShareableTenants] = useState<Enterprise[]>([]);
   const [approvingSkillId, setApprovingSkillId] = useState<string | null>(null);
   const [approvingAssistantId, setApprovingAssistantId] = useState<
     string | null
@@ -943,6 +944,34 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     };
   }, [isSkillsPage, difyDisabled, selectedEnterpriseId]);
 
+  // Cross-tenant sharing intentionally uses a read-only Dify admin endpoint,
+  // because /admin/enterprises is scoped to the current enterprise for
+  // ENTERPRISE_ADMIN and would leave the share target picker empty.
+  useEffect(() => {
+    if (isSkillsPage) return;
+    if (difyDisabled || !selectedEnterpriseId) {
+      setShareableTenants([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = (await adminApi.getShareableTenants({
+          enterprise_id: selectedEnterpriseId,
+        })) as { success?: boolean; data?: Enterprise[] };
+        if (cancelled) return;
+        setShareableTenants(
+          resp?.success && Array.isArray(resp.data) ? resp.data : [],
+        );
+      } catch {
+        if (!cancelled) setShareableTenants([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSkillsPage, difyDisabled, selectedEnterpriseId]);
+
   const userOptions = useMemo(
     () =>
       users.map((u) => ({
@@ -967,15 +996,15 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
 
   const tenantNameByCode = useMemo(() => {
     const map = new Map<string, string>();
-    for (const enterprise of enterprises) {
+    for (const enterprise of [...enterprises, ...shareableTenants]) {
       map.set(enterprise.code, enterprise.name);
     }
     return map;
-  }, [enterprises]);
+  }, [enterprises, shareableTenants]);
 
   const shareableTenantOptions = useMemo(
     () =>
-      enterprises
+      shareableTenants
         .filter(
           (enterprise) => enterprise.code && enterprise.code !== activeTenantId,
         )
@@ -983,7 +1012,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
           label: `${enterprise.name} (${enterprise.code})`,
           value: enterprise.code,
         })),
-    [enterprises, activeTenantId],
+    [shareableTenants, activeTenantId],
   );
 
   const formatTenantName = (tenantId: string): string =>
@@ -1236,7 +1265,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       if (values.categories)
         form.append("categories", JSON.stringify(values.categories));
       if (values.skills) form.append("skills", JSON.stringify(values.skills));
-      if (isSuperAdmin) appendSharedTenantFields(form, values);
+      appendSharedTenantFields(form, values);
       const aclEntries =
         values.acl_scope === "specific"
           ? (values.acl_user_ids || []).map((id: string) => ({
@@ -1420,7 +1449,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       );
       form.append("categories", JSON.stringify(values.categories || []));
       form.append("skills", JSON.stringify(editingRow.skills || []));
-      if (isSuperAdmin) appendSharedTenantFields(form, values);
+      appendSharedTenantFields(form, values);
       if (promptFileToSend) {
         form.append("prompt_file", promptFileToSend, promptFileToSend.name);
       }
@@ -2647,7 +2676,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
               }
             </Form.Item>
 
-            {isSuperAdmin && renderSharedTenantFormItems()}
+            {renderSharedTenantFormItems()}
 
             <SectionTitle
               icon={<ThunderboltOutlined />}
@@ -3035,7 +3064,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                 }
               </Form.Item>
 
-              {isSuperAdmin && renderSharedTenantFormItems()}
+              {renderSharedTenantFormItems()}
             </Form>
           )}
         </Drawer>
