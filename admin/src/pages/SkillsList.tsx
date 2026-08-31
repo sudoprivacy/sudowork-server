@@ -1094,7 +1094,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
 
       setLoading(true);
       try {
-        const params: any = { limit: 20, tenant_id: tenantId };
+        const params: any = { limit: 100, tenant_id: tenantId };
         if (cursor) params.cursor = cursor;
         if (query) params.query = query;
 
@@ -1770,8 +1770,9 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
       title: "名称",
       dataIndex: "display_name",
       key: "display_name",
+      width: 280,
       render: (_, record) => (
-        <Space direction="vertical" size={0}>
+        <Space direction="vertical" size={0} style={{ wordBreak: "break-word" }}>
           <Text strong>{record.display_name || record.name}</Text>
           <Text type="secondary">{record.name}</Text>
         </Space>
@@ -1786,6 +1787,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
     {
       title: "分类",
       key: "category",
+      width: 220,
       render: (_, record) =>
         record.categories?.length ? (
           <Space wrap>
@@ -2262,7 +2264,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
                 columns={skillColumns}
                 loading={loading}
                 pagination={false}
-                scroll={{ x: 1100 }}
+                scroll={{ x: 1240 }}
               />
             ) : (
               <Table<Assistant>
