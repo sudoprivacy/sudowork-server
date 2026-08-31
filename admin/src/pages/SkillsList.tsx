@@ -1094,7 +1094,7 @@ const SkillsList: React.FC<SkillsListProps> = ({ assetType }) => {
 
       setLoading(true);
       try {
-        const params: any = { limit: 20, tenant_id: tenantId };
+        const params: any = { limit: 100, tenant_id: tenantId };
         if (cursor) params.cursor = cursor;
         if (query) params.query = query;
 

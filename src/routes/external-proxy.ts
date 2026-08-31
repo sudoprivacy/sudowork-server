@@ -18,6 +18,7 @@ const PROXY_HEADERS = {
   Authorization: SKILLHUB_API_TOKEN,
   "Content-Type": "application/json",
 };
+const SUDOHUB_CURSOR_LIMIT = 100;
 
 async function parseProxyResponse(response: Response) {
   const rawText = await response.text();
@@ -98,6 +99,53 @@ function normalizeOwnedAssistantRows(
     });
 }
 
+function assistantCursorRows(body: unknown): {
+  rows: Array<Record<string, unknown>>;
+  hasMore: boolean;
+  nextCursor?: string;
+} {
+  const root = asRecord(body);
+  const rootData = root?.data;
+  const data = asRecord(rootData);
+  const rawRows = Array.isArray(rootData)
+    ? rootData
+    : Array.isArray(data?.assistants)
+      ? data.assistants
+      : [];
+  const rows = rawRows.filter(
+    (item): item is Record<string, unknown> => !!asRecord(item),
+  );
+  const hasMoreValue = Array.isArray(rootData) ? root?.has_more : data?.has_more;
+  const nextCursorValue = Array.isArray(rootData)
+    ? root?.next_cursor
+    : data?.next_cursor;
+  return {
+    rows,
+    hasMore: hasMoreValue === true,
+    nextCursor:
+      typeof nextCursorValue === "string" && nextCursorValue.length > 0
+        ? nextCursorValue
+        : undefined,
+  };
+}
+
+async function fetchAssistantsAdminCursor(params: URLSearchParams): Promise<{
+  body: unknown;
+  status: number;
+  url: string;
+}> {
+  const url = `${SKILLHUB_BASE_URL}/api/assistants/admin/cursor?${params.toString()}`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: PROXY_HEADERS,
+  });
+  return {
+    body: await parseProxyResponse(response),
+    status: response.status,
+    url,
+  };
+}
+
 function mergeAssistantOverridesIntoCursorResponse(
   body: unknown,
   enterpriseId?: number,
@@ -133,6 +181,63 @@ function mergeAssistantOverridesIntoCursorResponse(
       tenantCode,
     );
   }
+  return root;
+}
+
+function stopRepeatedAssistantCursor(body: unknown, cursor?: string): unknown {
+  if (!cursor) return body;
+  const page = assistantCursorRows(body);
+  if (page.nextCursor !== cursor) return body;
+
+  const root = asRecord(body);
+  const data = asRecord(root?.data);
+  if (!root || !data) return body;
+
+  // Avoid appending the same page forever if the upstream cursor does not move.
+  data.assistants = [];
+  data.has_more = false;
+  data.next_cursor = null;
+  return root;
+}
+
+function decodeSudohubCursorId(cursor?: string): string | undefined {
+  if (!cursor) return undefined;
+
+  try {
+    const normalized = cursor.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(
+      normalized.length + ((4 - (normalized.length % 4)) % 4),
+      "=",
+    );
+    const decoded = asRecord(
+      JSON.parse(Buffer.from(padded, "base64").toString("utf8")),
+    );
+    return typeof decoded?.id === "string" ? decoded.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function trimAssistantsCoveredByCursor(body: unknown, cursor?: string): unknown {
+  const cursorId = decodeSudohubCursorId(cursor);
+  if (!cursorId) return body;
+
+  const root = asRecord(body);
+  if (!root) return body;
+
+  if (Array.isArray(root.data)) {
+    const index = root.data.findIndex((item) => asRecord(item)?.id === cursorId);
+    if (index >= 0) root.data = root.data.slice(index + 1);
+    return root;
+  }
+
+  const data = asRecord(root.data);
+  if (!data || !Array.isArray(data.assistants)) return body;
+
+  const index = data.assistants.findIndex(
+    (item) => asRecord(item)?.id === cursorId,
+  );
+  if (index >= 0) data.assistants = data.assistants.slice(index + 1);
   return root;
 }
 
@@ -186,33 +291,44 @@ proxyRoutes.get(
     const query = c.req.query("query");
     const category = c.req.query("category");
 
+    console.log("=== 专属智能体请求 ===");
+    console.log("请求参数:", {
+      tenant_id: tenantId,
+      cursor,
+      limit,
+      query,
+      category,
+    });
+    console.log("Authorization: 已配置, Content-Type: application/json");
+
     const params = new URLSearchParams();
     if (tenantId) params.append("tenant_id", tenantId);
     if (cursor) params.append("cursor", cursor);
-    if (limit) params.append("limit", limit);
+    // Sudohub repeats page 1 when `tenant_id + cursor` are combined. Pull the
+    // largest supported tenant page up front so the admin UI is not capped at 20.
+    if (tenantId) {
+      params.append("limit", String(SUDOHUB_CURSOR_LIMIT));
+    } else if (limit) {
+      params.append("limit", limit);
+    }
     if (query) params.append("query", query);
     if (category) params.append("category", category);
-
-    const url = `${SKILLHUB_BASE_URL}/api/assistants/admin/cursor?${params.toString()}`;
-
-    console.log("=== 专属智能体请求 ===");
-    console.log("完整URL:", url);
-    console.log("请求参数:", Object.fromEntries(params));
-    console.log("Authorization: 已配置, Content-Type: application/json");
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: PROXY_HEADERS,
-    });
-
-    const data = mergeAssistantOverridesIntoCursorResponse(
-      await parseProxyResponse(response),
-      enterpriseIdForTenantCode(tenantId),
-      tenantId,
+    const fetched = await fetchAssistantsAdminCursor(params);
+    const data = stopRepeatedAssistantCursor(
+      trimAssistantsCoveredByCursor(
+        mergeAssistantOverridesIntoCursorResponse(
+          fetched.body,
+          enterpriseIdForTenantCode(tenantId),
+          tenantId,
+        ),
+        cursor,
+      ),
+      cursor,
     );
-    console.log("响应状态:", response.status);
+    console.log("上游URL:", fetched.url);
+    console.log("响应状态:", fetched.status);
     console.log("响应数据:", JSON.stringify(data, null, 2));
-    return c.json(data, response.status as 200);
+    return c.json(data, fetched.status as 200);
   },
 );
 
